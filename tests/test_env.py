@@ -35,6 +35,11 @@ class TestEnv(unittest.TestCase):
         self.assertTrue(collision_seen)
         self.assertEqual(env.state.agents["agent_0"].position[1], pos[1])
 
+    def test_rendering_can_be_disabled(self):
+        env = MultiAgentRLRLGym(EnvConfig(width=10, height=8, n_agents=1, render_enabled=False))
+        env.reset(seed=3)
+        self.assertEqual(env.render(color=False), "")
+
 
 if __name__ == "__main__":
     unittest.main()

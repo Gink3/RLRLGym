@@ -12,6 +12,8 @@ A gym to simulate brogue/nethack/Cataclysm DDA.
     * The rendering needs to support tile sets eventually, but colored ascii tiles for now is fine
     * The renderings need to have pause/play/fast forward capability
     * The renderings need to be able to zoom in and out to focus on single agents
+    * The renderings should be optional
+    * The renderings need to be in a new window
 
 ## Generic Actions
 * Move
@@ -46,3 +48,9 @@ Fixed-seed regression tests for training/eval consistency.
 Start with PPO/A2C on simplified rules.
 Add recurrent policies (LSTM/Transformer) for partial observability.
 Log rich metrics (survival time, dungeon depth, cause of death, resource efficiency).
+
+## Documentation
+All interfaces should be documented for easier usage in the `Readme.md` file
+
+## Packaging
+The gym should be 

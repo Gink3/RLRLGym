@@ -24,7 +24,7 @@ from .constants import (
 )
 from .mapgen import generate_map, sample_walkable_positions
 from .models import AgentState, EnvState
-from .render import AsciiRenderer
+from .render import AsciiRenderer, RenderWindow
 from .tiles import load_tileset
 
 
@@ -36,6 +36,7 @@ class EnvConfig:
     n_agents: int = 2
     tiles_path: str = str(Path("data") / "tiles.json")
     agent_observation_config: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    render_enabled: bool = True
 
 
 class MultiAgentRLRLGym:
@@ -45,7 +46,7 @@ class MultiAgentRLRLGym:
     `step(actions)` -> observations, rewards, terminations, truncations, info
     """
 
-    metadata = {"name": "RLRLGym-v0", "render_modes": ["ansi"]}
+    metadata = {"name": "RLRLGym-v0", "render_modes": ["ansi", "window"]}
 
     def __init__(self, config: Optional[EnvConfig] = None) -> None:
         self.config = config or EnvConfig()
@@ -55,6 +56,7 @@ class MultiAgentRLRLGym:
         self.possible_agents = [f"agent_{i}" for i in range(self.config.n_agents)]
         self.state: Optional[EnvState] = None
         self._last_info: Dict[str, Dict[str, object]] = {}
+        self._render_window: Optional[RenderWindow] = None
 
     @property
     def action_space(self) -> Dict[str, Tuple[int, int]]:
@@ -78,6 +80,8 @@ class MultiAgentRLRLGym:
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
         info = {aid: {"action_mask": [1] * 11, "alive": True} for aid in self.possible_agents}
         self._last_info = info
+        if self.config.render_enabled and self._render_window is not None:
+            self._render_window.update_state(self.state, focus_choices=self.possible_agents)
         return obs, info
 
     def step(self, actions: Dict[str, int]):
@@ -119,12 +123,39 @@ class MultiAgentRLRLGym:
             if self.state.agents[aid].alive or truncations[aid]
         }
         self._last_info = info
+        if self.config.render_enabled and self._render_window is not None:
+            self._render_window.update_state(self.state, focus_choices=self.possible_agents)
         return observations, rewards, terminations, truncations, info
 
     def render(self, focus_agent: Optional[str] = None, zoom: int = 0, color: bool = True) -> str:
+        if not self.config.render_enabled:
+            return ""
         if self.state is None:
             return ""
         return self.renderer.render(self.state, focus_agent=focus_agent, zoom=zoom, color=color)
+
+    def open_render_window(self, title: str = "RLRLGym Viewer") -> None:
+        if self._render_window is None:
+            self._render_window = RenderWindow(self.tiles, title=title)
+        if self.state is not None:
+            self._render_window.update_state(self.state, focus_choices=self.possible_agents)
+
+    def close_render_window(self) -> None:
+        if self._render_window is not None:
+            self._render_window.close()
+            self._render_window = None
+
+    def play_frames_in_window(self, frames: List[str], title: str = "RLRLGym Playback") -> None:
+        if self._render_window is None:
+            self._render_window = RenderWindow(self.tiles, title=title)
+        self._render_window.set_frames(frames)
+        self._render_window.play()
+
+    def run_render_window(self) -> None:
+        if self._render_window is None:
+            self.open_render_window()
+        assert self._render_window is not None
+        self._render_window.run()
 
     def snapshot(self) -> Dict[str, object]:
         if self.state is None:
