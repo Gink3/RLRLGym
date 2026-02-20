@@ -6,14 +6,20 @@ A gym to simulate brogue/nethack/Cataclysm DDA.
 
 # High Level Design
 * The game model should be expandable in order to add new tiles, items, and monsters
-* The game model needs a gym-compatible api.
+* The game model needs a gym-compatible api
+    * Primary multi-agent API should be PettingZoo Parallel API (easiest for multi-agent training workflows)
+    * The game model should handle asymmetric multi agent training
+    * Optional adapters can be added later for Gymnasium-compatible single-agent wrappers
 * Observations should be configurable per agent to make asymmetric experiences.
 * There should be a way to view/render training or playback.
+    * The renderings need to be in a new window, there will be no cli viewing capability
     * The rendering needs to support tile sets eventually, but colored ascii tiles for now is fine
     * The renderings need to have pause/play/fast forward capability
+        * fast forward should support 2x and 5x speeds
     * The renderings need to be able to zoom in and out to focus on single agents
+        * Zoom range should be 0 to 10 (0 = full map, higher values = tighter local focus)
     * The renderings should be optional
-    * The renderings need to be in a new window
+    * The renderings need to display tile colors in the new window
 
 ## Generic Actions
 * Move
@@ -27,11 +33,23 @@ A gym to simulate brogue/nethack/Cataclysm DDA.
 
 
 ## Rewards
-Reward Design needs to reward interactions with the enviornment and other agents. To limit exploitation, the environment needs to limit how many times something can be interacted with. Carefully shaped auxiliary rewards (exploration, skill gain, resource management) to avoid exploit loops. Add penalties for degenerate behavior (stutter-step farming, infinite wait loops).
+Reward Design needs to reward interactions with the environment and other agents. To limit exploitation, the environment needs to limit how many times something can be interacted with. Carefully shaped auxiliary rewards (exploration, skill gain, resource management) to avoid exploit loops. Add penalties for degenerate behavior (stutter-step farming, infinite wait loops).
 
 
 ## Procedural Generation
-The map generation engine should be configurable to allow for different generation probabilities. All tiles should be defined in json. All maps are assumed to be on the same z level or 1 z level. 
+The map generation engine should be configurable to allow for different generation probabilities. All tiles should be defined in JSON, and a schema for tiles should be defined. All maps are assumed to be on exactly 1 z level. There are no vertical elements planned.
+
+### Tile JSON Schema
+* `schema_version` (required, integer): Tile schema version for compatibility and migrations.
+* `tiles` (required, array): List of tile definitions.
+* Tile required fields:
+    * `id` (required, string): Unique tile identifier.
+    * `glyph` (required, string): Single-character glyph used for ASCII rendering.
+    * `color` (required, string): Color token used by renderer.
+    * `walkable` (required, boolean): Whether an agent can enter the tile.
+    * `spawn_weight` (required, number): Relative probability used in map generation.
+    * `max_interactions` (required, integer): Number of valid interactions before depletion.
+    * `loot_table` (required, array of strings): Items available from loot interactions (can be empty).
 
 
 ## Performance + scaling
@@ -50,7 +68,4 @@ Add recurrent policies (LSTM/Transformer) for partial observability.
 Log rich metrics (survival time, dungeon depth, cause of death, resource efficiency).
 
 ## Documentation
-All interfaces should be documented for easier usage in the `Readme.md` file
-
-## Packaging
-The gym should be 
+All interfaces should be documented for easier usage in the `README.md` file

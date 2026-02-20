@@ -15,9 +15,9 @@ python3 examples/window_demo.py
 Open a dedicated render window (Tkinter):
 
 ```python
-from rlrlgym import EnvConfig, MultiAgentRLRLGym
+from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
 
-env = MultiAgentRLRLGym(EnvConfig(render_enabled=True))
+env = PettingZooParallelRLRLGym(EnvConfig(render_enabled=True))
 env.reset(seed=7)
 env.open_render_window()
 for _ in range(20):
@@ -25,11 +25,14 @@ for _ in range(20):
 ```
 
 The window includes:
-- `Play`, `Pause`, `Step`, `Fast x2` controls for playback frames
+- `Play`, `Pause`, `Step` controls for playback frames
+- fixed speed controls: `1x`, `2x`, `5x`
 - `Focus` selector to center on a single agent
-- `Zoom` slider to zoom in/out around the selected agent
+- `Zoom` slider in range `0..10` to zoom in/out around the selected agent
+- tile colors rendered in the GUI window
 
 Rendering is optional via `EnvConfig(render_enabled=False)`.
+There is no CLI render mode.
 
 ## Run Tests
 
@@ -39,9 +42,9 @@ python3 -m unittest discover -s tests -q
 
 ## What Is Implemented
 
-- Multi-agent Gym-like environment with `reset` / `step`
+- PettingZoo Parallel-style multi-agent environment with `reset(seed, options)` / `step(actions)`
 - Configurable per-agent observations
-- JSON-defined tiles and weighted procedural map generation
+- JSON tile schema with required `schema_version` and required tile fields
 - Reward shaping with interaction caps and anti-exploit penalties
-- ASCII rendering with playback controls (`pause`, `play`, `fast_forward`, `zoom` via focused render)
+- Window-only rendering with playback controls and focused zoom
 - Snapshot save/load and synchronous vectorized environment wrapper

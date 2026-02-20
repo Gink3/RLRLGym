@@ -1,56 +1,59 @@
-[
-  {
-    "id": "floor",
-    "glyph": ".",
-    "color": "white",
-    "walkable": true,
-    "spawn_weight": 0.62,
-    "max_interactions": 0,
-    "loot_table": []
-  },
-  {
-    "id": "wall",
-    "glyph": "#",
-    "color": "bright_black",
-    "walkable": false,
-    "spawn_weight": 0.16,
-    "max_interactions": 0,
-    "loot_table": []
-  },
-  {
-    "id": "water",
-    "glyph": "~",
-    "color": "blue",
-    "walkable": false,
-    "spawn_weight": 0.08,
-    "max_interactions": 1,
-    "loot_table": []
-  },
-  {
-    "id": "food_cache",
-    "glyph": "%",
-    "color": "green",
-    "walkable": true,
-    "spawn_weight": 0.07,
-    "max_interactions": 2,
-    "loot_table": ["ration", "ration", "fruit"]
-  },
-  {
-    "id": "chest",
-    "glyph": "C",
-    "color": "yellow",
-    "walkable": true,
-    "spawn_weight": 0.05,
-    "max_interactions": 1,
-    "loot_table": ["bandage", "dagger", "torch"]
-  },
-  {
-    "id": "shrine",
-    "glyph": "S",
-    "color": "magenta",
-    "walkable": true,
-    "spawn_weight": 0.02,
-    "max_interactions": 3,
-    "loot_table": []
-  }
-]
+{
+  "schema_version": 1,
+  "tiles": [
+    {
+      "id": "floor",
+      "glyph": ".",
+      "color": "white",
+      "walkable": true,
+      "spawn_weight": 0.62,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
+      "id": "wall",
+      "glyph": "#",
+      "color": "bright_black",
+      "walkable": false,
+      "spawn_weight": 0.16,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
+      "id": "water",
+      "glyph": "~",
+      "color": "blue",
+      "walkable": false,
+      "spawn_weight": 0.08,
+      "max_interactions": 1,
+      "loot_table": []
+    },
+    {
+      "id": "food_cache",
+      "glyph": "%",
+      "color": "green",
+      "walkable": true,
+      "spawn_weight": 0.07,
+      "max_interactions": 2,
+      "loot_table": ["ration", "ration", "fruit"]
+    },
+    {
+      "id": "chest",
+      "glyph": "C",
+      "color": "yellow",
+      "walkable": true,
+      "spawn_weight": 0.05,
+      "max_interactions": 1,
+      "loot_table": ["bandage", "dagger", "torch"]
+    },
+    {
+      "id": "shrine",
+      "glyph": "S",
+      "color": "magenta",
+      "walkable": true,
+      "spawn_weight": 0.02,
+      "max_interactions": 3,
+      "loot_table": []
+    }
+  ]
+}

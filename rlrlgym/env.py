@@ -1,4 +1,4 @@
-"""Multi-agent roguelike RL gym environment."""
+"""PettingZoo-style parallel multi-agent roguelike environment."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from .constants import (
 )
 from .mapgen import generate_map, sample_walkable_positions
 from .models import AgentState, EnvState
-from .render import AsciiRenderer, RenderWindow
+from .render import RenderWindow
 from .tiles import load_tileset
 
 
@@ -40,34 +40,49 @@ class EnvConfig:
 
 
 class MultiAgentRLRLGym:
-    """Gym-like API with multi-agent step signature.
+    """PettingZoo Parallel-like API for multi-agent training.
 
-    `reset(seed)` -> observations, info
+    `reset(seed, options)` -> observations, info
     `step(actions)` -> observations, rewards, terminations, truncations, info
     """
 
-    metadata = {"name": "RLRLGym-v0", "render_modes": ["ansi", "window"]}
+    metadata = {"name": "RLRLGym-v0", "render_modes": ["window"]}
 
     def __init__(self, config: Optional[EnvConfig] = None) -> None:
         self.config = config or EnvConfig()
         self.tiles = load_tileset(self.config.tiles_path)
-        self.renderer = AsciiRenderer(self.tiles)
         self._rng = random.Random(0)
         self.possible_agents = [f"agent_{i}" for i in range(self.config.n_agents)]
+        self.agents = list(self.possible_agents)
         self.state: Optional[EnvState] = None
         self._last_info: Dict[str, Dict[str, object]] = {}
         self._render_window: Optional[RenderWindow] = None
 
-    @property
-    def action_space(self) -> Dict[str, Tuple[int, int]]:
-        return {agent_id: (0, 10) for agent_id in self.possible_agents}
+    def action_space(self, agent_id: str) -> Tuple[int, int]:
+        if agent_id not in self.possible_agents:
+            raise KeyError(f"Unknown agent: {agent_id}")
+        return (0, 10)
 
-    def reset(self, seed: Optional[int] = None):
+    def observation_space(self, agent_id: str) -> Dict[str, object]:
+        if agent_id not in self.possible_agents:
+            raise KeyError(f"Unknown agent: {agent_id}")
+        return {
+            "type": "dict",
+            "keys": ["step", "alive", "local_tiles", "stats", "inventory"],
+        }
+
+    def reset(
+        self, seed: Optional[int] = None, options: Optional[Dict[str, object]] = None
+    ):
         if seed is not None:
             self._rng.seed(seed)
 
-        grid = generate_map(self.config.width, self.config.height, self.tiles, self._rng)
-        starts = sample_walkable_positions(grid, self.tiles, self.config.n_agents, self._rng)
+        grid = generate_map(
+            self.config.width, self.config.height, self.tiles, self._rng
+        )
+        starts = sample_walkable_positions(
+            grid, self.tiles, self.config.n_agents, self._rng
+        )
 
         agents: Dict[str, AgentState] = {}
         for i, agent_id in enumerate(self.possible_agents):
@@ -76,12 +91,24 @@ class MultiAgentRLRLGym:
             agent.visited.add(pos)
             agents[agent_id] = agent
 
-        self.state = EnvState(grid=grid, tile_interactions={}, ground_items={}, agents=agents, step_count=0)
+        self.state = EnvState(
+            grid=grid,
+            tile_interactions={},
+            ground_items={},
+            agents=agents,
+            step_count=0,
+        )
+        self.agents = list(self.possible_agents)
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
-        info = {aid: {"action_mask": [1] * 11, "alive": True} for aid in self.possible_agents}
+        info = {
+            aid: {"action_mask": [1] * 11, "alive": True}
+            for aid in self.possible_agents
+        }
         self._last_info = info
         if self.config.render_enabled and self._render_window is not None:
-            self._render_window.update_state(self.state, focus_choices=self.possible_agents)
+            self._render_window.update_state(
+                self.state, focus_choices=self.possible_agents
+            )
         return obs, info
 
     def step(self, actions: Dict[str, int]):
@@ -117,6 +144,12 @@ class MultiAgentRLRLGym:
             for aid in self.possible_agents:
                 truncations[aid] = True
 
+        self.agents = [
+            aid
+            for aid in self.possible_agents
+            if not terminations[aid] and not truncations[aid]
+        ]
+
         observations = {
             aid: self._build_observation(aid)
             for aid in self.possible_agents
@@ -124,32 +157,55 @@ class MultiAgentRLRLGym:
         }
         self._last_info = info
         if self.config.render_enabled and self._render_window is not None:
-            self._render_window.update_state(self.state, focus_choices=self.possible_agents)
+            self._render_window.update_state(
+                self.state, focus_choices=self.possible_agents
+            )
         return observations, rewards, terminations, truncations, info
 
-    def render(self, focus_agent: Optional[str] = None, zoom: int = 0, color: bool = True) -> str:
-        if not self.config.render_enabled:
-            return ""
-        if self.state is None:
-            return ""
-        return self.renderer.render(self.state, focus_agent=focus_agent, zoom=zoom, color=color)
+    def render(self, focus_agent: Optional[str] = None, zoom: int = 0) -> None:
+        """Render only to the dedicated window (no CLI output mode)."""
+        if not self.config.render_enabled or self.state is None:
+            return
+        if self._render_window is None:
+            self.open_render_window()
+        assert self._render_window is not None
+        self._render_window.focus_var.set(focus_agent or "all")
+        self._render_window.zoom_var.set(max(0, min(10, int(zoom))))
+        self._render_window.update_state(self.state, focus_choices=self.possible_agents)
 
     def open_render_window(self, title: str = "RLRLGym Viewer") -> None:
+        if not self.config.render_enabled:
+            return
         if self._render_window is None:
             self._render_window = RenderWindow(self.tiles, title=title)
         if self.state is not None:
-            self._render_window.update_state(self.state, focus_choices=self.possible_agents)
+            self._render_window.update_state(
+                self.state, focus_choices=self.possible_agents
+            )
 
     def close_render_window(self) -> None:
         if self._render_window is not None:
             self._render_window.close()
             self._render_window = None
 
-    def play_frames_in_window(self, frames: List[str], title: str = "RLRLGym Playback") -> None:
+    def play_frames_in_window(
+        self, states: List[EnvState], title: str = "RLRLGym Playback"
+    ) -> None:
+        if not self.config.render_enabled:
+            return
         if self._render_window is None:
             self._render_window = RenderWindow(self.tiles, title=title)
-        self._render_window.set_frames(frames)
+        self._render_window.set_playback_states(
+            states, focus_choices=self.possible_agents
+        )
         self._render_window.play()
+
+    def capture_playback_state(self) -> EnvState:
+        if self.state is None:
+            raise RuntimeError(
+                "Environment must be reset before capturing playback state"
+            )
+        return copy.deepcopy(self.state)
 
     def run_render_window(self) -> None:
         if self._render_window is None:
@@ -193,7 +249,10 @@ class MultiAgentRLRLGym:
                     events.append("explore")
                     agent.visited.add(agent.position)
                 # Penalize immediate backtracking loops.
-                if len(agent.recent_positions) >= 2 and agent.recent_positions[-2] == agent.position:
+                if (
+                    len(agent.recent_positions) >= 2
+                    and agent.recent_positions[-2] == agent.position
+                ):
                     reward -= 0.03
                     events.append("stutter_penalty")
                 agent.recent_positions.append(agent.position)
@@ -281,7 +340,11 @@ class MultiAgentRLRLGym:
         for other_id, other in self.state.agents.items():
             if other_id == actor_id or not other.alive:
                 continue
-            if abs(other.position[0] - actor.position[0]) + abs(other.position[1] - actor.position[1]) == 1:
+            if (
+                abs(other.position[0] - actor.position[0])
+                + abs(other.position[1] - actor.position[1])
+                == 1
+            ):
                 reward += 0.06
                 events.append(f"agent_interact:{other_id}")
                 break
@@ -372,10 +435,19 @@ class MultiAgentRLRLGym:
         for r in range(cr - radius, cr + radius + 1):
             row: List[str] = []
             for c in range(cc - radius, cc + radius + 1):
-                if r < 0 or c < 0 or r >= len(self.state.grid) or c >= len(self.state.grid[0]):
+                if (
+                    r < 0
+                    or c < 0
+                    or r >= len(self.state.grid)
+                    or c >= len(self.state.grid[0])
+                ):
                     row.append("void")
                 else:
                     tile_id = self.state.grid[r][c]
                     row.append(tile_id)
             view.append(row)
         return view
+
+
+class PettingZooParallelRLRLGym(MultiAgentRLRLGym):
+    """Primary env class name to signal PettingZoo Parallel-style usage."""

@@ -1,4 +1,4 @@
-"""Minimal running example for RLRLGym."""
+"""Minimal running example for RLRLGym (headless training loop)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rlrlgym import EnvConfig, MultiAgentRLRLGym, PlaybackController
+from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
 from rlrlgym.constants import (
     ACTION_EAT,
     ACTION_INTERACT,
@@ -40,35 +40,29 @@ def main() -> None:
         height=12,
         max_steps=20,
         n_agents=2,
+        render_enabled=False,
         agent_observation_config={
             "agent_0": {"view_radius": 2, "include_inventory": True},
             "agent_1": {"view_radius": 1, "include_inventory": False},
         },
     )
-    env = MultiAgentRLRLGym(config)
-    observations, info = env.reset(seed=7)
+    env = PettingZooParallelRLRLGym(config)
+    observations, _ = env.reset(seed=7)
 
     print("Reset complete")
+    print("Active agents:", env.agents)
     print("Initial obs keys:", list(observations.keys()))
-    print(env.render(color=False))
 
-    frames = [env.render(color=False)]
     for t in range(8):
         actions = {"agent_0": scripted_policy(t), "agent_1": scripted_policy(t + 2)}
-        observations, rewards, terminations, truncations, info = env.step(actions)
-        frames.append(env.render(color=False))
-        print(f"\\nStep {t + 1}")
-        print("Actions:", actions)
-        print("Rewards:", rewards)
-        print("Terminations:", terminations)
-        print("Truncations:", truncations)
+        observations, rewards, terminations, truncations, _ = env.step(actions)
+        print(
+            f"Step {t + 1}: rewards={rewards} terminations={terminations} truncations={truncations}"
+        )
 
-    playback = PlaybackController(frames=frames)
-    playback.fast_forward(3.0)
-    print("\\nPlayback preview (first 3 frames at fast-forward speed):")
-    for frame in playback.run(limit=3):
-        print(frame)
-        print("-" * 30)
+        if not env.agents:
+            print("All agents done")
+            break
 
 
 if __name__ == "__main__":

@@ -1,12 +1,14 @@
 import random
 import unittest
 
-from rlrlgym import EnvConfig, MultiAgentRLRLGym
+from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
 
 
 class TestInvariants(unittest.TestCase):
     def test_random_rollout_invariants(self):
-        env = MultiAgentRLRLGym(EnvConfig(width=14, height=10, n_agents=3, max_steps=60))
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=14, height=10, n_agents=3, max_steps=60)
+        )
         env.reset(seed=5)
 
         rng = random.Random(9)

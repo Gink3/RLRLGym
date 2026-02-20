@@ -37,7 +37,12 @@ def generate_map(
         grid.append(row)
 
     # Ensure enough walkable floor to place agents.
-    walkable = [(r, c) for r in range(height) for c in range(width) if tiles[grid[r][c]].walkable]
+    walkable = [
+        (r, c)
+        for r in range(height)
+        for c in range(width)
+        if tiles[grid[r][c]].walkable
+    ]
     if len(walkable) < 2:
         for r in range(1, height - 1):
             for c in range(1, width - 1):
@@ -49,7 +54,12 @@ def generate_map(
 def sample_walkable_positions(
     grid: List[List[str]], tiles: Dict[str, TileDef], count: int, rng: random.Random
 ) -> List[Tuple[int, int]]:
-    walkable = [(r, c) for r, row in enumerate(grid) for c, tile_id in enumerate(row) if tiles[tile_id].walkable]
+    walkable = [
+        (r, c)
+        for r, row in enumerate(grid)
+        for c, tile_id in enumerate(row)
+        if tiles[tile_id].walkable
+    ]
     if len(walkable) < count:
         raise ValueError("Not enough walkable cells for agent placement")
     rng.shuffle(walkable)
