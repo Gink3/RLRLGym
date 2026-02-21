@@ -24,6 +24,7 @@ from .constants import (
 )
 from .mapgen import generate_map, sample_walkable_positions
 from .models import AgentState, EnvState
+from .profiles import AgentProfile, load_profiles
 from .render import RenderWindow
 from .tiles import load_tileset
 
@@ -35,7 +36,9 @@ class EnvConfig:
     max_steps: int = 150
     n_agents: int = 2
     tiles_path: str = str(Path("data") / "tiles.json")
+    profiles_path: str = str(Path("data") / "agent_profiles.json")
     agent_observation_config: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    agent_profile_map: Dict[str, str] = field(default_factory=dict)
     render_enabled: bool = True
 
 
@@ -51,6 +54,7 @@ class MultiAgentRLRLGym:
     def __init__(self, config: Optional[EnvConfig] = None) -> None:
         self.config = config or EnvConfig()
         self.tiles = load_tileset(self.config.tiles_path)
+        self.profiles: Dict[str, AgentProfile] = load_profiles(self.config.profiles_path)
         self._rng = random.Random(0)
         self.possible_agents = [f"agent_{i}" for i in range(self.config.n_agents)]
         self.agents = list(self.possible_agents)
@@ -66,10 +70,18 @@ class MultiAgentRLRLGym:
     def observation_space(self, agent_id: str) -> Dict[str, object]:
         if agent_id not in self.possible_agents:
             raise KeyError(f"Unknown agent: {agent_id}")
-        return {
-            "type": "dict",
-            "keys": ["step", "alive", "local_tiles", "stats", "inventory"],
-        }
+        profile_name = self._resolve_profile_name(
+            agent_id, self.possible_agents.index(agent_id)
+        )
+        profile = self._profile_by_name(profile_name)
+        keys = ["step", "alive", "profile"]
+        if profile.include_grid:
+            keys.append("local_tiles")
+        if profile.include_stats:
+            keys.append("stats")
+        if profile.include_inventory:
+            keys.append("inventory")
+        return {"type": "dict", "keys": keys}
 
     def reset(
         self, seed: Optional[int] = None, options: Optional[Dict[str, object]] = None
@@ -87,7 +99,17 @@ class MultiAgentRLRLGym:
         agents: Dict[str, AgentState] = {}
         for i, agent_id in enumerate(self.possible_agents):
             pos = starts[i]
-            agent = AgentState(agent_id=agent_id, position=pos)
+            profile_name = self._resolve_profile_name(agent_id, i)
+            profile = self._profile_by_name(profile_name)
+            agent = AgentState(
+                agent_id=agent_id,
+                position=pos,
+                profile_name=profile.name,
+                hp=profile.max_hp,
+                max_hp=profile.max_hp,
+                hunger=profile.max_hunger,
+                max_hunger=profile.max_hunger,
+            )
             agent.visited.add(pos)
             agents[agent_id] = agent
 
@@ -101,7 +123,11 @@ class MultiAgentRLRLGym:
         self.agents = list(self.possible_agents)
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
         info = {
-            aid: {"action_mask": [1] * 11, "alive": True}
+            aid: {
+                "action_mask": [1] * 11,
+                "alive": True,
+                "profile": self.state.agents[aid].profile_name,
+            }
             for aid in self.possible_agents
         }
         self._last_info = info
@@ -138,6 +164,12 @@ class MultiAgentRLRLGym:
                 terminations[aid] = True
                 rewards[aid] -= 1.0
                 info[aid]["events"].append("death")
+
+            profile = self._profile_for_agent(aid)
+            rewards[aid] += profile.reward_adjustment(
+                events=info[aid]["events"],
+                died=terminations[aid],
+            )
 
         self.state.step_count += 1
         if self.state.step_count >= self.config.max_steps:
@@ -276,12 +308,12 @@ class MultiAgentRLRLGym:
         elif action == ACTION_EAT:
             if "ration" in agent.inventory:
                 agent.inventory.remove("ration")
-                agent.hunger = min(20, agent.hunger + 8)
+                agent.hunger = min(agent.max_hunger, agent.hunger + 8)
                 reward += 0.25
                 events.append("eat:ration")
             elif "fruit" in agent.inventory:
                 agent.inventory.remove("fruit")
-                agent.hunger = min(20, agent.hunger + 4)
+                agent.hunger = min(agent.max_hunger, agent.hunger + 4)
                 reward += 0.15
                 events.append("eat:fruit")
             else:
@@ -298,9 +330,9 @@ class MultiAgentRLRLGym:
                 reward -= 0.01
 
         elif action == ACTION_USE:
-            if "bandage" in agent.inventory and agent.hp < 10:
+            if "bandage" in agent.inventory and agent.hp < agent.max_hp:
                 agent.inventory.remove("bandage")
-                agent.hp = min(10, agent.hp + 3)
+                agent.hp = min(agent.max_hp, agent.hp + 3)
                 reward += 0.12
                 events.append("use:bandage")
             else:
@@ -323,11 +355,11 @@ class MultiAgentRLRLGym:
         if tile.max_interactions > 0 and n_interactions < tile.max_interactions:
             self.state.tile_interactions[(r, c)] = n_interactions + 1
             if tile_id == "shrine":
-                actor.hp = min(10, actor.hp + 1)
+                actor.hp = min(actor.max_hp, actor.hp + 1)
                 reward += 0.1
                 events.append("interact:shrine")
             elif tile_id == "water":
-                actor.hunger = min(20, actor.hunger + 1)
+                actor.hunger = min(actor.max_hunger, actor.hunger + 1)
                 reward += 0.04
                 events.append("interact:water")
             else:
@@ -406,13 +438,15 @@ class MultiAgentRLRLGym:
     def _build_observation(self, aid: str) -> Dict[str, object]:
         assert self.state is not None
         cfg = self.config.agent_observation_config.get(aid, {})
-        radius = int(cfg.get("view_radius", 2))
-        include_grid = bool(cfg.get("include_grid", True))
-        include_stats = bool(cfg.get("include_stats", True))
-        include_inventory = bool(cfg.get("include_inventory", True))
 
         agent = self.state.agents[aid]
+        profile = self._profile_for_agent(aid)
+        radius = int(cfg.get("view_radius", profile.view_radius))
+        include_grid = bool(cfg.get("include_grid", profile.include_grid))
+        include_stats = bool(cfg.get("include_stats", profile.include_stats))
+        include_inventory = bool(cfg.get("include_inventory", profile.include_inventory))
         obs: Dict[str, object] = {"step": self.state.step_count, "alive": agent.alive}
+        obs["profile"] = profile.name
 
         if include_grid:
             obs["local_tiles"] = self._local_view(agent.position, radius)
@@ -427,6 +461,24 @@ class MultiAgentRLRLGym:
             obs["inventory"] = list(agent.inventory)
 
         return obs
+
+    def _resolve_profile_name(self, agent_id: str, index: int) -> str:
+        if agent_id in self.config.agent_profile_map:
+            return self.config.agent_profile_map[agent_id]
+        if index == 0:
+            return "human"
+        if index == 1:
+            return "orc"
+        return "human"
+
+    def _profile_by_name(self, name: str) -> AgentProfile:
+        if name not in self.profiles:
+            raise ValueError(f"Unknown agent profile: {name}")
+        return self.profiles[name]
+
+    def _profile_for_agent(self, agent_id: str) -> AgentProfile:
+        assert self.state is not None
+        return self._profile_by_name(self.state.agents[agent_id].profile_name)
 
     def _local_view(self, center: Tuple[int, int], radius: int) -> List[List[str]]:
         assert self.state is not None

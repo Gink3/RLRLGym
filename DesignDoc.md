@@ -31,6 +31,24 @@ A gym to simulate brogue/nethack/Cataclysm DDA.
 * Use Items
 * Interact with the environment
 
+## Agent Profiles
+The environment should support profile-based agents with different observation spaces and reward functions.
+
+### Initial Profiles
+* `human`
+    * Broader local awareness (larger view radius)
+    * Balanced rewards for exploration, loot, and interaction
+* `orc`
+    * Narrower local awareness (smaller view radius)
+    * Higher reward emphasis on interactions, stronger penalties for idle behavior
+
+### Profile Requirements
+* Profiles must be loaded from JSON config files (not hardcoded in source).
+* Profile JSON should include a `schema_version` key for compatibility and migrations.
+* Each agent is assigned a profile by agent id.
+* Observation shape/content can differ by profile.
+* Reward shaping can differ by profile while core game rules remain shared.
+
 
 ## Rewards
 Reward Design needs to reward interactions with the environment and other agents. To limit exploitation, the environment needs to limit how many times something can be interacted with. Carefully shaped auxiliary rewards (exploration, skill gain, resource management) to avoid exploit loops. Add penalties for degenerate behavior (stutter-step farming, infinite wait loops).
@@ -66,6 +84,21 @@ Fixed-seed regression tests for training/eval consistency.
 Start with PPO/A2C on simplified rules.
 Add recurrent policies (LSTM/Transformer) for partial observability.
 Log rich metrics (survival time, dungeon depth, cause of death, resource efficiency).
+
+## Training Logger and Dashboard
+Training should include a dedicated logger/dashboard for aggregate metrics.
+
+### Metrics
+* Episode return curves (team return and per-agent return)
+* Win rate
+* Mean survival time
+* Cause-of-death histogram
+
+### Outputs
+* `episodes.jsonl`: Episode-by-episode structured records
+* `episodes.csv`: Tabular metrics for quick analysis
+* `summary.json`: Aggregate metrics
+* `dashboard.html`: Human-readable dashboard report
 
 ## Documentation
 All interfaces should be documented for easier usage in the `README.md` file

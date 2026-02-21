@@ -21,8 +21,11 @@ class TileDef:
 class AgentState:
     agent_id: str
     position: Tuple[int, int]
+    profile_name: str = "human"
     hp: int = 10
+    max_hp: int = 10
     hunger: int = 20
+    max_hunger: int = 20
     inventory: List[str] = field(default_factory=list)
     equipped: List[str] = field(default_factory=list)
     alive: bool = True

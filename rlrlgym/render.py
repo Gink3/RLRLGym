@@ -20,7 +20,11 @@ TK_COLORS = {
     "bright_black": "#7f8c8d",
 }
 
-AGENT_COLOR = "#6dd5ff"
+PROFILE_AGENT_STYLE = {
+    "human": ("H", "#3498db"),
+    "orc": ("O", "#2ecc71"),
+}
+DEFAULT_AGENT_STYLE = ("A", "#6dd5ff")
 
 
 class AsciiRenderer:
@@ -55,8 +59,12 @@ class AsciiRenderer:
             for c in range(min_c, max_c + 1):
                 pos = (r, c)
                 if pos in agent_positions:
-                    symbol = agent_positions[pos][0].upper()
-                    row_cells.append((symbol, AGENT_COLOR))
+                    agent_id = agent_positions[pos]
+                    agent = state.agents[agent_id]
+                    symbol, color = PROFILE_AGENT_STYLE.get(
+                        agent.profile_name, DEFAULT_AGENT_STYLE
+                    )
+                    row_cells.append((symbol, color))
                     continue
                 tile = self.tiles[state.grid[r][c]]
                 row_cells.append(
@@ -170,7 +178,10 @@ class RenderWindow:
 
     def _configure_color_tags(self) -> None:
         self.text.configure(state="normal")
-        for color in set(TK_COLORS.values()) | {AGENT_COLOR}:
+        profile_colors = {style[1] for style in PROFILE_AGENT_STYLE.values()}
+        for color in set(TK_COLORS.values()) | profile_colors | {
+            DEFAULT_AGENT_STYLE[1]
+        }:
             self.text.tag_configure(color, foreground=color)
         self.text.configure(state="disabled")
 
