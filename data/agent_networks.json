@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "architectures": [
+    {
+      "name": "human",
+      "hidden_layers": [64, 32],
+      "activation": "relu",
+      "learning_rate": 0.003,
+      "gamma": 0.97,
+      "epsilon_start": 0.20,
+      "epsilon_end": 0.03,
+      "epsilon_decay": 0.995
+    },
+    {
+      "name": "orc",
+      "hidden_layers": [32, 32],
+      "activation": "relu",
+      "learning_rate": 0.003,
+      "gamma": 0.97,
+      "epsilon_start": 0.25,
+      "epsilon_end": 0.04,
+      "epsilon_decay": 0.995
+    }
+  ]
+}
