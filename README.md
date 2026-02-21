@@ -135,6 +135,7 @@ Version-controlled training scripts:
 - `scripts/train_quick.sh` (fast smoke training)
 - `scripts/train_default.sh` (default training)
 - `scripts/train_long.sh` (longer training run)
+- `scripts/train_full.sh` (full training run)
 
 All scripts accept additional CLI overrides, for example:
 

@@ -22,8 +22,13 @@ class TestProfilesAndLogger(unittest.TestCase):
 
         self.assertEqual(obs["agent_0"]["profile"], "human")
         self.assertEqual(obs["agent_1"]["profile"], "orc")
-        self.assertEqual(len(obs["agent_0"]["local_tiles"]), 7)
-        self.assertEqual(len(obs["agent_1"]["local_tiles"]), 5)
+        self.assertEqual(len(obs["agent_0"]["local_tiles"]), 12)
+        self.assertEqual(len(obs["agent_0"]["local_tiles"][0]), 12)
+        self.assertEqual(len(obs["agent_1"]["local_tiles"]), 10)
+        self.assertEqual(len(obs["agent_1"]["local_tiles"][0]), 10)
+        self.assertIn("nearby_item_counts", obs["agent_0"]["stats"])
+        self.assertIn("tile_interaction_counts", obs["agent_0"]["stats"])
+        self.assertIn("teammate_distance", obs["agent_0"]["stats"])
 
         _, rewards, _, _, info = env.step({"agent_0": ACTION_WAIT, "agent_1": ACTION_WAIT})
         self.assertLess(rewards["agent_1"], rewards["agent_0"])

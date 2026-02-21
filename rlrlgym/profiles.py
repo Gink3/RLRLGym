@@ -12,7 +12,8 @@ REQUIRED_PROFILE_FIELDS = {
     "name",
     "max_hp",
     "max_hunger",
-    "view_radius",
+    "view_width",
+    "view_height",
     "include_grid",
     "include_stats",
     "include_inventory",
@@ -25,7 +26,8 @@ class AgentProfile:
     name: str
     max_hp: int
     max_hunger: int
-    view_radius: int
+    view_width: int
+    view_height: int
     include_grid: bool = True
     include_stats: bool = True
     include_inventory: bool = True
@@ -76,7 +78,8 @@ def load_profiles(path: str | Path) -> Dict[str, AgentProfile]:
             name=str(row["name"]),
             max_hp=int(row["max_hp"]),
             max_hunger=int(row["max_hunger"]),
-            view_radius=int(row["view_radius"]),
+            view_width=int(row["view_width"]),
+            view_height=int(row["view_height"]),
             include_grid=bool(row["include_grid"]),
             include_stats=bool(row["include_stats"]),
             include_inventory=bool(row["include_inventory"]),

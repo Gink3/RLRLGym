@@ -441,7 +441,8 @@ class MultiAgentRLRLGym:
 
         agent = self.state.agents[aid]
         profile = self._profile_for_agent(aid)
-        radius = int(cfg.get("view_radius", profile.view_radius))
+        view_width = int(cfg.get("view_width", profile.view_width))
+        view_height = int(cfg.get("view_height", profile.view_height))
         include_grid = bool(cfg.get("include_grid", profile.include_grid))
         include_stats = bool(cfg.get("include_stats", profile.include_stats))
         include_inventory = bool(cfg.get("include_inventory", profile.include_inventory))
@@ -449,13 +450,21 @@ class MultiAgentRLRLGym:
         obs["profile"] = profile.name
 
         if include_grid:
-            obs["local_tiles"] = self._local_view(agent.position, radius)
+            obs["local_tiles"] = self._local_view_dims(
+                agent.position, height=view_height, width=view_width
+            )
         if include_stats:
+            nearby_item_counts = self._nearby_item_counts(
+                center=agent.position, height=view_height, width=view_width
+            )
             obs["stats"] = {
                 "hp": agent.hp,
                 "hunger": agent.hunger,
                 "position": agent.position,
                 "equipped_count": len(agent.equipped),
+                "nearby_item_counts": nearby_item_counts,
+                "tile_interaction_counts": self._tile_interaction_counts(agent.position),
+                "teammate_distance": self._nearest_teammate_distance(aid),
             }
         if include_inventory:
             obs["inventory"] = list(agent.inventory)
@@ -480,13 +489,19 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         return self._profile_by_name(self.state.agents[agent_id].profile_name)
 
-    def _local_view(self, center: Tuple[int, int], radius: int) -> List[List[str]]:
+    def _local_view_dims(
+        self, center: Tuple[int, int], height: int, width: int
+    ) -> List[List[str]]:
         assert self.state is not None
+        height = max(1, int(height))
+        width = max(1, int(width))
         cr, cc = center
+        start_r = cr - (height // 2)
+        start_c = cc - (width // 2)
         view: List[List[str]] = []
-        for r in range(cr - radius, cr + radius + 1):
+        for r in range(start_r, start_r + height):
             row: List[str] = []
-            for c in range(cc - radius, cc + radius + 1):
+            for c in range(start_c, start_c + width):
                 if (
                     r < 0
                     or c < 0
@@ -499,6 +514,41 @@ class MultiAgentRLRLGym:
                     row.append(tile_id)
             view.append(row)
         return view
+
+    def _nearby_item_counts(
+        self, center: Tuple[int, int], height: int, width: int
+    ) -> Dict[str, int]:
+        assert self.state is not None
+        counts: Dict[str, int] = {}
+        cr, cc = center
+        start_r = cr - (height // 2)
+        start_c = cc - (width // 2)
+        for r in range(start_r, start_r + height):
+            for c in range(start_c, start_c + width):
+                if r < 0 or c < 0 or r >= len(self.state.grid) or c >= len(self.state.grid[0]):
+                    continue
+                for item in self.state.ground_items.get((r, c), []):
+                    counts[item] = counts.get(item, 0) + 1
+        return counts
+
+    def _tile_interaction_counts(self, center: Tuple[int, int]) -> Dict[str, int]:
+        assert self.state is not None
+        used_here = self.state.tile_interactions.get(center, 0)
+        used_total = sum(self.state.tile_interactions.values())
+        return {"current_tile_used": used_here, "total_used": used_total}
+
+    def _nearest_teammate_distance(self, aid: str) -> int | None:
+        assert self.state is not None
+        actor = self.state.agents[aid]
+        distances: List[int] = []
+        for other_id, other in self.state.agents.items():
+            if other_id == aid or not other.alive:
+                continue
+            d = abs(actor.position[0] - other.position[0]) + abs(actor.position[1] - other.position[1])
+            distances.append(d)
+        if not distances:
+            return None
+        return min(distances)
 
 
 class PettingZooParallelRLRLGym(MultiAgentRLRLGym):

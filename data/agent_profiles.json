@@ -4,8 +4,9 @@
     {
       "name": "human",
       "max_hp": 10,
-      "max_hunger": 20,
-      "view_radius": 3,
+      "max_hunger": 45,
+      "view_width": 12,
+      "view_height": 12,
       "include_grid": true,
       "include_stats": true,
       "include_inventory": true,
@@ -22,8 +23,9 @@
     {
       "name": "orc",
       "max_hp": 12,
-      "max_hunger": 18,
-      "view_radius": 2,
+      "max_hunger": 40,
+      "view_width": 10,
+      "view_height": 10,
       "include_grid": true,
       "include_stats": true,
       "include_inventory": true,
