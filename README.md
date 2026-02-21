@@ -10,7 +10,7 @@ python3 examples/minimal_run.py
 python3 examples/window_demo.py
 python3 examples/training_dashboard_demo.py
 python3 examples/train_demo.py
-python3 -m train --episodes 100 --max-steps 120 --output-dir outputs/train
+./scripts/train_default.sh
 ```
 
 ## Window Rendering
@@ -50,6 +50,22 @@ Outputs are written to `outputs/`:
 - `episodes.csv`
 - `summary.json`
 - `dashboard.html`
+
+## Serve Dashboard Locally
+
+To avoid browser `file://` issues, serve dashboard files over localhost:
+
+```bash
+./scripts/serve_dashboard.sh outputs/train/quick 8000
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/dashboard.html
+```
+
+You can do the same for any run directory, for example `outputs/train/default`.
 
 ## Observation And Action Spaces
 
@@ -104,7 +120,7 @@ the PettingZoo-style env.
 CLI:
 
 ```bash
-python3 -m train --episodes 100 --max-steps 120 --seed 0 --output-dir outputs/train --networks-path data/agent_networks.json
+./scripts/train_default.sh
 ```
 
 Outputs include:
@@ -113,6 +129,18 @@ Outputs include:
 
 Network architectures are defined in `data/agent_networks.json` by profile name
 (for example `human` and `orc`).
+
+Version-controlled training scripts:
+
+- `scripts/train_quick.sh` (fast smoke training)
+- `scripts/train_default.sh` (default training)
+- `scripts/train_long.sh` (longer training run)
+
+All scripts accept additional CLI overrides, for example:
+
+```bash
+./scripts/train_quick.sh --seed 3 --output-dir outputs/train/custom_run
+```
 
 ## Run Tests
 

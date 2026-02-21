@@ -156,12 +156,72 @@ class TrainingLogger:
   <meta charset=\"utf-8\" />
   <title>RLRLGym Training Dashboard</title>
   <style>
-    body {{ font-family: -apple-system, Segoe UI, sans-serif; margin: 24px; background: #f7f9fb; color: #1f2937; }}
-    .card {{ background: white; border: 1px solid #d1d5db; border-radius: 8px; padding: 14px; margin-bottom: 16px; }}
+    :root {{
+      --bg: #1f232b;
+      --bg-alt: #262b35;
+      --surface: #2d3340;
+      --surface-soft: #343b49;
+      --text: #f1f4fb;
+      --muted: #b7bfd3;
+      --border: #4b5468;
+      --royal-purple: #6a3fe8;
+      --royal-purple-2: #7d5cf0;
+      --teal-accent: #39d0c3;
+      --gold-accent: #f2c14e;
+      --rose-accent: #ef7fa8;
+    }}
+    body {{
+      font-family: -apple-system, Segoe UI, sans-serif;
+      margin: 24px;
+      background: radial-gradient(1200px 600px at 10% -10%, #312554 0%, var(--bg) 45%);
+      color: var(--text);
+    }}
+    h1 {{ letter-spacing: 0.3px; }}
+    h3 {{ color: var(--teal-accent); margin-top: 0; }}
+    .card {{
+      background: linear-gradient(180deg, var(--surface) 0%, var(--bg-alt) 100%);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 16px;
+      box-shadow: 0 10px 26px rgba(12, 10, 20, 0.35);
+    }}
     table {{ border-collapse: collapse; width: 100%; }}
-    th, td {{ border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; font-size: 13px; }}
-    .metric {{ display: inline-block; margin-right: 16px; font-weight: 600; }}
-    .bar {{ height: 18px; background: #60a5fa; margin-bottom: 4px; }}
+    th, td {{
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      text-align: left;
+      font-size: 13px;
+    }}
+    th {{
+      background: rgba(106, 63, 232, 0.24);
+      color: #efe9ff;
+    }}
+    tr:nth-child(even) td {{ background: rgba(255, 255, 255, 0.02); }}
+    .metric {{
+      display: inline-block;
+      margin-right: 16px;
+      margin-bottom: 4px;
+      font-weight: 700;
+      color: var(--gold-accent);
+    }}
+    pre {{
+      margin: 0;
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(106, 63, 232, 0.12);
+      border: 1px solid rgba(125, 92, 240, 0.35);
+      color: #e8deff;
+      overflow-x: auto;
+    }}
+    .bar {{
+      height: 18px;
+      border-radius: 6px;
+      background: linear-gradient(90deg, var(--royal-purple), var(--royal-purple-2), var(--rose-accent));
+      margin-bottom: 8px;
+      box-shadow: 0 0 0 1px rgba(239, 127, 168, 0.2);
+    }}
+    .hist-label {{ color: var(--muted); margin-bottom: 2px; }}
   </style>
 </head>
 <body>
@@ -178,7 +238,7 @@ class TrainingLogger:
   </div>
   <div class=\"card\">
     <h3>Cause of Death Histogram</h3>
-    {''.join([f'<div>{k}: {v}<div class="bar" style="width:{20 + v * 20}px"></div></div>' for k, v in aggregate['cause_of_death_histogram'].items()])}
+    {''.join([f'<div class=\"hist-label\">{k}: {v}</div><div class=\"bar\" style=\"width:{20 + v * 20}px\"></div>' for k, v in aggregate['cause_of_death_histogram'].items()])}
   </div>
   <div class=\"card\">
     <h3>Episode Table</h3>
