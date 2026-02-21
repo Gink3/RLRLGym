@@ -66,19 +66,30 @@ class MultiAgentTrainer:
         recent_starvation: deque[float] = deque(maxlen=window)
         recent_loss: deque[float] = deque(maxlen=window)
         recent_teammate_dist: deque[float] = deque(maxlen=window)
+        recent_profile_metrics: Dict[str, Dict[str, deque[float]]] = {}
 
         for ep in range(self.config.episodes):
             observations, _ = self.env.reset(seed=self.config.seed + ep)
             self.logger.start_episode(self.env.possible_agents)
             episode_losses: list[float] = []
             episode_teammate_dist: list[float] = []
+            episode_agent_returns = {aid: 0.0 for aid in self.env.possible_agents}
+            episode_agent_losses = {aid: [] for aid in self.env.possible_agents}
+            episode_agent_dist = {aid: [] for aid in self.env.possible_agents}
+            episode_agent_survival = {aid: 0 for aid in self.env.possible_agents}
+            episode_agent_done = {aid: False for aid in self.env.possible_agents}
 
             for _ in range(self.config.max_steps):
+                for aid in self.env.possible_agents:
+                    if not episode_agent_done[aid]:
+                        episode_agent_survival[aid] += 1
+
                 for aid in self.env.agents:
                     stats = observations.get(aid, {}).get("stats", {})
                     td = stats.get("teammate_distance") if isinstance(stats, dict) else None
                     if td is not None:
                         episode_teammate_dist.append(float(td))
+                        episode_agent_dist[aid].append(float(td))
 
                 actions = {
                     aid: self.policies[aid].act(observations[aid], training=True)
@@ -87,6 +98,11 @@ class MultiAgentTrainer:
 
                 next_obs, rewards, terminations, truncations, info = self.env.step(actions)
                 self.logger.log_step(rewards, terminations, truncations, info)
+                for aid, reward in rewards.items():
+                    episode_agent_returns[aid] += float(reward)
+                for aid in self.env.possible_agents:
+                    if terminations.get(aid, False) or truncations.get(aid, False):
+                        episode_agent_done[aid] = True
 
                 for aid, action in actions.items():
                     done = bool(terminations.get(aid, False) or truncations.get(aid, False))
@@ -98,6 +114,7 @@ class MultiAgentTrainer:
                         done=done,
                     )
                     episode_losses.append(float(loss))
+                    episode_agent_losses[aid].append(float(loss))
 
                 observations = next_obs
                 if not self.env.agents:
@@ -127,6 +144,16 @@ class MultiAgentTrainer:
             recent_starvation.append(episode_starved)
             recent_loss.append(float(episode_mean_loss))
             recent_teammate_dist.append(float(episode_mean_teammate))
+            self._update_profile_metric_windows(
+                recent_profile_metrics=recent_profile_metrics,
+                episode_returns=episode_agent_returns,
+                episode_losses=episode_agent_losses,
+                episode_survival=episode_agent_survival,
+                episode_teammate_dist=episode_agent_dist,
+                cause_of_death=summary.cause_of_death,
+                alive_agents=alive,
+                window=window,
+            )
 
             if self.config.show_progress:
                 self._print_live_progress(
@@ -140,6 +167,7 @@ class MultiAgentTrainer:
                     mean_loss=sum(recent_loss) / len(recent_loss),
                     epsilon=sum(p.epsilon for p in self.policies.values()) / len(self.policies),
                     mean_teammate_distance=sum(recent_teammate_dist) / len(recent_teammate_dist),
+                    profile_metrics=recent_profile_metrics,
                 )
 
         if self.config.show_progress:
@@ -168,6 +196,7 @@ class MultiAgentTrainer:
         mean_loss: float,
         epsilon: float,
         mean_teammate_distance: float,
+        profile_metrics: Dict[str, Dict[str, deque[float]]],
     ) -> None:
         bar_width = 26
         frac = episode / max(1, total)
@@ -183,8 +212,86 @@ class MultiAgentTrainer:
             f"eps={epsilon:.3f} "
             f"team_dist{window}={mean_teammate_distance:.2f}"
         )
+        if profile_metrics:
+            line += " |"
+            for profile in sorted(profile_metrics.keys()):
+                pm = profile_metrics[profile]
+                pret = self._mean(pm["return"])
+                pwin = self._mean(pm["win"])
+                psurv = self._mean(pm["survival"])
+                pstarve = self._mean(pm["starvation"])
+                ploss = self._mean(pm["loss"])
+                pdist = self._mean(pm["distance"])
+                line += (
+                    f" {profile}:"
+                    f"ret={pret:.3f},"
+                    f"win={pwin:.3f},"
+                    f"surv={psurv:.1f},"
+                    f"starve={pstarve:.3f},"
+                    f"loss={ploss:.4f},"
+                    f"dist={pdist:.2f}"
+                )
         sys.stdout.write(line)
         sys.stdout.flush()
+
+    def _update_profile_metric_windows(
+        self,
+        recent_profile_metrics: Dict[str, Dict[str, deque[float]]],
+        episode_returns: Dict[str, float],
+        episode_losses: Dict[str, list[float]],
+        episode_survival: Dict[str, int],
+        episode_teammate_dist: Dict[str, list[float]],
+        cause_of_death: Dict[str, str],
+        alive_agents: Dict[str, bool],
+        window: int,
+    ) -> None:
+        profile_to_agent_ids: Dict[str, list[str]] = {}
+        for aid in self.env.possible_agents:
+            profile = self.env.state.agents[aid].profile_name
+            profile_to_agent_ids.setdefault(profile, []).append(aid)
+
+        for profile, aids in profile_to_agent_ids.items():
+            if profile not in recent_profile_metrics:
+                recent_profile_metrics[profile] = {
+                    "return": deque(maxlen=window),
+                    "win": deque(maxlen=window),
+                    "survival": deque(maxlen=window),
+                    "starvation": deque(maxlen=window),
+                    "loss": deque(maxlen=window),
+                    "distance": deque(maxlen=window),
+                }
+            pm = recent_profile_metrics[profile]
+
+            returns = [episode_returns[aid] for aid in aids]
+            wins = [1.0 if alive_agents.get(aid, False) else 0.0 for aid in aids]
+            survival = [float(episode_survival[aid]) for aid in aids]
+            starvation = [
+                1.0 if cause_of_death.get(aid) == "starvation" else 0.0 for aid in aids
+            ]
+            losses = [
+                (sum(episode_losses[aid]) / len(episode_losses[aid]))
+                if episode_losses[aid]
+                else 0.0
+                for aid in aids
+            ]
+            distances = [
+                (sum(episode_teammate_dist[aid]) / len(episode_teammate_dist[aid]))
+                if episode_teammate_dist[aid]
+                else 0.0
+                for aid in aids
+            ]
+
+            pm["return"].append(sum(returns) / max(1, len(returns)))
+            pm["win"].append(sum(wins) / max(1, len(wins)))
+            pm["survival"].append(sum(survival) / max(1, len(survival)))
+            pm["starvation"].append(sum(starvation) / max(1, len(starvation)))
+            pm["loss"].append(sum(losses) / max(1, len(losses)))
+            pm["distance"].append(sum(distances) / max(1, len(distances)))
+
+    def _mean(self, values: deque[float]) -> float:
+        if not values:
+            return 0.0
+        return sum(values) / len(values)
 
     def _write_checkpoint(self) -> str:
         out = Path(self.config.output_dir)
