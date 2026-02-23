@@ -7,18 +7,9 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence, Tuple
 
-from .network_config import NetworkConfig
+from rlrlgym.featurize import vectorize_observation
 
-TILE_VOCAB = [
-    "floor",
-    "wall",
-    "water",
-    "food_cache",
-    "chest",
-    "shrine",
-    "void",
-]
-PROFILE_VOCAB = ["human", "orc"]
+from .network_config import NetworkConfig
 
 
 def _relu(x: float) -> float:
@@ -36,37 +27,6 @@ def _tanh(x: float) -> float:
 def _tanh_grad(x: float) -> float:
     t = math.tanh(x)
     return 1.0 - t * t
-
-
-def vectorize_observation(obs: Dict[str, object]) -> List[float]:
-    stats = obs.get("stats", {}) if isinstance(obs.get("stats"), dict) else {}
-    hp = float(stats.get("hp", 0.0)) / 20.0
-    hunger = float(stats.get("hunger", 0.0)) / 20.0
-    equipped = float(stats.get("equipped_count", 0.0)) / 8.0
-
-    inventory = obs.get("inventory", []) if isinstance(obs.get("inventory"), list) else []
-    inventory_len = float(len(inventory)) / 10.0
-
-    profile = str(obs.get("profile", "human"))
-    profile_features = [1.0 if profile == p else 0.0 for p in PROFILE_VOCAB]
-
-    tile_hist = {k: 0.0 for k in TILE_VOCAB}
-    local = obs.get("local_tiles", [])
-    if isinstance(local, list):
-        for row in local:
-            if not isinstance(row, list):
-                continue
-            for tile in row:
-                tid = str(tile)
-                if tid in tile_hist:
-                    tile_hist[tid] += 1.0
-                else:
-                    tile_hist["void"] += 1.0
-
-    total_tiles = max(1.0, sum(tile_hist.values()))
-    tile_features = [tile_hist[k] / total_tiles for k in TILE_VOCAB]
-
-    return [hp, hunger, equipped, inventory_len] + profile_features + tile_features
 
 
 @dataclass

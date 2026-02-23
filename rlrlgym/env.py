@@ -170,6 +170,9 @@ class MultiAgentRLRLGym:
                 events=info[aid]["events"],
                 died=terminations[aid],
             )
+            info[aid]["alive"] = agent.alive
+            info[aid]["profile"] = agent.profile_name
+            info[aid]["teammate_distance"] = self._nearest_teammate_distance(aid)
 
         self.state.step_count += 1
         if self.state.step_count >= self.config.max_steps:

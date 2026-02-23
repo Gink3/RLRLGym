@@ -100,7 +100,7 @@ Observations are per-agent dictionaries and always include:
 
 Profile and config determine optional keys:
 
-- `local_tiles`: local tile window around the agent (`view_radius` dependent)
+- `local_tiles`: local tile window around the agent (`view_width`/`view_height` dependent)
 - `stats`: `{hp, hunger, position, equipped_count}`
 - `inventory`: list of carried items
 
@@ -114,8 +114,10 @@ agent_obs = obs["agent_0"]
 
 ## Train Module
 
-The in-repo `train/` module provides a neural Q-learning baseline over
-the PettingZoo-style env.
+The in-repo `train/` module supports:
+
+- `rllib` backend (primary, recommended)
+- `custom` backend (legacy in-repo trainer)
 
 CLI:
 
@@ -124,18 +126,36 @@ CLI:
 ```
 
 Outputs include:
-- `outputs/train/neural_policies.json` (learned neural policies)
-- dashboard artifacts via `TrainingLogger`
+- RLlib metrics/checkpoints in the selected output directory
+- (custom backend only) `neural_policies.json` + dashboard artifacts via `TrainingLogger`
 
 Network architectures are defined in `data/agent_networks.json` by profile name
 (for example `human` and `orc`).
 
+Install RLlib:
+
+```bash
+python3 -m pip install "ray[rllib]"
+```
+
+Direct RLlib CLI example:
+
+```bash
+python3 -m train --backend rllib --iterations 50 --max-steps 120 --output-dir outputs/train/default
+```
+
+Legacy custom backend example:
+
+```bash
+python3 -m train --backend custom --episodes 100 --max-steps 120 --output-dir outputs/train/custom --networks-path data/agent_networks.json
+```
+
 Version-controlled training scripts:
 
-- `scripts/train_quick.sh` (fast smoke training)
-- `scripts/train_default.sh` (default training)
-- `scripts/train_long.sh` (longer training run)
-- `scripts/train_full.sh` (full training run)
+- `scripts/train_quick.sh` (fast RLlib training)
+- `scripts/train_default.sh` (default RLlib training)
+- `scripts/train_long.sh` (longer RLlib training)
+- `scripts/train_full.sh` (full RLlib training)
 
 All scripts accept additional CLI overrides, for example:
 

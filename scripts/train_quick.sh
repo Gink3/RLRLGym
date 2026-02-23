@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python3 -m train \
-  --episodes 20 \
+PY_BIN="python3"
+if [[ -x ".venv/bin/python" ]]; then
+  PY_BIN=".venv/bin/python"
+fi
+
+
+"$PY_BIN" -m train \
+  --backend rllib \
+  --iterations 10 \
   --max-steps 80 \
   --seed 0 \
   --output-dir outputs/train/quick \
-  --networks-path data/agent_networks.json \
   "$@"
