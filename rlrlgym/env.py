@@ -28,6 +28,17 @@ from .profiles import AgentProfile, load_profiles
 from .render import RenderWindow
 from .tiles import load_tileset
 
+EDIBLE_ITEMS = {"ration", "fruit"}
+MOVE_VALID_REWARD = 0.005
+MOVE_STEP_COST = 0.003
+MOVE_FOOD_PROGRESS_REWARD = 0.01
+MOVE_FOOD_REGRESS_PENALTY = 0.005
+EAT_PER_HUNGER_GAIN_REWARD = 0.04
+EAT_WASTE_THRESHOLD = 0.8
+EAT_WASTE_PENALTY = 0.05
+LOW_HUNGER_THRESHOLD = 0.4
+LOW_HUNGER_PENALTY_SCALE = 0.01
+
 
 @dataclass
 class EnvConfig:
@@ -226,14 +237,19 @@ class MultiAgentRLRLGym:
             self._render_window = None
 
     def play_frames_in_window(
-        self, states: List[EnvState], title: str = "RLRLGym Playback"
+        self,
+        states: List[EnvState],
+        title: str = "RLRLGym Playback",
+        playback_actions: Optional[List[Dict[str, int]]] = None,
     ) -> None:
         if not self.config.render_enabled:
             return
         if self._render_window is None:
             self._render_window = RenderWindow(self.tiles, title=title)
         self._render_window.set_playback_states(
-            states, focus_choices=self.possible_agents
+            states,
+            focus_choices=self.possible_agents,
+            action_log=playback_actions,
         )
         self._render_window.play()
 
@@ -275,12 +291,30 @@ class MultiAgentRLRLGym:
         events: List[str] = []
 
         if action in MOVE_DELTAS:
+            old_food_distance = self._nearest_food_distance(agent.position)
             dr, dc = MOVE_DELTAS[action]
             nr, nc = agent.position[0] + dr, agent.position[1] + dc
             if self._walkable(nr, nc):
                 old_pos = agent.position
                 agent.position = (nr, nc)
                 events.append(f"move:{old_pos}->{agent.position}")
+                reward += MOVE_VALID_REWARD
+                reward -= MOVE_STEP_COST
+                new_food_distance = self._nearest_food_distance(agent.position)
+                if (
+                    old_food_distance is not None
+                    and new_food_distance is not None
+                    and new_food_distance < old_food_distance
+                ):
+                    reward += MOVE_FOOD_PROGRESS_REWARD
+                    events.append("food_progress")
+                elif (
+                    old_food_distance is not None
+                    and new_food_distance is not None
+                    and new_food_distance > old_food_distance
+                ):
+                    reward -= MOVE_FOOD_REGRESS_PENALTY
+                    events.append("food_regress")
                 if agent.position not in agent.visited:
                     reward += 0.05
                     events.append("explore")
@@ -311,19 +345,30 @@ class MultiAgentRLRLGym:
             reward += self._pickup_from_tile(agent, events)
 
         elif action == ACTION_EAT:
+            pre_hunger = agent.hunger
             if "ration" in agent.inventory:
                 agent.inventory.remove("ration")
                 agent.hunger = min(agent.max_hunger, agent.hunger + 8)
-                reward += 0.25
+                hunger_gain = agent.hunger - pre_hunger
+                reward += EAT_PER_HUNGER_GAIN_REWARD * hunger_gain
                 events.append("eat:ration")
             elif "fruit" in agent.inventory:
                 agent.inventory.remove("fruit")
                 agent.hunger = min(agent.max_hunger, agent.hunger + 4)
-                reward += 0.15
+                hunger_gain = agent.hunger - pre_hunger
+                reward += EAT_PER_HUNGER_GAIN_REWARD * hunger_gain
                 events.append("eat:fruit")
             else:
                 reward -= 0.02
                 events.append("eat_fail")
+                hunger_gain = 0
+
+            if (
+                hunger_gain > 0
+                and pre_hunger >= int(agent.max_hunger * EAT_WASTE_THRESHOLD)
+            ):
+                reward -= EAT_WASTE_PENALTY
+                events.append("eat_waste_penalty")
 
         elif action == ACTION_EQUIP:
             if agent.inventory:
@@ -427,6 +472,11 @@ class MultiAgentRLRLGym:
             agent.hp -= 1
             rewards[aid] -= 0.05
             info[aid]["events"].append("starve_tick")
+        hunger_ratio = agent.hunger / max(1, agent.max_hunger)
+        if hunger_ratio < LOW_HUNGER_THRESHOLD:
+            pressure = (LOW_HUNGER_THRESHOLD - hunger_ratio) / LOW_HUNGER_THRESHOLD
+            rewards[aid] -= LOW_HUNGER_PENALTY_SCALE * pressure
+            info[aid]["events"].append("low_hunger_pressure")
 
     def _walkable(self, r: int, c: int) -> bool:
         assert self.state is not None
@@ -565,6 +615,31 @@ class MultiAgentRLRLGym:
         if not distances:
             return None
         return min(distances)
+
+    def _nearest_food_distance(self, position: Tuple[int, int]) -> int | None:
+        assert self.state is not None
+        row, col = position
+        best: int | None = None
+        for (r, c), items in self.state.ground_items.items():
+            if any(item in EDIBLE_ITEMS for item in items):
+                dist = abs(row - r) + abs(col - c)
+                if best is None or dist < best:
+                    best = dist
+
+        for r, grid_row in enumerate(self.state.grid):
+            for c, tile_id in enumerate(grid_row):
+                tile = self.tiles[tile_id]
+                if not tile.loot_table:
+                    continue
+                if not any(item in EDIBLE_ITEMS for item in tile.loot_table):
+                    continue
+                used = self.state.tile_interactions.get((r, c), 0)
+                if used >= max(1, tile.max_interactions):
+                    continue
+                dist = abs(row - r) + abs(col - c)
+                if best is None or dist < best:
+                    best = dist
+        return best
 
 
 class PettingZooParallelRLRLGym(MultiAgentRLRLGym):

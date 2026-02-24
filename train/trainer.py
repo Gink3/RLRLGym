@@ -29,6 +29,7 @@ class TrainConfig:
     agent_profile_map: Dict[str, str] | None = None
     progress_window: int = 50
     show_progress: bool = True
+    replay_save_every: int = 1000
 
 
 class MultiAgentTrainer:
@@ -68,9 +69,18 @@ class MultiAgentTrainer:
         recent_loss: deque[float] = deque(maxlen=window)
         recent_teammate_dist: deque[float] = deque(maxlen=window)
         recent_profile_metrics: Dict[str, Dict[str, deque[float]]] = {}
+        replay_paths: list[str] = []
 
         for ep in range(self.config.episodes):
             observations, _ = self.env.reset(seed=self.config.seed + ep)
+            capture_replay = (
+                int(self.config.replay_save_every) > 0
+                and (ep + 1) % int(self.config.replay_save_every) == 0
+            )
+            replay_states = (
+                [self.env.capture_playback_state()] if capture_replay else []
+            )
+            replay_actions = [] if capture_replay else None
             if not self._run_metrics_initialized:
                 self._initialize_run_metrics(observations)
             self.logger.start_episode(
@@ -103,6 +113,10 @@ class MultiAgentTrainer:
                 }
 
                 next_obs, rewards, terminations, truncations, info = self.env.step(actions)
+                if capture_replay:
+                    replay_states.append(self.env.capture_playback_state())
+                    assert replay_actions is not None
+                    replay_actions.append({aid: int(a) for aid, a in actions.items()})
                 self.logger.log_step(
                     rewards,
                     terminations,
@@ -134,6 +148,15 @@ class MultiAgentTrainer:
 
             alive = {aid: self.env.state.agents[aid].alive for aid in self.env.possible_agents}
             summary = self.logger.end_episode(step_count=self.env.state.step_count, alive_agents=alive)
+            if capture_replay:
+                replay_paths.append(
+                    self._write_replay(
+                        episode=ep + 1,
+                        seed=self.config.seed + ep,
+                        frames=replay_states,
+                        action_history=replay_actions or [],
+                    )
+                )
 
             for policy in self.policies.values():
                 policy.decay_epsilon()
@@ -194,6 +217,7 @@ class MultiAgentTrainer:
             "aggregate": aggregate,
             "artifacts": artifact_paths,
             "checkpoint": checkpoint_path,
+            "replays": replay_paths,
         }
 
     def _initialize_run_metrics(self, observations: Dict[str, Dict[str, object]]) -> None:
@@ -331,3 +355,60 @@ class MultiAgentTrainer:
         payload = {aid: policy.to_dict() for aid, policy in self.policies.items()}
         p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return str(p)
+
+    def _write_replay(
+        self,
+        episode: int,
+        seed: int,
+        frames: list,
+        action_history: list[Dict[str, int]],
+    ) -> str:
+        out = Path(self.config.output_dir) / "replays"
+        out.mkdir(parents=True, exist_ok=True)
+        p = out / f"episode_{episode:06d}.replay.json"
+        payload = {
+            "schema_version": 1,
+            "episode": int(episode),
+            "seed": int(seed),
+            "frame_count": len(frames),
+            "frames": [self._serialize_state(s) for s in frames],
+            "actions": [{aid: int(a) for aid, a in x.items()} for x in action_history],
+        }
+        p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return str(p)
+
+    def _serialize_state(self, state) -> Dict[str, object]:
+        return {
+            "grid": state.grid,
+            "tile_interactions": [
+                {"position": [r, c], "count": count}
+                for (r, c), count in sorted(state.tile_interactions.items())
+            ],
+            "ground_items": [
+                {"position": [r, c], "items": list(items)}
+                for (r, c), items in sorted(state.ground_items.items())
+            ],
+            "agents": {
+                aid: {
+                    "agent_id": agent.agent_id,
+                    "position": [agent.position[0], agent.position[1]],
+                    "profile_name": agent.profile_name,
+                    "hp": agent.hp,
+                    "max_hp": agent.max_hp,
+                    "hunger": agent.hunger,
+                    "max_hunger": agent.max_hunger,
+                    "inventory": list(agent.inventory),
+                    "equipped": list(agent.equipped),
+                    "alive": agent.alive,
+                    "visited": [
+                        [r, c] for (r, c) in sorted(agent.visited)
+                    ],
+                    "wait_streak": agent.wait_streak,
+                    "recent_positions": [
+                        [r, c] for (r, c) in agent.recent_positions
+                    ],
+                }
+                for aid, agent in sorted(state.agents.items())
+            },
+            "step_count": state.step_count,
+        }

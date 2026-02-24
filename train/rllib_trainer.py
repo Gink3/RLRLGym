@@ -26,6 +26,7 @@ class RLlibTrainConfig:
     num_gpus: int = 0
     num_rollout_workers: int = 0
     train_batch_size: int = 4000
+    replay_save_every: int = 1000
 
 
 class RLlibTrainer:
@@ -98,6 +99,8 @@ class RLlibTrainer:
             "n_agents": self.config.n_agents,
             "render_enabled": False,
             "agent_profile_map": {"agent_0": "human", "agent_1": "orc"},
+            "replay_save_every": int(self.config.replay_save_every),
+            "replay_output_dir": str(Path(self.config.output_dir).resolve()),
         }
 
         self._register_env(env_name, lambda cfg: self._RLRLGymRLlibEnv(cfg))
@@ -307,6 +310,8 @@ class RLlibTrainer:
             "episodes_total": episodes_total_final,
             "checkpoint": checkpoint,
             "metrics": str(metrics_path),
+            "replay_dir": str((out / "replays").resolve()),
+            "replay_save_every": int(self.config.replay_save_every),
         }
         dashboard_path = out / "dashboard.html"
         dashboard_path.write_text(

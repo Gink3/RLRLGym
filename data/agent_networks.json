@@ -3,7 +3,7 @@
   "architectures": [
     {
       "name": "human",
-      "hidden_layers": [64, 32],
+      "hidden_layers": [128, 128],
       "activation": "relu",
       "learning_rate": 0.003,
       "gamma": 0.97,
@@ -13,7 +13,7 @@
     },
     {
       "name": "orc",
-      "hidden_layers": [32, 32],
+      "hidden_layers": [128, 128],
       "activation": "relu",
       "learning_rate": 0.003,
       "gamma": 0.97,

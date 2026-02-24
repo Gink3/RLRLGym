@@ -6,6 +6,7 @@ import copy
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from .constants import ACTION_NAMES
 from .models import EnvState, TileDef
 
 TK_COLORS = {
@@ -114,6 +115,7 @@ class RenderWindow:
 
         self._live_state: Optional[EnvState] = None
         self._playback_states: List[EnvState] = []
+        self._playback_actions: List[Dict[str, int]] = []
         self._cursor = 0
         self._playing = False
         self._focus_choices: List[str] = ["all"]
@@ -163,16 +165,29 @@ class RenderWindow:
         )
         self.zoom_scale.pack(side="left", fill="x", expand=True)
 
+        content = ttk.Frame(self.root)
+        content.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
         self.text = tk.Text(
-            self.root,
+            content,
             width=100,
             height=35,
             font=("Courier", 11),
             bg="#1e1e1e",
             fg="#ecf0f1",
         )
-        self.text.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.text.pack(side="left", fill="both", expand=True)
         self.text.configure(state="disabled")
+        self.action_log_text = tk.Text(
+            content,
+            width=48,
+            height=35,
+            font=("Courier", 10),
+            bg="#10161f",
+            fg="#dbe7ff",
+        )
+        self.action_log_text.pack(side="left", fill="y", padx=(8, 0))
+        self.action_log_text.configure(state="disabled")
 
         self._configure_color_tags()
 
@@ -228,6 +243,35 @@ class RenderWindow:
             zoom=int(self.zoom_var.get()),
         )
         self._draw_cells(cells)
+        self._redraw_action_log()
+
+    def _redraw_action_log(self) -> None:
+        self.action_log_text.configure(state="normal")
+        self.action_log_text.delete("1.0", self._tk.END)
+        self.action_log_text.insert(self._tk.END, "Recent Actions\n")
+        self.action_log_text.insert(self._tk.END, "--------------\n")
+
+        if not self._playback_states:
+            self.action_log_text.insert(self._tk.END, "No playback loaded.\n")
+        elif not self._playback_actions or self._cursor == 0:
+            self.action_log_text.insert(self._tk.END, "No actions yet.\n")
+        else:
+            total = min(len(self._playback_actions), self._cursor)
+            shown = 0
+            for step_idx in range(total, 0, -1):
+                acts = self._playback_actions[step_idx - 1]
+                step_num = step_idx
+                rendered = ", ".join(
+                    f"{aid}={ACTION_NAMES.get(int(a), str(a))}({int(a)})"
+                    for aid, a in sorted(acts.items())
+                )
+                self.action_log_text.insert(
+                    self._tk.END, f"step {step_num}: {rendered}\n"
+                )
+                shown += 1
+                if shown >= 25:
+                    break
+        self.action_log_text.configure(state="disabled")
 
     def update_state(
         self, state: EnvState, focus_choices: Optional[List[str]] = None
@@ -239,15 +283,20 @@ class RenderWindow:
         self.pump()
 
     def set_playback_states(
-        self, states: List[EnvState], focus_choices: Optional[List[str]] = None
+        self,
+        states: List[EnvState],
+        focus_choices: Optional[List[str]] = None,
+        action_log: Optional[List[Dict[str, int]]] = None,
     ) -> None:
         self._playback_states = [copy.deepcopy(state) for state in states]
+        self._playback_actions = [dict(x) for x in (action_log or [])]
         self._cursor = 0
         self._set_focus_choices(focus_choices)
         self._redraw()
 
     def clear_playback(self) -> None:
         self._playback_states = []
+        self._playback_actions = []
         self._cursor = 0
         self._playing = False
         self._redraw()
