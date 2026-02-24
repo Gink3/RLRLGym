@@ -31,8 +31,8 @@ from .tiles import load_tileset
 
 @dataclass
 class EnvConfig:
-    width: int = 24
-    height: int = 16
+    width: int = 50
+    height: int = 50
     max_steps: int = 150
     n_agents: int = 2
     tiles_path: str = str(Path("data") / "tiles.json")
@@ -54,7 +54,9 @@ class MultiAgentRLRLGym:
     def __init__(self, config: Optional[EnvConfig] = None) -> None:
         self.config = config or EnvConfig()
         self.tiles = load_tileset(self.config.tiles_path)
-        self.profiles: Dict[str, AgentProfile] = load_profiles(self.config.profiles_path)
+        self.profiles: Dict[str, AgentProfile] = load_profiles(
+            self.config.profiles_path
+        )
         self._rng = random.Random(0)
         self.possible_agents = [f"agent_{i}" for i in range(self.config.n_agents)]
         self.agents = list(self.possible_agents)
@@ -448,7 +450,9 @@ class MultiAgentRLRLGym:
         view_height = int(cfg.get("view_height", profile.view_height))
         include_grid = bool(cfg.get("include_grid", profile.include_grid))
         include_stats = bool(cfg.get("include_stats", profile.include_stats))
-        include_inventory = bool(cfg.get("include_inventory", profile.include_inventory))
+        include_inventory = bool(
+            cfg.get("include_inventory", profile.include_inventory)
+        )
         obs: Dict[str, object] = {"step": self.state.step_count, "alive": agent.alive}
         obs["profile"] = profile.name
 
@@ -466,7 +470,9 @@ class MultiAgentRLRLGym:
                 "position": agent.position,
                 "equipped_count": len(agent.equipped),
                 "nearby_item_counts": nearby_item_counts,
-                "tile_interaction_counts": self._tile_interaction_counts(agent.position),
+                "tile_interaction_counts": self._tile_interaction_counts(
+                    agent.position
+                ),
                 "teammate_distance": self._nearest_teammate_distance(aid),
             }
         if include_inventory:
@@ -528,7 +534,12 @@ class MultiAgentRLRLGym:
         start_c = cc - (width // 2)
         for r in range(start_r, start_r + height):
             for c in range(start_c, start_c + width):
-                if r < 0 or c < 0 or r >= len(self.state.grid) or c >= len(self.state.grid[0]):
+                if (
+                    r < 0
+                    or c < 0
+                    or r >= len(self.state.grid)
+                    or c >= len(self.state.grid[0])
+                ):
                     continue
                 for item in self.state.ground_items.get((r, c), []):
                     counts[item] = counts.get(item, 0) + 1
@@ -547,7 +558,9 @@ class MultiAgentRLRLGym:
         for other_id, other in self.state.agents.items():
             if other_id == aid or not other.alive:
                 continue
-            d = abs(actor.position[0] - other.position[0]) + abs(actor.position[1] - other.position[1])
+            d = abs(actor.position[0] - other.position[0]) + abs(
+                actor.position[1] - other.position[1]
+            )
             distances.append(d)
         if not distances:
             return None

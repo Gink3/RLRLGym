@@ -40,6 +40,8 @@ class RLlibTrainer:
             from ray import air
             from ray.rllib.algorithms.callbacks import DefaultCallbacks
             from ray.rllib.algorithms.ppo import PPOConfig
+            from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec
+            from ray.rllib.core.rl_module.rl_module import RLModuleSpec
             from ray.tune.registry import register_env
             from rlrlgym.rllib_env import RLRLGymRLlibEnv
         except Exception as exc:  # pragma: no cover - dependency/runtime specific
@@ -52,6 +54,8 @@ class RLlibTrainer:
         self._air = air
         self._DefaultCallbacks = DefaultCallbacks
         self._PPOConfig = PPOConfig
+        self._MultiRLModuleSpec = MultiRLModuleSpec
+        self._RLModuleSpec = RLModuleSpec
         self._register_env = register_env
         self._RLRLGymRLlibEnv = RLRLGymRLlibEnv
         self._configure_ray_storage_defaults()
@@ -59,6 +63,8 @@ class RLlibTrainer:
         logging.getLogger("ray.rllib.algorithms.algorithm_config").setLevel(logging.ERROR)
         logging.getLogger("ray.tune.logger.unified").setLevel(logging.ERROR)
         logging.getLogger("ray.rllib.utils.deprecation").setLevel(logging.ERROR)
+        logging.getLogger("ray._common.deprecation").setLevel(logging.ERROR)
+        logging.getLogger("ray.rllib.core.rl_module.rl_module").setLevel(logging.ERROR)
         logging.getLogger("ray.rllib.utils.sgd").setLevel(logging.ERROR)
 
     def _configure_ray_storage_defaults(self) -> None:
@@ -135,6 +141,22 @@ class RLlibTrainer:
         warnings.filterwarnings("ignore", category=FutureWarning, module=r"ray\..*")
 
         policy_ids = ["human_policy", "orc_policy"]
+        rl_module_spec = self._MultiRLModuleSpec(
+            rl_module_specs={
+                "human_policy": self._RLModuleSpec(
+                    observation_space=sample_obs_space,
+                    action_space=sample_action_space,
+                    inference_only=False,
+                    model_config={},
+                ),
+                "orc_policy": self._RLModuleSpec(
+                    observation_space=sample_obs_space,
+                    action_space=sample_action_space,
+                    inference_only=False,
+                    model_config={},
+                ),
+            }
+        )
 
         def policy_mapping_fn(agent_id, *args, **kwargs):
             return "human_policy" if agent_id == "agent_0" else "orc_policy"
@@ -150,22 +172,10 @@ class RLlibTrainer:
             .resources(num_gpus=self.config.num_gpus)
             .env_runners(num_env_runners=self.config.num_rollout_workers)
             .training(train_batch_size=self.config.train_batch_size)
+            .rl_module(rl_module_spec=rl_module_spec)
             .callbacks(MetricsCallbacks)
             .multi_agent(
-                policies={
-                    "human_policy": (
-                        None,
-                        sample_obs_space,
-                        sample_action_space,
-                        {},
-                    ),
-                    "orc_policy": (
-                        None,
-                        sample_obs_space,
-                        sample_action_space,
-                        {},
-                    ),
-                },
+                policies=policy_ids,
                 policy_mapping_fn=policy_mapping_fn,
                 policies_to_train=policy_ids,
             )
