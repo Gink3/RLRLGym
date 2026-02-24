@@ -111,3 +111,61 @@ Given existing systems (tiles, interactions, inventory, hunger):
 2) Add **doors/walls** in mapgen
 3) Add **LOS-limited** observations
 
+## Experiment Tracking: Model Size Across Runs
+
+Goal: track how big the learned policies are across training runs (architecture + parameter count).
+
+### Where the model is saved
+- Each training run writes: `outputs/train/neural_policies.json` via `MultiAgentTrainer._write_checkpoint()`.
+- This checkpoint includes per-agent:
+  - `config.hidden_layers`, `activation`, etc.
+  - `network.weights` and `network.biases` (so you can compute exact param counts)
+
+### Recommended “size” metrics
+1) **Parameter count** (best apples-to-apples):
+   - For each layer: `dout * din` (weights) + `dout` (biases)
+   - Total params = sum over layers of `dout * (din + 1)`
+2) **Checkpoint file size (bytes)** as a quick sanity check (less clean than params)
+3) **Architecture signature**: `input_dim -> hidden_layers -> output_dim`
+
+### Minimal script to compute param counts
+Save as `scripts/model_size.py`:
+
+```python
+import json
+import os
+import sys
+
+def count_params(net):
+    weights = net.get("weights", [])  # [layer][out][in]
+    biases = net.get("biases", [])
+    wcount = sum(len(out_row) for layer in weights for out_row in layer)
+    bcount = sum(len(layer_b) for layer_b in biases)
+    return wcount + bcount, wcount, bcount
+
+path = sys.argv[1] if len(sys.argv) > 1 else "outputs/train/neural_policies.json"
+with open(path, "r") as f:
+    data = json.load(f)
+
+print(f"checkpoint: {path}")
+print(f"file_bytes: {os.path.getsize(path)}")
+
+for aid, payload in data.items():
+    net = payload.get("network")
+    cfg = payload.get("config", {})
+    if not net:
+        print(f"{aid}: (no network saved)")
+        continue
+    total, w, b = count_params(net)
+    print(
+        f"{aid}: params={total} (W={w}, b={b}) "
+        f"arch={net['input_dim']}->{cfg.get('hidden_layers')}->{net['output_dim']} act={cfg.get('activation')}"
+    )
+```
+
+Run:
+- `python scripts/model_size.py outputs/train/neural_policies.json`
+
+### Automation idea
+- Write `model_sizes.json` next to the checkpoint each run, or add `param_count` into the checkpoint payload for easy aggregation.
+
