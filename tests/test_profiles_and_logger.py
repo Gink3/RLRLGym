@@ -36,7 +36,7 @@ class TestProfilesAndLogger(unittest.TestCase):
 
     def test_training_logger_outputs(self):
         logger = TrainingLogger(output_dir="outputs_test")
-        logger.start_episode(["agent_0", "agent_1"])
+        logger.start_episode(["agent_0", "agent_1"], agent_profiles={"agent_0": "human", "agent_1": "orc"})
         logger.log_step(
             rewards={"agent_0": 0.2, "agent_1": -0.1},
             terminations={"agent_0": False, "agent_1": False},
@@ -60,6 +60,9 @@ class TestProfilesAndLogger(unittest.TestCase):
         self.assertEqual(agg["action_histogram"]["wait"], 2)
         self.assertEqual(agg["action_histogram"]["pickup"], 1)
         self.assertEqual(agg["action_histogram"]["loot"], 1)
+        self.assertEqual(agg["human_win_rate"], 1.0)
+        self.assertEqual(agg["orc_win_rate"], 0.0)
+        self.assertEqual(agg["tie_rate"], 0.0)
 
         with tempfile.TemporaryDirectory() as tmp:
             logger.output_dir = str(Path(tmp) / "out")
@@ -69,6 +72,7 @@ class TestProfilesAndLogger(unittest.TestCase):
             self.assertTrue(Path(paths["summary"]).exists())
             self.assertTrue(Path(paths["html"]).exists())
             csv_text = Path(paths["csv"]).read_text(encoding="utf-8")
+            self.assertIn("outcome", csv_text)
             self.assertIn("action_wait", csv_text)
             self.assertIn("action_pickup", csv_text)
             jsonl_text = Path(paths["jsonl"]).read_text(encoding="utf-8")

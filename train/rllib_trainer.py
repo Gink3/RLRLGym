@@ -300,12 +300,20 @@ class RLlibTrainer:
 
         metrics_path = out / "rllib_metrics.json"
         metrics_path.write_text(json.dumps(metrics_rows, indent=2), encoding="utf-8")
+        episodes_total_final = int(metrics_rows[-1]["episodes_total"]) if metrics_rows else 0
 
         summary = {
             "iterations": self.config.iterations,
+            "episodes_total": episodes_total_final,
             "checkpoint": checkpoint,
             "metrics": str(metrics_path),
         }
+        dashboard_path = out / "dashboard.html"
+        dashboard_path.write_text(
+            self._build_dashboard_html(metrics_rows=metrics_rows, summary=summary),
+            encoding="utf-8",
+        )
+        summary["dashboard"] = str(dashboard_path)
         summary_path = out / "summary.json"
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
@@ -382,3 +390,108 @@ class RLlibTrainer:
             f"episodes_total={episodes_total}"
         )
         print(line, end="", flush=True)
+
+    def _build_dashboard_html(self, metrics_rows: list[dict], summary: dict) -> str:
+        episodes_total = int(summary.get("episodes_total", 0))
+        iterations = int(summary.get("iterations", 0))
+        latest = metrics_rows[-1] if metrics_rows else {}
+        latest_reward = float(latest.get("episode_reward_mean", 0.0) or 0.0)
+        latest_win = float(latest.get("win_rate", 0.0) or 0.0)
+        latest_starve = float(latest.get("starvation_rate", 0.0) or 0.0)
+        latest_loss = float(latest.get("loss", 0.0) or 0.0)
+        reward_curve = [round(float(r.get("episode_reward_mean", 0.0) or 0.0), 4) for r in metrics_rows]
+
+        rows_html = "".join(
+            [
+                "<tr>"
+                f"<td>{int(r.get('iteration', 0))}</td>"
+                f"<td>{int(float(r.get('episodes_total', 0) or 0))}</td>"
+                f"<td>{float(r.get('episode_reward_mean', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('win_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('starvation_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('loss', 0.0) or 0.0):.6f}</td>"
+                "</tr>"
+                for r in metrics_rows
+            ]
+        )
+
+        return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>RLRLGym RLlib Dashboard</title>
+  <style>
+    :root {{
+      --bg: #12161d;
+      --surface: #1d2430;
+      --border: #2f3a4d;
+      --text: #f2f7ff;
+      --muted: #9eb0cb;
+      --accent: #41c79d;
+    }}
+    body {{
+      font-family: -apple-system, Segoe UI, sans-serif;
+      margin: 24px;
+      background: var(--bg);
+      color: var(--text);
+    }}
+    .card {{
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 16px;
+    }}
+    .metric {{
+      display: inline-block;
+      margin-right: 16px;
+      margin-bottom: 6px;
+      font-weight: 700;
+      color: var(--accent);
+    }}
+    table {{ border-collapse: collapse; width: 100%; }}
+    th, td {{
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      text-align: left;
+      font-size: 13px;
+    }}
+    th {{ background: #273247; }}
+    pre {{
+      margin: 0;
+      padding: 10px;
+      border-radius: 8px;
+      background: #10161f;
+      border: 1px solid var(--border);
+      color: #d4def0;
+      overflow-x: auto;
+    }}
+  </style>
+</head>
+<body>
+  <h1>RLRLGym RLlib Dashboard</h1>
+  <div class="card">
+    <div class="metric">Episodes (from episodes_total): {episodes_total}</div>
+    <div class="metric">Iterations: {iterations}</div>
+    <div class="metric">Latest reward: {latest_reward:.4f}</div>
+    <div class="metric">Latest win rate: {latest_win:.4f}</div>
+    <div class="metric">Latest starvation rate: {latest_starve:.4f}</div>
+    <div class="metric">Latest loss: {latest_loss:.6f}</div>
+  </div>
+  <div class="card">
+    <h3>Reward Curve (per iteration)</h3>
+    <pre>{reward_curve}</pre>
+  </div>
+  <div class="card">
+    <h3>Iteration Metrics</h3>
+    <table>
+      <thead>
+        <tr><th>Iteration</th><th>Episodes Total</th><th>Reward Mean</th><th>Win Rate</th><th>Starvation Rate</th><th>Loss</th></tr>
+      </thead>
+      <tbody>
+        {rows_html}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>"""

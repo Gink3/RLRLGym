@@ -122,6 +122,11 @@ class MLPQNetwork:
             "biases": self.biases,
         }
 
+    def parameter_count(self) -> int:
+        weight_params = sum(len(row) for layer in self.weights for row in layer)
+        bias_params = sum(len(layer) for layer in self.biases)
+        return int(weight_params + bias_params)
+
 
 @dataclass
 class NeuralQPolicy:
@@ -151,6 +156,14 @@ class NeuralQPolicy:
             learning_rate=self.net_cfg.learning_rate,
             seed=self.seed,
         )
+
+    def ensure_initialized(self, observation: Dict[str, object]) -> None:
+        self._ensure_network(observation)
+
+    def parameter_count(self) -> int:
+        if self.network is None:
+            return 0
+        return self.network.parameter_count()
 
     def act(self, observation: Dict[str, object], training: bool = True) -> int:
         self._ensure_network(observation)

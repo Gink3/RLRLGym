@@ -57,6 +57,7 @@ class MultiAgentTrainer:
                 net_cfg=self.network_cfgs[profile],
                 seed=config.seed + i,
             )
+        self._run_metrics_initialized = False
 
     def train(self) -> Dict[str, object]:
         window = max(1, int(self.config.progress_window))
@@ -70,7 +71,12 @@ class MultiAgentTrainer:
 
         for ep in range(self.config.episodes):
             observations, _ = self.env.reset(seed=self.config.seed + ep)
-            self.logger.start_episode(self.env.possible_agents)
+            if not self._run_metrics_initialized:
+                self._initialize_run_metrics(observations)
+            self.logger.start_episode(
+                self.env.possible_agents,
+                agent_profiles={aid: self.env.state.agents[aid].profile_name for aid in self.env.possible_agents},
+            )
             episode_losses: list[float] = []
             episode_teammate_dist: list[float] = []
             episode_agent_returns = {aid: 0.0 for aid in self.env.possible_agents}
@@ -189,6 +195,25 @@ class MultiAgentTrainer:
             "artifacts": artifact_paths,
             "checkpoint": checkpoint_path,
         }
+
+    def _initialize_run_metrics(self, observations: Dict[str, Dict[str, object]]) -> None:
+        # Build policy networks once from first observations, then capture static size metadata.
+        for aid in self.env.possible_agents:
+            self.policies[aid].ensure_initialized(observations[aid])
+
+        profile_param_counts: Dict[str, int] = {}
+        for aid in self.env.possible_agents:
+            profile = self.env.state.agents[aid].profile_name
+            if profile in profile_param_counts:
+                continue
+            profile_param_counts[profile] = self.policies[aid].parameter_count()
+
+        self.logger.set_run_metrics(
+            {
+                "network_parameter_counts": profile_param_counts,
+            }
+        )
+        self._run_metrics_initialized = True
 
     def _print_live_progress(
         self,

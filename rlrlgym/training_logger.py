@@ -18,6 +18,7 @@ class EpisodeSummary:
     team_return: float
     per_agent_return: Dict[str, float]
     win: bool
+    outcome: str
     mean_survival_time: float
     cause_of_death: Dict[str, str]
     action_counts: Dict[str, int]
@@ -32,17 +33,27 @@ class TrainingLogger:
     _death_cause: Dict[str, str] = field(default_factory=dict)
     _survival_steps: Dict[str, int] = field(default_factory=dict)
     _action_counts: Dict[str, int] = field(default_factory=dict)
+    _agent_profiles: Dict[str, str] = field(default_factory=dict)
+    _run_metrics: Dict[str, object] = field(default_factory=dict)
 
     @staticmethod
     def _action_keys() -> List[str]:
         return [ACTION_NAMES[k] for k in sorted(ACTION_NAMES.keys())]
 
-    def start_episode(self, agent_ids: List[str]) -> None:
+    def set_run_metrics(self, metrics: Dict[str, object]) -> None:
+        self._run_metrics = dict(metrics)
+
+    def start_episode(
+        self,
+        agent_ids: List[str],
+        agent_profiles: Dict[str, str] | None = None,
+    ) -> None:
         self._episode += 1
         self._returns = {aid: 0.0 for aid in agent_ids}
         self._death_cause = {aid: "alive" for aid in agent_ids}
         self._survival_steps = {aid: 0 for aid in agent_ids}
         self._action_counts = {name: 0 for name in self._action_keys()}
+        self._agent_profiles = dict(agent_profiles or {})
 
     def log_step(
         self,
@@ -54,6 +65,10 @@ class TrainingLogger:
     ) -> None:
         for aid, reward in rewards.items():
             self._returns[aid] = self._returns.get(aid, 0.0) + float(reward)
+            if aid not in self._agent_profiles:
+                profile = info.get(aid, {}).get("profile")
+                if isinstance(profile, str):
+                    self._agent_profiles[aid] = profile
 
         for aid in self._survival_steps:
             done = bool(terminations.get(aid, False) or truncations.get(aid, False))
@@ -78,6 +93,22 @@ class TrainingLogger:
     def end_episode(self, step_count: int, alive_agents: Dict[str, bool]) -> EpisodeSummary:
         team_return = sum(self._returns.values())
         win = any(alive_agents.values())
+        human_alive = any(
+            bool(alive_agents.get(aid, False))
+            for aid, profile in self._agent_profiles.items()
+            if profile == "human"
+        )
+        orc_alive = any(
+            bool(alive_agents.get(aid, False))
+            for aid, profile in self._agent_profiles.items()
+            if profile == "orc"
+        )
+        if human_alive and not orc_alive:
+            outcome = "human_win"
+        elif orc_alive and not human_alive:
+            outcome = "orc_win"
+        else:
+            outcome = "tie"
         mean_survival = sum(self._survival_steps.values()) / max(1, len(self._survival_steps))
         summary = EpisodeSummary(
             episode=self._episode,
@@ -85,6 +116,7 @@ class TrainingLogger:
             team_return=team_return,
             per_agent_return=dict(self._returns),
             win=win,
+            outcome=outcome,
             mean_survival_time=mean_survival,
             cause_of_death=dict(self._death_cause),
             action_counts=dict(self._action_counts),
@@ -97,13 +129,20 @@ class TrainingLogger:
             return {
                 "episodes": 0,
                 "win_rate": 0.0,
+                "human_win_rate": 0.0,
+                "orc_win_rate": 0.0,
+                "tie_rate": 0.0,
                 "mean_team_return": 0.0,
                 "mean_survival_time": 0.0,
                 "cause_of_death_histogram": {},
                 "action_histogram": {},
+                "run_metrics": dict(self._run_metrics),
             }
 
         wins = sum(1 for e in self.episode_summaries if e.win)
+        human_wins = sum(1 for e in self.episode_summaries if e.outcome == "human_win")
+        orc_wins = sum(1 for e in self.episode_summaries if e.outcome == "orc_win")
+        ties = sum(1 for e in self.episode_summaries if e.outcome == "tie")
         mean_return = sum(e.team_return for e in self.episode_summaries) / len(self.episode_summaries)
         mean_survival = sum(e.mean_survival_time for e in self.episode_summaries) / len(self.episode_summaries)
 
@@ -119,10 +158,14 @@ class TrainingLogger:
         return {
             "episodes": len(self.episode_summaries),
             "win_rate": wins / len(self.episode_summaries),
+            "human_win_rate": human_wins / len(self.episode_summaries),
+            "orc_win_rate": orc_wins / len(self.episode_summaries),
+            "tie_rate": ties / len(self.episode_summaries),
             "mean_team_return": mean_return,
             "mean_survival_time": mean_survival,
             "cause_of_death_histogram": cod,
             "action_histogram": actions,
+            "run_metrics": dict(self._run_metrics),
         }
 
     def write_outputs(self) -> Dict[str, str]:
@@ -138,7 +181,7 @@ class TrainingLogger:
         all_agents = sorted({aid for e in self.episode_summaries for aid in e.per_agent_return})
         all_actions = sorted({k for e in self.episode_summaries for k in e.action_counts.keys()})
         with csv_path.open("w", newline="", encoding="utf-8") as f:
-            fieldnames = ["episode", "steps", "team_return", "win", "mean_survival_time"] + [
+            fieldnames = ["episode", "steps", "team_return", "win", "outcome", "mean_survival_time"] + [
                 f"return_{aid}" for aid in all_agents
             ] + [f"action_{action_name}" for action_name in all_actions]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -149,6 +192,7 @@ class TrainingLogger:
                     "steps": e.steps,
                     "team_return": round(e.team_return, 5),
                     "win": int(e.win),
+                    "outcome": e.outcome,
                     "mean_survival_time": round(e.mean_survival_time, 5),
                 }
                 for aid in all_agents:
@@ -253,9 +297,15 @@ class TrainingLogger:
   <h1>RLRLGym Training Dashboard</h1>
   <div class=\"card\">
     <div class=\"metric\">Episodes: {aggregate['episodes']}</div>
-    <div class=\"metric\">Win rate: {aggregate['win_rate']:.3f}</div>
+    <div class=\"metric\">Human win rate: {aggregate['human_win_rate']:.3f}</div>
+    <div class=\"metric\">Orc win rate: {aggregate['orc_win_rate']:.3f}</div>
+    <div class=\"metric\">Tie rate: {aggregate['tie_rate']:.3f}</div>
     <div class=\"metric\">Mean team return: {aggregate['mean_team_return']:.3f}</div>
     <div class=\"metric\">Mean survival time: {aggregate['mean_survival_time']:.3f}</div>
+  </div>
+  <div class=\"card\">
+    <h3>Model Size</h3>
+    <pre>{json.dumps(aggregate.get("run_metrics", {}), indent=2)}</pre>
   </div>
   <div class=\"card\">
     <h3>Episode Return Curve</h3>
@@ -272,9 +322,9 @@ class TrainingLogger:
   <div class=\"card\">
     <h3>Episode Table</h3>
     <table>
-      <thead><tr><th>Episode</th><th>Steps</th><th>Team Return</th><th>Win</th><th>Mean Survival</th><th>Cause Of Death</th><th>Action Counts</th></tr></thead>
+      <thead><tr><th>Episode</th><th>Steps</th><th>Team Return</th><th>Outcome</th><th>Mean Survival</th><th>Cause Of Death</th><th>Action Counts</th></tr></thead>
       <tbody>
-        {''.join([f'<tr><td>{e["episode"]}</td><td>{e["steps"]}</td><td>{e["team_return"]:.3f}</td><td>{int(e["win"])}</td><td>{e["mean_survival_time"]:.3f}</td><td>{e["cause_of_death"]}</td><td>{e["action_counts"]}</td></tr>' for e in data])}
+        {''.join([f'<tr><td>{e["episode"]}</td><td>{e["steps"]}</td><td>{e["team_return"]:.3f}</td><td>{e["outcome"]}</td><td>{e["mean_survival_time"]:.3f}</td><td>{e["cause_of_death"]}</td><td>{e["action_counts"]}</td></tr>' for e in data])}
       </tbody>
     </table>
   </div>

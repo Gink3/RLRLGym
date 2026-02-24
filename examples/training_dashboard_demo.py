@@ -13,7 +13,10 @@ from rlrlgym import EnvConfig, PettingZooParallelRLRLGym, TrainingLogger
 
 def run_episode(env: PettingZooParallelRLRLGym, logger: TrainingLogger, seed: int) -> None:
     env.reset(seed=seed)
-    logger.start_episode(env.possible_agents)
+    logger.start_episode(
+        env.possible_agents,
+        agent_profiles={aid: env.state.agents[aid].profile_name for aid in env.possible_agents},
+    )
     rng = random.Random(seed)
 
     for _ in range(env.config.max_steps):

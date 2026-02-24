@@ -23,6 +23,13 @@ class TestTrainModule(unittest.TestCase):
             self.assertIn("aggregate", result)
             self.assertIn("artifacts", result)
             self.assertIn("checkpoint", result)
+            self.assertIn("run_metrics", result["aggregate"])
+            self.assertIn("network_parameter_counts", result["aggregate"]["run_metrics"])
+            counts = result["aggregate"]["run_metrics"]["network_parameter_counts"]
+            self.assertIn("human", counts)
+            self.assertIn("orc", counts)
+            self.assertGreater(counts["human"], 0)
+            self.assertGreater(counts["orc"], 0)
             self.assertTrue(Path(result["checkpoint"]).exists())
             self.assertTrue(result["checkpoint"].endswith("neural_policies.json"))
             self.assertTrue(Path(result["artifacts"]["summary"]).exists())
