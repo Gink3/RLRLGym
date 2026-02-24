@@ -19,7 +19,7 @@ def run_episode(env: PettingZooParallelRLRLGym, logger: TrainingLogger, seed: in
     for _ in range(env.config.max_steps):
         actions = {aid: rng.randint(0, 10) for aid in env.agents}
         _, rewards, terminations, truncations, info = env.step(actions)
-        logger.log_step(rewards, terminations, truncations, info)
+        logger.log_step(rewards, terminations, truncations, info, actions=actions)
 
         if not env.agents:
             break

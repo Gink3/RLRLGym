@@ -97,7 +97,13 @@ class MultiAgentTrainer:
                 }
 
                 next_obs, rewards, terminations, truncations, info = self.env.step(actions)
-                self.logger.log_step(rewards, terminations, truncations, info)
+                self.logger.log_step(
+                    rewards,
+                    terminations,
+                    truncations,
+                    info,
+                    actions=actions,
+                )
                 for aid, reward in rewards.items():
                     episode_agent_returns[aid] += float(reward)
                 for aid in self.env.possible_agents:

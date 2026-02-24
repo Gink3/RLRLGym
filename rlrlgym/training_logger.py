@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List
 
+from .constants import ACTION_NAMES
+
 
 @dataclass
 class EpisodeSummary:
@@ -18,6 +20,7 @@ class EpisodeSummary:
     win: bool
     mean_survival_time: float
     cause_of_death: Dict[str, str]
+    action_counts: Dict[str, int]
 
 
 @dataclass
@@ -28,12 +31,18 @@ class TrainingLogger:
     _returns: Dict[str, float] = field(default_factory=dict)
     _death_cause: Dict[str, str] = field(default_factory=dict)
     _survival_steps: Dict[str, int] = field(default_factory=dict)
+    _action_counts: Dict[str, int] = field(default_factory=dict)
+
+    @staticmethod
+    def _action_keys() -> List[str]:
+        return [ACTION_NAMES[k] for k in sorted(ACTION_NAMES.keys())]
 
     def start_episode(self, agent_ids: List[str]) -> None:
         self._episode += 1
         self._returns = {aid: 0.0 for aid in agent_ids}
         self._death_cause = {aid: "alive" for aid in agent_ids}
         self._survival_steps = {aid: 0 for aid in agent_ids}
+        self._action_counts = {name: 0 for name in self._action_keys()}
 
     def log_step(
         self,
@@ -41,6 +50,7 @@ class TrainingLogger:
         terminations: Dict[str, bool],
         truncations: Dict[str, bool],
         info: Dict[str, Dict[str, object]],
+        actions: Dict[str, int] | None = None,
     ) -> None:
         for aid, reward in rewards.items():
             self._returns[aid] = self._returns.get(aid, 0.0) + float(reward)
@@ -60,6 +70,11 @@ class TrainingLogger:
                 else:
                     self._death_cause[aid] = "unknown"
 
+        if actions:
+            for action in actions.values():
+                action_name = ACTION_NAMES.get(int(action), f"unknown_{int(action)}")
+                self._action_counts[action_name] = self._action_counts.get(action_name, 0) + 1
+
     def end_episode(self, step_count: int, alive_agents: Dict[str, bool]) -> EpisodeSummary:
         team_return = sum(self._returns.values())
         win = any(alive_agents.values())
@@ -72,6 +87,7 @@ class TrainingLogger:
             win=win,
             mean_survival_time=mean_survival,
             cause_of_death=dict(self._death_cause),
+            action_counts=dict(self._action_counts),
         )
         self.episode_summaries.append(summary)
         return summary
@@ -84,6 +100,7 @@ class TrainingLogger:
                 "mean_team_return": 0.0,
                 "mean_survival_time": 0.0,
                 "cause_of_death_histogram": {},
+                "action_histogram": {},
             }
 
         wins = sum(1 for e in self.episode_summaries if e.win)
@@ -94,6 +111,10 @@ class TrainingLogger:
         for e in self.episode_summaries:
             for cause in e.cause_of_death.values():
                 cod[cause] = cod.get(cause, 0) + 1
+        actions: Dict[str, int] = {}
+        for e in self.episode_summaries:
+            for action_name, count in e.action_counts.items():
+                actions[action_name] = actions.get(action_name, 0) + int(count)
 
         return {
             "episodes": len(self.episode_summaries),
@@ -101,6 +122,7 @@ class TrainingLogger:
             "mean_team_return": mean_return,
             "mean_survival_time": mean_survival,
             "cause_of_death_histogram": cod,
+            "action_histogram": actions,
         }
 
     def write_outputs(self) -> Dict[str, str]:
@@ -114,10 +136,11 @@ class TrainingLogger:
 
         csv_path = out / "episodes.csv"
         all_agents = sorted({aid for e in self.episode_summaries for aid in e.per_agent_return})
+        all_actions = sorted({k for e in self.episode_summaries for k in e.action_counts.keys()})
         with csv_path.open("w", newline="", encoding="utf-8") as f:
             fieldnames = ["episode", "steps", "team_return", "win", "mean_survival_time"] + [
                 f"return_{aid}" for aid in all_agents
-            ]
+            ] + [f"action_{action_name}" for action_name in all_actions]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for e in self.episode_summaries:
@@ -130,6 +153,8 @@ class TrainingLogger:
                 }
                 for aid in all_agents:
                     row[f"return_{aid}"] = round(e.per_agent_return.get(aid, 0.0), 5)
+                for action_name in all_actions:
+                    row[f"action_{action_name}"] = int(e.action_counts.get(action_name, 0))
                 writer.writerow(row)
 
         html_path = out / "dashboard.html"
@@ -241,11 +266,15 @@ class TrainingLogger:
     {''.join([f'<div class=\"hist-label\">{k}: {v}</div><div class=\"bar\" style=\"width:{20 + v * 20}px\"></div>' for k, v in aggregate['cause_of_death_histogram'].items()])}
   </div>
   <div class=\"card\">
+    <h3>Total Action Usage</h3>
+    <pre>{json.dumps(aggregate["action_histogram"], indent=2)}</pre>
+  </div>
+  <div class=\"card\">
     <h3>Episode Table</h3>
     <table>
-      <thead><tr><th>Episode</th><th>Steps</th><th>Team Return</th><th>Win</th><th>Mean Survival</th><th>Cause Of Death</th></tr></thead>
+      <thead><tr><th>Episode</th><th>Steps</th><th>Team Return</th><th>Win</th><th>Mean Survival</th><th>Cause Of Death</th><th>Action Counts</th></tr></thead>
       <tbody>
-        {''.join([f'<tr><td>{e["episode"]}</td><td>{e["steps"]}</td><td>{e["team_return"]:.3f}</td><td>{int(e["win"])}</td><td>{e["mean_survival_time"]:.3f}</td><td>{e["cause_of_death"]}</td></tr>' for e in data])}
+        {''.join([f'<tr><td>{e["episode"]}</td><td>{e["steps"]}</td><td>{e["team_return"]:.3f}</td><td>{int(e["win"])}</td><td>{e["mean_survival_time"]:.3f}</td><td>{e["cause_of_death"]}</td><td>{e["action_counts"]}</td></tr>' for e in data])}
       </tbody>
     </table>
   </div>

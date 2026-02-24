@@ -42,12 +42,14 @@ class TestProfilesAndLogger(unittest.TestCase):
             terminations={"agent_0": False, "agent_1": False},
             truncations={"agent_0": False, "agent_1": False},
             info={"agent_0": {"events": []}, "agent_1": {"events": []}},
+            actions={"agent_0": 4, "agent_1": 7},
         )
         logger.log_step(
             rewards={"agent_0": 0.1, "agent_1": -1.0},
             terminations={"agent_0": False, "agent_1": True},
             truncations={"agent_0": False, "agent_1": False},
             info={"agent_0": {"events": []}, "agent_1": {"events": ["death", "starve_tick"]}},
+            actions={"agent_0": 5, "agent_1": 4},
         )
         logger.end_episode(step_count=2, alive_agents={"agent_0": True, "agent_1": False})
 
@@ -55,6 +57,9 @@ class TestProfilesAndLogger(unittest.TestCase):
         self.assertEqual(agg["episodes"], 1)
         self.assertGreater(agg["mean_team_return"], -1.0)
         self.assertIn("starvation", agg["cause_of_death_histogram"])
+        self.assertEqual(agg["action_histogram"]["wait"], 2)
+        self.assertEqual(agg["action_histogram"]["pickup"], 1)
+        self.assertEqual(agg["action_histogram"]["loot"], 1)
 
         with tempfile.TemporaryDirectory() as tmp:
             logger.output_dir = str(Path(tmp) / "out")
@@ -63,6 +68,11 @@ class TestProfilesAndLogger(unittest.TestCase):
             self.assertTrue(Path(paths["jsonl"]).exists())
             self.assertTrue(Path(paths["summary"]).exists())
             self.assertTrue(Path(paths["html"]).exists())
+            csv_text = Path(paths["csv"]).read_text(encoding="utf-8")
+            self.assertIn("action_wait", csv_text)
+            self.assertIn("action_pickup", csv_text)
+            jsonl_text = Path(paths["jsonl"]).read_text(encoding="utf-8")
+            self.assertIn("\"action_counts\"", jsonl_text)
 
 
 if __name__ == "__main__":
