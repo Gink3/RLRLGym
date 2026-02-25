@@ -251,16 +251,9 @@ class RLlibTrainer:
                         else:
                             death_counts["other"] += 1
 
-                if winner_tag is None and alive_flags:
-                    # Fallback for episodes lacking explicit winner tag in events.
-                    n_alive = int(sum(1 for v in alive_flags if v > 0))
-                    if n_alive == 0:
-                        winner_tag = "tie"
-                    elif n_alive == 1:
-                        # Ambiguous without explicit tag; leave as tie fallback.
-                        winner_tag = "tie"
-                    else:
-                        winner_tag = "tie"
+                if winner_tag is None:
+                    # If no explicit winner event was emitted, treat as tie.
+                    winner_tag = "tie"
                 self._emit_metric(
                     episode, metrics_logger, "agent0_win", 1.0 if winner_tag == "agent_0" else 0.0
                 )
@@ -459,7 +452,7 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
-            tie_rate = self._extract_float(
+            tie_metric_raw = self._extract_float(
                 result,
                 [
                     ("custom_metrics", "tie_mean"),
@@ -469,6 +462,11 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
+            # For two-agent episodes with mutually exclusive outcomes, derive tie
+            # directly from wins to avoid callback metric key drift.
+            tie_rate = max(0.0, min(1.0, 1.0 - agent0_win - agent1_win))
+            if tie_metric_raw > 0.0:
+                tie_rate = float(tie_metric_raw)
             action_wait_rate = self._extract_float(
                 result,
                 [
