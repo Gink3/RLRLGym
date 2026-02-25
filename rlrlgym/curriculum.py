@@ -36,6 +36,7 @@ OPTIONAL_PHASE_FIELDS = {
     "lost_enemy_penalty": float,
     "timeout_tie_penalty": float,
     "engagement_bonus": float,
+    "monster_sight_range": int,
 }
 
 

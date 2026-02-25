@@ -16,6 +16,7 @@
     "agent_profile_map": {},
     "agent_race_map": {},
     "agent_class_map": {},
+    "monster_sight_range": 7,
     "new_tile_seen_reward": 0.02,
     "frontier_step_reward": 0.008,
     "stagnation_penalty": 0.01,

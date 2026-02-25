@@ -133,6 +133,7 @@ class EnvConfig:
     agent_profile_map: Dict[str, str] = field(default_factory=dict)
     agent_race_map: Dict[str, str] = field(default_factory=dict)
     agent_class_map: Dict[str, str] = field(default_factory=dict)
+    monster_sight_range: int = 7
     combat_training_mode: bool = False
     hunger_tick_enabled: bool = True
     missed_attack_opportunity_penalty: float = 0.03
@@ -1702,9 +1703,13 @@ class MultiAgentRLRLGym:
                 monster.alive = False
                 continue
 
-            target_id = self._nearest_alive_agent_id(monster.position)
+            target_id = self._nearest_alive_agent_id(
+                monster.position,
+                max_range=max(1, int(self.config.monster_sight_range)),
+            )
             if target_id is None:
-                return
+                self._monster_random_move(monster, info)
+                continue
             target = self.state.agents[target_id]
             dist = self._manhattan(monster.position, target.position)
             if dist == 1:
@@ -1712,7 +1717,9 @@ class MultiAgentRLRLGym:
             else:
                 self._monster_move_toward_target(monster, target.position, info)
 
-    def _nearest_alive_agent_id(self, position: Tuple[int, int]) -> str | None:
+    def _nearest_alive_agent_id(
+        self, position: Tuple[int, int], max_range: int | None = None
+    ) -> str | None:
         assert self.state is not None
         best_id: str | None = None
         best_dist: int | None = None
@@ -1721,6 +1728,8 @@ class MultiAgentRLRLGym:
             if not agent.alive or agent.hp <= 0:
                 continue
             dist = self._manhattan(position, agent.position)
+            if max_range is not None and dist > int(max_range):
+                continue
             if best_dist is None or dist < best_dist:
                 best_dist = dist
                 best_id = aid
@@ -1804,6 +1813,34 @@ class MultiAgentRLRLGym:
                 info[nearest]["events"].append(
                     f"monster_move:{monster.monster_id}:{old}->{monster.position}"
                 )
+
+    def _monster_random_move(
+        self,
+        monster: MonsterState,
+        info: Dict[str, Dict[str, object]],
+    ) -> None:
+        assert self.state is not None
+        mr, mc = monster.position
+        candidates = [
+            (mr - 1, mc),
+            (mr + 1, mc),
+            (mr, mc - 1),
+            (mr, mc + 1),
+        ]
+        walkable = [
+            (r, c)
+            for (r, c) in candidates
+            if self._walkable_for_monster(r, c, monster.entity_id)
+        ]
+        if not walkable:
+            return
+        old = monster.position
+        monster.position = self._rng.choice(walkable)
+        nearest = self._nearest_alive_agent_id(monster.position)
+        if nearest is not None:
+            info[nearest]["events"].append(
+                f"monster_wander:{monster.monster_id}:{old}->{monster.position}"
+            )
 
     def _drop_monster_loot(self, monster: MonsterState, events: List[str]) -> None:
         assert self.state is not None
