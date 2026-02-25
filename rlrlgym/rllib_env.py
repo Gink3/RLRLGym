@@ -21,15 +21,15 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         super().__init__()
         cfg = config or {}
         profile_map = cfg.get("agent_profile_map", {"agent_0": "human", "agent_1": "orc"})
+        env_cfg = EnvConfig.from_json(str(cfg.get("env_config_path", "data/env_config.json")))
+        env_cfg.width = int(cfg.get("width", env_cfg.width))
+        env_cfg.height = int(cfg.get("height", env_cfg.height))
+        env_cfg.max_steps = int(cfg.get("max_steps", env_cfg.max_steps))
+        env_cfg.n_agents = int(cfg.get("n_agents", env_cfg.n_agents))
+        env_cfg.render_enabled = bool(cfg.get("render_enabled", False))
+        env_cfg.agent_profile_map = dict(profile_map)
         self.base = PettingZooParallelRLRLGym(
-            EnvConfig(
-                width=int(cfg.get("width", 20)),
-                height=int(cfg.get("height", 12)),
-                max_steps=int(cfg.get("max_steps", 120)),
-                n_agents=int(cfg.get("n_agents", 2)),
-                render_enabled=bool(cfg.get("render_enabled", False)),
-                agent_profile_map=dict(profile_map),
-            )
+            env_cfg
         )
         self._obs_space = spaces.Box(
             low=-1.0,
@@ -44,7 +44,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         self.action_spaces = {aid: self._action_space for aid in self.possible_agents}
         self._done_agents: set[str] = set()
         self._episode_counter = 0
-        self._replay_save_every = int(cfg.get("replay_save_every", 100))
+        self._replay_save_every = int(cfg.get("replay_save_every", 1000))
         out_dir = cfg.get("replay_output_dir", "")
         self._replay_output_dir = Path(out_dir) if out_dir else None
         self._capture_replay = False
@@ -172,11 +172,42 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                 {"position": [r, c], "items": list(items)}
                 for (r, c), items in sorted(state.ground_items.items())
             ],
+            "chests": [
+                {
+                    "position": [r, c],
+                    "opened": bool(chest.opened),
+                    "locked": bool(chest.locked),
+                    "loot": list(chest.loot),
+                }
+                for (r, c), chest in sorted(state.chests.items())
+            ],
+            "monsters": [
+                {
+                    "entity_id": monster.entity_id,
+                    "monster_id": monster.monster_id,
+                    "name": monster.name,
+                    "symbol": monster.symbol,
+                    "color": monster.color,
+                    "position": [monster.position[0], monster.position[1]],
+                    "hp": monster.hp,
+                    "max_hp": monster.max_hp,
+                    "acc": monster.acc,
+                    "eva": monster.eva,
+                    "dmg_min": monster.dmg_min,
+                    "dmg_max": monster.dmg_max,
+                    "dr_min": monster.dr_min,
+                    "dr_max": monster.dr_max,
+                    "alive": bool(monster.alive),
+                }
+                for _, monster in sorted(state.monsters.items())
+            ],
             "agents": {
                 aid: {
                     "agent_id": agent.agent_id,
                     "position": [agent.position[0], agent.position[1]],
                     "profile_name": agent.profile_name,
+                    "race_name": agent.race_name,
+                    "class_name": agent.class_name,
                     "hp": agent.hp,
                     "max_hp": agent.max_hp,
                     "hunger": agent.hunger,
@@ -187,6 +218,11 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                     "visited": [[r, c] for (r, c) in sorted(agent.visited)],
                     "wait_streak": agent.wait_streak,
                     "recent_positions": [[r, c] for (r, c) in agent.recent_positions],
+                    "strength": agent.strength,
+                    "dexterity": agent.dexterity,
+                    "intellect": agent.intellect,
+                    "skills": dict(agent.skills),
+                    "skill_xp": dict(agent.skill_xp),
                 }
                 for aid, agent in sorted(state.agents.items())
             },

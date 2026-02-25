@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "classes": [
+    {
+      "name": "wanderer",
+      "starting_items": [],
+      "skill_modifiers": {}
+    },
+    {
+      "name": "scout",
+      "starting_items": ["ration", "torch"],
+      "skill_modifiers": {
+        "exploration": 2,
+        "athletics": 1
+      }
+    },
+    {
+      "name": "fighter",
+      "starting_items": ["club", "bandage"],
+      "skill_modifiers": {
+        "melee": 2,
+        "athletics": 1
+      }
+    },
+    {
+      "name": "medic",
+      "starting_items": ["bandage", "healing_potion"],
+      "skill_modifiers": {
+        "medic": 2,
+        "exploration": 1
+      }
+    },
+    {
+      "name": "hunter",
+      "starting_items": ["bow", "thrown_knife"],
+      "skill_modifiers": {
+        "archery": 2,
+        "thrown_weapons": 1
+      }
+    }
+  ]
+}

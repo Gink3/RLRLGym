@@ -16,9 +16,13 @@ def generate_map(
     rng: random.Random,
     wall_tile_id: str = "wall",
     floor_fallback_id: str = "floor",
+    min_width: int = 4,
+    min_height: int = 4,
 ) -> List[List[str]]:
-    if width < 4 or height < 4:
-        raise ValueError("Map must be at least 4x4")
+    min_width = max(1, int(min_width))
+    min_height = max(1, int(min_height))
+    if width < min_width or height < min_height:
+        raise ValueError(f"Map must be at least {min_width}x{min_height}")
 
     interior_ids = weighted_tile_ids(tiles)
     interior_weights = weighted_tile_weights(tiles)

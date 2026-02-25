@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "monsters": [
+    {
+      "id": "rat",
+      "name": "Rat",
+      "symbol": "r",
+      "color": "bright_black",
+      "threat": 1,
+      "hp": 3,
+      "acc": 0,
+      "eva": 2,
+      "dmg_min": 1,
+      "dmg_max": 2,
+      "dr_min": 0,
+      "dr_max": 0,
+      "loot": [
+        {"item": "fruit", "weight": 15, "min_qty": 1, "max_qty": 1},
+        {"item": "ration", "weight": 5, "min_qty": 1, "max_qty": 1}
+      ]
+    },
+    {
+      "id": "bat",
+      "name": "Bat",
+      "symbol": "b",
+      "color": "cyan",
+      "threat": 1,
+      "hp": 2,
+      "acc": -1,
+      "eva": 4,
+      "dmg_min": 1,
+      "dmg_max": 2,
+      "dr_min": 0,
+      "dr_max": 0,
+      "loot": [
+        {"item": "fruit", "weight": 10, "min_qty": 1, "max_qty": 1}
+      ]
+    },
+    {
+      "id": "kobold_skirmisher",
+      "name": "Kobold Skirmisher",
+      "symbol": "k",
+      "color": "yellow",
+      "threat": 2,
+      "hp": 5,
+      "acc": 2,
+      "eva": 2,
+      "dmg_min": 1,
+      "dmg_max": 4,
+      "dr_min": 0,
+      "dr_max": 0,
+      "loot": [
+        {"item": "coin", "weight": 45, "min_qty": 1, "max_qty": 8},
+        {"item": "dagger", "weight": 12, "min_qty": 1, "max_qty": 1},
+        {"item": "ration", "weight": 12, "min_qty": 1, "max_qty": 1},
+        {"item": "bandage", "weight": 6, "min_qty": 1, "max_qty": 1},
+        {"item": "leather_armor", "weight": 3, "min_qty": 1, "max_qty": 1}
+      ]
+    },
+    {
+      "id": "goblin_scout",
+      "name": "Goblin Scout",
+      "symbol": "g",
+      "color": "green",
+      "threat": 2,
+      "hp": 6,
+      "acc": 2,
+      "eva": 1,
+      "dmg_min": 1,
+      "dmg_max": 4,
+      "dr_min": 0,
+      "dr_max": 0,
+      "loot": [
+        {"item": "coin", "weight": 50, "min_qty": 1, "max_qty": 6},
+        {"item": "ration", "weight": 15, "min_qty": 1, "max_qty": 1},
+        {"item": "dagger", "weight": 10, "min_qty": 1, "max_qty": 1},
+        {"item": "leather_armor", "weight": 4, "min_qty": 1, "max_qty": 1},
+        {"item": "bandage", "weight": 8, "min_qty": 1, "max_qty": 1}
+      ]
+    },
+    {
+      "id": "skeleton",
+      "name": "Skeleton",
+      "symbol": "s",
+      "color": "white",
+      "threat": 3,
+      "hp": 7,
+      "acc": 1,
+      "eva": 0,
+      "dmg_min": 1,
+      "dmg_max": 6,
+      "dr_min": 1,
+      "dr_max": 2,
+      "loot": [
+        {"item": "club", "weight": 10, "min_qty": 1, "max_qty": 1},
+        {"item": "short_sword", "weight": 6, "min_qty": 1, "max_qty": 1},
+        {"item": "bandage", "weight": 5, "min_qty": 1, "max_qty": 1},
+        {"item": "coin", "weight": 35, "min_qty": 1, "max_qty": 8}
+      ]
+    },
+    {
+      "id": "giant_spider",
+      "name": "Giant Spider",
+      "symbol": "p",
+      "color": "magenta",
+      "threat": 4,
+      "hp": 8,
+      "acc": 3,
+      "eva": 2,
+      "dmg_min": 1,
+      "dmg_max": 6,
+      "dr_min": 0,
+      "dr_max": 0,
+      "loot": [
+        {"item": "antidote", "weight": 5, "min_qty": 1, "max_qty": 1},
+        {"item": "bandage", "weight": 8, "min_qty": 1, "max_qty": 1},
+        {"item": "fruit", "weight": 8, "min_qty": 1, "max_qty": 1}
+      ]
+    },
+    {
+      "id": "cult_acolyte",
+      "name": "Cult Acolyte",
+      "symbol": "a",
+      "color": "red",
+      "threat": 3,
+      "hp": 6,
+      "acc": 1,
+      "eva": 1,
+      "dmg_min": 1,
+      "dmg_max": 4,
+      "dr_min": 0,
+      "dr_max": 0,
+      "loot": [
+        {"item": "bandage", "weight": 15, "min_qty": 1, "max_qty": 1},
+        {"item": "scroll_identify", "weight": 6, "min_qty": 1, "max_qty": 1},
+        {"item": "amulet", "weight": 2, "min_qty": 1, "max_qty": 1},
+        {"item": "coin", "weight": 40, "min_qty": 1, "max_qty": 12}
+      ]
+    },
+    {
+      "id": "armored_beetle",
+      "name": "Armored Beetle",
+      "symbol": "B",
+      "color": "blue",
+      "threat": 3,
+      "hp": 9,
+      "acc": 0,
+      "eva": -2,
+      "dmg_min": 1,
+      "dmg_max": 4,
+      "dr_min": 2,
+      "dr_max": 4,
+      "loot": [
+        {"item": "leather_armor", "weight": 6, "min_qty": 1, "max_qty": 1},
+        {"item": "coin", "weight": 25, "min_qty": 1, "max_qty": 6}
+      ]
+    }
+  ]
+}

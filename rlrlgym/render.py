@@ -54,6 +54,16 @@ class AsciiRenderer:
         agent_positions = {
             a.position: aid for aid, a in state.agents.items() if a.alive
         }
+        chest_positions = {
+            pos
+            for pos, chest in state.chests.items()
+            if not chest.opened
+        }
+        monster_positions = {
+            monster.position: monster
+            for monster in state.monsters.values()
+            if monster.alive
+        }
         cells: List[List[Tuple[str, str]]] = []
         for r in range(min_r, max_r + 1):
             row_cells: List[Tuple[str, str]] = []
@@ -66,6 +76,13 @@ class AsciiRenderer:
                         agent.profile_name, DEFAULT_AGENT_STYLE
                     )
                     row_cells.append((symbol, color))
+                    continue
+                if pos in monster_positions:
+                    monster = monster_positions[pos]
+                    row_cells.append((monster.symbol, TK_COLORS.get(monster.color, "#ff7675")))
+                    continue
+                if pos in chest_positions:
+                    row_cells.append(("C", TK_COLORS["yellow"]))
                     continue
                 tile = self.tiles[state.grid[r][c]]
                 row_cells.append(

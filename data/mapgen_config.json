@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "mapgen": {
+    "wall_tile_id": "wall",
+    "floor_fallback_id": "floor",
+    "chest_density": 0.02,
+    "monster_density": 0.0,
+    "min_width": 4,
+    "min_height": 4
+  }
+}

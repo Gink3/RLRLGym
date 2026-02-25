@@ -27,6 +27,7 @@ class RLlibTrainConfig:
     num_rollout_workers: int = 0
     train_batch_size: int = 4000
     replay_save_every: int = 1000
+    env_config_path: str = "data/env_config.json"
 
 
 class RLlibTrainer:
@@ -101,6 +102,7 @@ class RLlibTrainer:
             "agent_profile_map": {"agent_0": "human", "agent_1": "orc"},
             "replay_save_every": int(self.config.replay_save_every),
             "replay_output_dir": str(Path(self.config.output_dir).resolve()),
+            "env_config_path": self.config.env_config_path,
         }
 
         self._register_env(env_name, lambda cfg: self._RLRLGymRLlibEnv(cfg))

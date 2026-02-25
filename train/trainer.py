@@ -30,21 +30,22 @@ class TrainConfig:
     progress_window: int = 50
     show_progress: bool = True
     replay_save_every: int = 1000
+    env_config_path: str = "data/env_config.json"
 
 
 class MultiAgentTrainer:
     def __init__(self, config: TrainConfig) -> None:
         self.config = config
         profile_map = config.agent_profile_map or {"agent_0": "human", "agent_1": "orc"}
+        env_cfg = EnvConfig.from_json(config.env_config_path)
+        env_cfg.width = config.width
+        env_cfg.height = config.height
+        env_cfg.max_steps = config.max_steps
+        env_cfg.n_agents = config.n_agents
+        env_cfg.render_enabled = config.render_enabled
+        env_cfg.agent_profile_map = dict(profile_map)
         self.env = PettingZooParallelRLRLGym(
-            EnvConfig(
-                width=config.width,
-                height=config.height,
-                max_steps=config.max_steps,
-                n_agents=config.n_agents,
-                render_enabled=config.render_enabled,
-                agent_profile_map=profile_map,
-            )
+            env_cfg
         )
         self.logger = TrainingLogger(output_dir=config.output_dir)
         self.network_cfgs: Dict[str, NetworkConfig] = load_network_configs(config.networks_path)
@@ -388,11 +389,42 @@ class MultiAgentTrainer:
                 {"position": [r, c], "items": list(items)}
                 for (r, c), items in sorted(state.ground_items.items())
             ],
+            "chests": [
+                {
+                    "position": [r, c],
+                    "opened": bool(chest.opened),
+                    "locked": bool(chest.locked),
+                    "loot": list(chest.loot),
+                }
+                for (r, c), chest in sorted(state.chests.items())
+            ],
+            "monsters": [
+                {
+                    "entity_id": monster.entity_id,
+                    "monster_id": monster.monster_id,
+                    "name": monster.name,
+                    "symbol": monster.symbol,
+                    "color": monster.color,
+                    "position": [monster.position[0], monster.position[1]],
+                    "hp": monster.hp,
+                    "max_hp": monster.max_hp,
+                    "acc": monster.acc,
+                    "eva": monster.eva,
+                    "dmg_min": monster.dmg_min,
+                    "dmg_max": monster.dmg_max,
+                    "dr_min": monster.dr_min,
+                    "dr_max": monster.dr_max,
+                    "alive": bool(monster.alive),
+                }
+                for _, monster in sorted(state.monsters.items())
+            ],
             "agents": {
                 aid: {
                     "agent_id": agent.agent_id,
                     "position": [agent.position[0], agent.position[1]],
                     "profile_name": agent.profile_name,
+                    "race_name": agent.race_name,
+                    "class_name": agent.class_name,
                     "hp": agent.hp,
                     "max_hp": agent.max_hp,
                     "hunger": agent.hunger,
@@ -407,6 +439,11 @@ class MultiAgentTrainer:
                     "recent_positions": [
                         [r, c] for (r, c) in agent.recent_positions
                     ],
+                    "strength": agent.strength,
+                    "dexterity": agent.dexterity,
+                    "intellect": agent.intellect,
+                    "skills": dict(agent.skills),
+                    "skill_xp": dict(agent.skill_xp),
                 }
                 for aid, agent in sorted(state.agents.items())
             },

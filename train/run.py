@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--num-rollout-workers", type=int, default=0)
     p.add_argument("--train-batch-size", type=int, default=4000)
     p.add_argument("--replay-save-every", type=int, default=1000)
+    p.add_argument("--env-config-path", type=str, default="data/env_config.json")
     return p
 
 
@@ -42,6 +43,7 @@ def main() -> None:
             render_enabled=False,
             networks_path=args.networks_path,
             replay_save_every=args.replay_save_every,
+            env_config_path=args.env_config_path,
         )
         trainer = MultiAgentTrainer(config)
         result = trainer.train()
@@ -64,6 +66,7 @@ def main() -> None:
         num_rollout_workers=args.num_rollout_workers,
         train_batch_size=args.train_batch_size,
         replay_save_every=args.replay_save_every,
+        env_config_path=args.env_config_path,
     )
     trainer = RLlibTrainer(rllib_cfg)
     summary = trainer.train()

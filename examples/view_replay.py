@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.models import AgentState, EnvState
+from rlrlgym.models import AgentState, ChestState, EnvState, MonsterState
 
 
 def _state_from_payload(frame: dict) -> EnvState:
@@ -22,12 +22,23 @@ def _state_from_payload(frame: dict) -> EnvState:
         (int(row["position"][0]), int(row["position"][1])): list(row.get("items", []))
         for row in frame.get("ground_items", [])
     }
+    chests = {
+        (int(row["position"][0]), int(row["position"][1])): ChestState(
+            position=(int(row["position"][0]), int(row["position"][1])),
+            opened=bool(row.get("opened", False)),
+            locked=bool(row.get("locked", False)),
+            loot=list(row.get("loot", [])),
+        )
+        for row in frame.get("chests", [])
+    }
     agents = {}
     for aid, row in frame.get("agents", {}).items():
         agent = AgentState(
             agent_id=str(row["agent_id"]),
             position=(int(row["position"][0]), int(row["position"][1])),
             profile_name=str(row.get("profile_name", "human")),
+            race_name=str(row.get("race_name", row.get("profile_name", "human"))),
+            class_name=str(row.get("class_name", "wanderer")),
             hp=int(row.get("hp", 0)),
             max_hp=int(row.get("max_hp", 0)),
             hunger=int(row.get("hunger", 0)),
@@ -44,13 +55,41 @@ def _state_from_payload(frame: dict) -> EnvState:
                 (int(pos[0]), int(pos[1]))
                 for pos in row.get("recent_positions", [])
             ],
+            strength=int(row.get("strength", 5)),
+            dexterity=int(row.get("dexterity", 5)),
+            intellect=int(row.get("intellect", 5)),
+            skills={str(k): int(v) for k, v in dict(row.get("skills", {})).items()},
+            skill_xp={str(k): int(v) for k, v in dict(row.get("skill_xp", {})).items()},
         )
         agents[aid] = agent
+    monsters = {}
+    for row in frame.get("monsters", []):
+        entity_id = str(row.get("entity_id", "monster"))
+        monster = MonsterState(
+            entity_id=entity_id,
+            monster_id=str(row.get("monster_id", entity_id)),
+            name=str(row.get("name", row.get("monster_id", entity_id))),
+            symbol=str(row.get("symbol", "M"))[:1] or "M",
+            color=str(row.get("color", "red")),
+            position=(int(row["position"][0]), int(row["position"][1])),
+            hp=int(row.get("hp", 1)),
+            max_hp=int(row.get("max_hp", 1)),
+            acc=int(row.get("acc", 0)),
+            eva=int(row.get("eva", 0)),
+            dmg_min=int(row.get("dmg_min", 1)),
+            dmg_max=int(row.get("dmg_max", 1)),
+            dr_min=int(row.get("dr_min", 0)),
+            dr_max=int(row.get("dr_max", 0)),
+            alive=bool(row.get("alive", True)),
+        )
+        monsters[entity_id] = monster
     return EnvState(
         grid=frame["grid"],
         tile_interactions=tile_interactions,
         ground_items=ground_items,
         agents=agents,
+        chests=chests,
+        monsters=monsters,
         step_count=int(frame.get("step_count", 0)),
     )
 

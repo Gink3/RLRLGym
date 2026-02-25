@@ -42,9 +42,9 @@
       "glyph": "C",
       "color": "yellow",
       "walkable": true,
-      "spawn_weight": 0.05,
+      "spawn_weight": 0.0,
       "max_interactions": 1,
-      "loot_table": ["bandage", "dagger", "torch"]
+      "loot_table": []
     },
     {
       "id": "shrine",

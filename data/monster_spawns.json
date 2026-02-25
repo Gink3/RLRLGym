@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "spawns": [
+    {"monster_id": "rat", "weight": 28},
+    {"monster_id": "bat", "weight": 20},
+    {"monster_id": "kobold_skirmisher", "weight": 14},
+    {"monster_id": "goblin_scout", "weight": 14},
+    {"monster_id": "skeleton", "weight": 9},
+    {"monster_id": "giant_spider", "weight": 5},
+    {"monster_id": "cult_acolyte", "weight": 6},
+    {"monster_id": "armored_beetle", "weight": 4}
+  ]
+}

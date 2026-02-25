@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "env_config": {
+    "width": 50,
+    "height": 50,
+    "max_steps": 150,
+    "n_agents": 2,
+    "tiles_path": "data/tiles.json",
+    "profiles_path": "data/agent_profiles.json",
+    "races_path": "data/agent_races.json",
+    "classes_path": "data/agent_classes.json",
+    "monsters_path": "data/monsters.json",
+    "monster_spawns_path": "data/monster_spawns.json",
+    "mapgen_config_path": "data/mapgen_config.json",
+    "agent_observation_config": {},
+    "agent_profile_map": {},
+    "agent_race_map": {},
+    "agent_class_map": {},
+    "render_enabled": true
+  }
+}
