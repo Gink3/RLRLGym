@@ -216,6 +216,15 @@ class RLlibTrainer:
                     "agent": 0,
                     "other": 0,
                 }
+                coverages = []
+                stagnation_steps = []
+                enemy_visible_steps = []
+                enemy_distances = []
+                enemy_distance_delta_means = []
+                first_seen_steps = []
+                first_seen_count = 0
+                combat_exchange_counts = []
+                timeout_no_contact_flags = []
                 for aid in agent_ids:
                     info = episode.last_info_for(aid)
                     if not info:
@@ -237,6 +246,31 @@ class RLlibTrainer:
                     starvation_flags.append(1.0 if starved else 0.0)
                     if td is not None:
                         teammate_dists.append(float(td))
+                    cov = info.get("explore_coverage")
+                    if cov is not None:
+                        coverages.append(float(cov))
+                    ssn = info.get("steps_since_new_tile")
+                    if ssn is not None:
+                        stagnation_steps.append(float(ssn))
+                    evs = info.get("enemy_visible_steps")
+                    if evs is not None:
+                        enemy_visible_steps.append(float(evs))
+                    ed = info.get("enemy_distance")
+                    if ed is not None:
+                        enemy_distances.append(float(ed))
+                    edd = info.get("enemy_distance_delta_mean")
+                    if edd is not None:
+                        enemy_distance_delta_means.append(float(edd))
+                    fes = info.get("first_enemy_seen_step")
+                    if fes is not None:
+                        first_seen_count += 1
+                        first_seen_steps.append(float(fes))
+                    cex = info.get("combat_exchanges")
+                    if cex is not None:
+                        combat_exchange_counts.append(float(cex))
+                    tnc = info.get("timeout_no_contact")
+                    if tnc is not None:
+                        timeout_no_contact_flags.append(1.0 if bool(tnc) else 0.0)
                     if not alive:
                         death_reason = str(info.get("death_reason", ""))
                         if starved:
@@ -284,30 +318,98 @@ class RLlibTrainer:
                     "action_interact_rate",
                     float(counts.get("interact", 0)) / total_actions,
                 )
-                agent_count = max(1, len(agent_ids))
+                n_agents = max(1, len(agent_ids))
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "explore_coverage",
+                    (sum(coverages) / len(coverages)) if coverages else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "steps_since_new_tile",
+                    (sum(stagnation_steps) / len(stagnation_steps))
+                    if stagnation_steps
+                    else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "enemy_visible_steps",
+                    (sum(enemy_visible_steps) / len(enemy_visible_steps))
+                    if enemy_visible_steps
+                    else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "enemy_distance",
+                    (sum(enemy_distances) / len(enemy_distances))
+                    if enemy_distances
+                    else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "enemy_distance_delta_mean",
+                    (sum(enemy_distance_delta_means) / len(enemy_distance_delta_means))
+                    if enemy_distance_delta_means
+                    else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "first_enemy_seen_rate",
+                    float(first_seen_count) / float(n_agents),
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "first_enemy_seen_step",
+                    (sum(first_seen_steps) / len(first_seen_steps))
+                    if first_seen_steps
+                    else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "combat_exchanges",
+                    (sum(combat_exchange_counts) / len(combat_exchange_counts))
+                    if combat_exchange_counts
+                    else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "timeout_no_contact_rate",
+                    (sum(timeout_no_contact_flags) / len(timeout_no_contact_flags))
+                    if timeout_no_contact_flags
+                    else 0.0,
+                )
                 self._emit_metric(
                     episode,
                     metrics_logger,
                     "death_starvation",
-                    float(death_counts["starvation"]) / agent_count,
+                    float(death_counts["starvation"]) / n_agents,
                 )
                 self._emit_metric(
                     episode,
                     metrics_logger,
                     "death_monster",
-                    float(death_counts["monster"]) / agent_count,
+                    float(death_counts["monster"]) / n_agents,
                 )
                 self._emit_metric(
                     episode,
                     metrics_logger,
                     "death_agent",
-                    float(death_counts["agent"]) / agent_count,
+                    float(death_counts["agent"]) / n_agents,
                 )
                 self._emit_metric(
                     episode,
                     metrics_logger,
                     "death_other",
-                    float(death_counts["other"]) / agent_count,
+                    float(death_counts["other"]) / n_agents,
                 )
                 self._episode_action_counts.pop(id(episode), None)
 
@@ -497,6 +599,96 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
+            explore_coverage = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "explore_coverage_mean"),
+                    ("custom_metrics", "explore_coverage"),
+                    ("env_runners", "custom_metrics", "explore_coverage_mean"),
+                    ("env_runners", "custom_metrics", "explore_coverage"),
+                ],
+                default=0.0,
+            )
+            steps_since_new_tile = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "steps_since_new_tile_mean"),
+                    ("custom_metrics", "steps_since_new_tile"),
+                    ("env_runners", "custom_metrics", "steps_since_new_tile_mean"),
+                    ("env_runners", "custom_metrics", "steps_since_new_tile"),
+                ],
+                default=0.0,
+            )
+            enemy_visible_steps = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "enemy_visible_steps_mean"),
+                    ("custom_metrics", "enemy_visible_steps"),
+                    ("env_runners", "custom_metrics", "enemy_visible_steps_mean"),
+                    ("env_runners", "custom_metrics", "enemy_visible_steps"),
+                ],
+                default=0.0,
+            )
+            enemy_distance = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "enemy_distance_mean"),
+                    ("custom_metrics", "enemy_distance"),
+                    ("env_runners", "custom_metrics", "enemy_distance_mean"),
+                    ("env_runners", "custom_metrics", "enemy_distance"),
+                ],
+                default=0.0,
+            )
+            enemy_distance_delta_mean = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "enemy_distance_delta_mean_mean"),
+                    ("custom_metrics", "enemy_distance_delta_mean"),
+                    ("env_runners", "custom_metrics", "enemy_distance_delta_mean_mean"),
+                    ("env_runners", "custom_metrics", "enemy_distance_delta_mean"),
+                ],
+                default=0.0,
+            )
+            first_enemy_seen_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "first_enemy_seen_rate_mean"),
+                    ("custom_metrics", "first_enemy_seen_rate"),
+                    ("env_runners", "custom_metrics", "first_enemy_seen_rate_mean"),
+                    ("env_runners", "custom_metrics", "first_enemy_seen_rate"),
+                ],
+                default=0.0,
+            )
+            first_enemy_seen_step = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "first_enemy_seen_step_mean"),
+                    ("custom_metrics", "first_enemy_seen_step"),
+                    ("env_runners", "custom_metrics", "first_enemy_seen_step_mean"),
+                    ("env_runners", "custom_metrics", "first_enemy_seen_step"),
+                ],
+                default=0.0,
+            )
+            combat_exchanges = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "combat_exchanges_mean"),
+                    ("custom_metrics", "combat_exchanges"),
+                    ("env_runners", "custom_metrics", "combat_exchanges_mean"),
+                    ("env_runners", "custom_metrics", "combat_exchanges"),
+                ],
+                default=0.0,
+            )
+            timeout_no_contact_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "timeout_no_contact_rate_mean"),
+                    ("custom_metrics", "timeout_no_contact_rate"),
+                    ("env_runners", "custom_metrics", "timeout_no_contact_rate_mean"),
+                    ("env_runners", "custom_metrics", "timeout_no_contact_rate"),
+                ],
+                default=0.0,
+            )
             death_starvation_rate = self._extract_float(
                 result,
                 [
@@ -569,6 +761,15 @@ class RLlibTrainer:
                     "action_wait_rate": action_wait_rate,
                     "action_move_rate": action_move_rate,
                     "action_interact_rate": action_interact_rate,
+                    "explore_coverage": explore_coverage,
+                    "steps_since_new_tile": steps_since_new_tile,
+                    "enemy_visible_steps": enemy_visible_steps,
+                    "enemy_distance": enemy_distance,
+                    "enemy_distance_delta_mean": enemy_distance_delta_mean,
+                    "first_enemy_seen_rate": first_enemy_seen_rate,
+                    "first_enemy_seen_step": first_enemy_seen_step,
+                    "combat_exchanges": combat_exchanges,
+                    "timeout_no_contact_rate": timeout_no_contact_rate,
                     "death_starvation": int(death_histogram["starvation"]),
                     "death_monster": int(death_histogram["monster"]),
                     "death_agent": int(death_histogram["agent"]),
@@ -753,6 +954,15 @@ class RLlibTrainer:
         latest_wait_rate = float(latest.get("action_wait_rate", 0.0) or 0.0)
         latest_move_rate = float(latest.get("action_move_rate", 0.0) or 0.0)
         latest_interact_rate = float(latest.get("action_interact_rate", 0.0) or 0.0)
+        latest_explore_coverage = float(latest.get("explore_coverage", 0.0) or 0.0)
+        latest_steps_since_new = float(latest.get("steps_since_new_tile", 0.0) or 0.0)
+        latest_enemy_visible_steps = float(latest.get("enemy_visible_steps", 0.0) or 0.0)
+        latest_enemy_distance = float(latest.get("enemy_distance", 0.0) or 0.0)
+        latest_enemy_dist_delta = float(latest.get("enemy_distance_delta_mean", 0.0) or 0.0)
+        latest_first_seen_rate = float(latest.get("first_enemy_seen_rate", 0.0) or 0.0)
+        latest_first_seen_step = float(latest.get("first_enemy_seen_step", 0.0) or 0.0)
+        latest_combat_exchanges = float(latest.get("combat_exchanges", 0.0) or 0.0)
+        latest_timeout_no_contact = float(latest.get("timeout_no_contact_rate", 0.0) or 0.0)
         latest_timesteps_total = int(float(latest.get("timesteps_total", 0) or 0))
         cause_hist = summary.get("cause_of_death_histogram", {}) or {}
         cause_hist_rows = "".join(
@@ -778,6 +988,15 @@ class RLlibTrainer:
         wait_curve = [round(float(r.get("action_wait_rate", 0.0) or 0.0), 4) for r in metrics_rows]
         move_curve = [round(float(r.get("action_move_rate", 0.0) or 0.0), 4) for r in metrics_rows]
         interact_curve = [round(float(r.get("action_interact_rate", 0.0) or 0.0), 4) for r in metrics_rows]
+        explore_coverage_curve = [round(float(r.get("explore_coverage", 0.0) or 0.0), 4) for r in metrics_rows]
+        steps_since_new_curve = [round(float(r.get("steps_since_new_tile", 0.0) or 0.0), 3) for r in metrics_rows]
+        enemy_visible_steps_curve = [round(float(r.get("enemy_visible_steps", 0.0) or 0.0), 3) for r in metrics_rows]
+        enemy_distance_curve = [round(float(r.get("enemy_distance", 0.0) or 0.0), 3) for r in metrics_rows]
+        enemy_distance_delta_curve = [round(float(r.get("enemy_distance_delta_mean", 0.0) or 0.0), 4) for r in metrics_rows]
+        first_seen_rate_curve = [round(float(r.get("first_enemy_seen_rate", 0.0) or 0.0), 4) for r in metrics_rows]
+        first_seen_step_curve = [round(float(r.get("first_enemy_seen_step", 0.0) or 0.0), 3) for r in metrics_rows]
+        combat_exchanges_curve = [round(float(r.get("combat_exchanges", 0.0) or 0.0), 3) for r in metrics_rows]
+        timeout_no_contact_curve = [round(float(r.get("timeout_no_contact_rate", 0.0) or 0.0), 4) for r in metrics_rows]
 
         rows_html = "".join(
             [
@@ -794,6 +1013,15 @@ class RLlibTrainer:
                 f"<td>{float(r.get('action_wait_rate', 0.0) or 0.0):.4f}</td>"
                 f"<td>{float(r.get('action_move_rate', 0.0) or 0.0):.4f}</td>"
                 f"<td>{float(r.get('action_interact_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('explore_coverage', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('steps_since_new_tile', 0.0) or 0.0):.2f}</td>"
+                f"<td>{float(r.get('enemy_visible_steps', 0.0) or 0.0):.2f}</td>"
+                f"<td>{float(r.get('enemy_distance', 0.0) or 0.0):.2f}</td>"
+                f"<td>{float(r.get('enemy_distance_delta_mean', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('first_enemy_seen_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('first_enemy_seen_step', 0.0) or 0.0):.2f}</td>"
+                f"<td>{float(r.get('combat_exchanges', 0.0) or 0.0):.2f}</td>"
+                f"<td>{float(r.get('timeout_no_contact_rate', 0.0) or 0.0):.4f}</td>"
                 "</tr>"
                 for r in metrics_rows
             ]
@@ -881,6 +1109,15 @@ class RLlibTrainer:
     <div class="metric">Latest wait rate: {latest_wait_rate:.4f}</div>
     <div class="metric">Latest move rate: {latest_move_rate:.4f}</div>
     <div class="metric">Latest interact rate: {latest_interact_rate:.4f}</div>
+    <div class="metric">Latest explore coverage: {latest_explore_coverage:.4f}</div>
+    <div class="metric">Latest steps_since_new_tile: {latest_steps_since_new:.2f}</div>
+    <div class="metric">Latest enemy_visible_steps: {latest_enemy_visible_steps:.2f}</div>
+    <div class="metric">Latest enemy_distance: {latest_enemy_distance:.2f}</div>
+    <div class="metric">Latest enemy_dist_delta: {latest_enemy_dist_delta:.4f}</div>
+    <div class="metric">Latest first_seen_rate: {latest_first_seen_rate:.4f}</div>
+    <div class="metric">Latest first_seen_step: {latest_first_seen_step:.2f}</div>
+    <div class="metric">Latest combat_exchanges: {latest_combat_exchanges:.2f}</div>
+    <div class="metric">Latest timeout_no_contact: {latest_timeout_no_contact:.4f}</div>
   </div>
   <div class="card">
     <h3>Reward Curve (per iteration)</h3>
@@ -898,6 +1135,15 @@ class RLlibTrainer:
     <pre>action_wait_rate={wait_curve}</pre>
     <pre>action_move_rate={move_curve}</pre>
     <pre>action_interact_rate={interact_curve}</pre>
+    <pre>explore_coverage={explore_coverage_curve}</pre>
+    <pre>steps_since_new_tile={steps_since_new_curve}</pre>
+    <pre>enemy_visible_steps={enemy_visible_steps_curve}</pre>
+    <pre>enemy_distance={enemy_distance_curve}</pre>
+    <pre>enemy_distance_delta_mean={enemy_distance_delta_curve}</pre>
+    <pre>first_enemy_seen_rate={first_seen_rate_curve}</pre>
+    <pre>first_enemy_seen_step={first_seen_step_curve}</pre>
+    <pre>combat_exchanges={combat_exchanges_curve}</pre>
+    <pre>timeout_no_contact_rate={timeout_no_contact_curve}</pre>
     <pre>rolling_reward50={rolling_reward50_curve}</pre>
   </div>
   <div class="card">
@@ -908,7 +1154,7 @@ class RLlibTrainer:
     <h3>Iteration Metrics</h3>
     <table>
       <thead>
-        <tr><th>Iteration</th><th>Episodes Total</th><th>Timesteps Total</th><th>Reward Mean</th><th>Win Rate</th><th>Survival Mean</th><th>Starvation Rate</th><th>Loss</th><th>Team Dist</th><th>Wait</th><th>Move</th><th>Interact</th></tr>
+        <tr><th>Iteration</th><th>Episodes Total</th><th>Timesteps Total</th><th>Reward Mean</th><th>Win Rate</th><th>Survival Mean</th><th>Starvation Rate</th><th>Loss</th><th>Team Dist</th><th>Wait</th><th>Move</th><th>Interact</th><th>ExploreCov</th><th>Stagnation</th><th>EnemyVis</th><th>EnemyDist</th><th>EnemyDistΔ</th><th>FirstSeenRate</th><th>FirstSeenStep</th><th>CombatX</th><th>TimeoutNoContact</th></tr>
       </thead>
       <tbody>
         {rows_html}

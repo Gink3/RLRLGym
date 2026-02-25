@@ -10,7 +10,23 @@
       "monster_density": 0.0,
       "chest_density": 0.08,
       "combat_training_mode": false,
-      "hunger_tick_enabled": true
+      "hunger_tick_enabled": true,
+      "new_tile_seen_reward": 0.03,
+      "frontier_step_reward": 0.012,
+      "stagnation_penalty": 0.012,
+      "stagnation_threshold_steps": 8,
+      "repeat_visit_penalty": 0.006,
+      "repeat_visit_window": 6,
+      "move_bias_reward": 0.003,
+      "wait_no_enemy_penalty": 0.012,
+      "wait_safe_hunger_ratio": 0.55,
+      "first_enemy_seen_bonus": 0.9,
+      "enemy_visible_reward": 0.014,
+      "enemy_distance_delta_reward_scale": 0.015,
+      "enemy_distance_delta_clip": 2.0,
+      "lost_enemy_penalty": 0.01,
+      "timeout_tie_penalty": 0.18,
+      "engagement_bonus": 0.08
     },
     {
       "name": "phase_2_combat",
@@ -22,7 +38,23 @@
       "chest_density": 0.03,
       "combat_training_mode": true,
       "hunger_tick_enabled": false,
-      "missed_attack_opportunity_penalty": 0.05
+      "missed_attack_opportunity_penalty": 0.05,
+      "new_tile_seen_reward": 0.008,
+      "frontier_step_reward": 0.003,
+      "stagnation_penalty": 0.008,
+      "stagnation_threshold_steps": 14,
+      "repeat_visit_penalty": 0.004,
+      "repeat_visit_window": 6,
+      "move_bias_reward": 0.001,
+      "wait_no_enemy_penalty": 0.006,
+      "wait_safe_hunger_ratio": 0.5,
+      "first_enemy_seen_bonus": 0.25,
+      "enemy_visible_reward": 0.004,
+      "enemy_distance_delta_reward_scale": 0.004,
+      "enemy_distance_delta_clip": 1.5,
+      "lost_enemy_penalty": 0.005,
+      "timeout_tie_penalty": 0.25,
+      "engagement_bonus": 0.2
     }
   ]
 }

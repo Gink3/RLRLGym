@@ -16,6 +16,22 @@
     "agent_profile_map": {},
     "agent_race_map": {},
     "agent_class_map": {},
+    "new_tile_seen_reward": 0.02,
+    "frontier_step_reward": 0.008,
+    "stagnation_penalty": 0.01,
+    "stagnation_threshold_steps": 10,
+    "repeat_visit_penalty": 0.006,
+    "repeat_visit_window": 6,
+    "move_bias_reward": 0.002,
+    "wait_no_enemy_penalty": 0.01,
+    "wait_safe_hunger_ratio": 0.5,
+    "first_enemy_seen_bonus": 0.7,
+    "enemy_visible_reward": 0.01,
+    "enemy_distance_delta_reward_scale": 0.01,
+    "enemy_distance_delta_clip": 2.0,
+    "lost_enemy_penalty": 0.01,
+    "timeout_tie_penalty": 0.2,
+    "engagement_bonus": 0.15,
     "render_enabled": true
   }
 }

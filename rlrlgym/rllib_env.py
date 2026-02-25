@@ -115,24 +115,21 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         if selected is None:
             selected = self._curriculum_phases[-1]
 
-        if "width" in selected:
-            self.base.config.width = int(selected["width"])
-        if "height" in selected:
-            self.base.config.height = int(selected["height"])
-        if "max_steps" in selected:
-            self.base.config.max_steps = int(selected["max_steps"])
         if "monster_density" in selected:
             self.base.mapgen_cfg.monster_density = float(selected["monster_density"])
         if "chest_density" in selected:
             self.base.mapgen_cfg.chest_density = float(selected["chest_density"])
-        if "combat_training_mode" in selected:
-            self.base.config.combat_training_mode = bool(selected["combat_training_mode"])
-        if "hunger_tick_enabled" in selected:
-            self.base.config.hunger_tick_enabled = bool(selected["hunger_tick_enabled"])
-        if "missed_attack_opportunity_penalty" in selected:
-            self.base.config.missed_attack_opportunity_penalty = float(
-                selected["missed_attack_opportunity_penalty"]
-            )
+        for key, value in selected.items():
+            if hasattr(self.base.config, key):
+                current = getattr(self.base.config, key)
+                if isinstance(current, bool):
+                    setattr(self.base.config, key, bool(value))
+                elif isinstance(current, int):
+                    setattr(self.base.config, key, int(value))
+                elif isinstance(current, float):
+                    setattr(self.base.config, key, float(value))
+                else:
+                    setattr(self.base.config, key, value)
 
     def step(self, action_dict):
         obs, rewards, terminations, truncations, info = self.base.step(action_dict)

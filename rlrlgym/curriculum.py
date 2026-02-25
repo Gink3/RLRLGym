@@ -16,6 +16,28 @@ REQUIRED_PHASE_FIELDS = {
     "chest_density",
 }
 
+OPTIONAL_PHASE_FIELDS = {
+    "combat_training_mode": bool,
+    "hunger_tick_enabled": bool,
+    "missed_attack_opportunity_penalty": float,
+    "new_tile_seen_reward": float,
+    "frontier_step_reward": float,
+    "stagnation_penalty": float,
+    "stagnation_threshold_steps": int,
+    "repeat_visit_penalty": float,
+    "repeat_visit_window": int,
+    "move_bias_reward": float,
+    "wait_no_enemy_penalty": float,
+    "wait_safe_hunger_ratio": float,
+    "first_enemy_seen_bonus": float,
+    "enemy_visible_reward": float,
+    "enemy_distance_delta_reward_scale": float,
+    "enemy_distance_delta_clip": float,
+    "lost_enemy_penalty": float,
+    "timeout_tie_penalty": float,
+    "engagement_bonus": float,
+}
+
 
 def load_curriculum_phases(path: str | Path) -> List[Dict[str, object]]:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -45,14 +67,9 @@ def load_curriculum_phases(path: str | Path) -> List[Dict[str, object]]:
                 "chest_density": float(row["chest_density"]),
             }
         )
-        if "combat_training_mode" in row:
-            out[-1]["combat_training_mode"] = bool(row["combat_training_mode"])
-        if "hunger_tick_enabled" in row:
-            out[-1]["hunger_tick_enabled"] = bool(row["hunger_tick_enabled"])
-        if "missed_attack_opportunity_penalty" in row:
-            out[-1]["missed_attack_opportunity_penalty"] = float(
-                row["missed_attack_opportunity_penalty"]
-            )
+        for key, caster in OPTIONAL_PHASE_FIELDS.items():
+            if key in row:
+                out[-1][key] = caster(row[key])
 
     if not out:
         raise ValueError("At least one curriculum phase is required")

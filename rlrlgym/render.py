@@ -56,7 +56,7 @@ class AsciiRenderer:
         state: EnvState,
         focus_agent: Optional[str] = None,
         zoom: int = 0,
-    ) -> List[List[Tuple[str, str]]]:
+    ) -> List[List[Tuple[str, str, bool]]]:
         min_r, max_r, min_c, max_c = self.view_bounds(
             state=state, focus_agent=focus_agent, zoom=zoom
         )
@@ -74,9 +74,9 @@ class AsciiRenderer:
             for monster in state.monsters.values()
             if monster.alive
         }
-        cells: List[List[Tuple[str, str]]] = []
+        cells: List[List[Tuple[str, str, bool]]] = []
         for r in range(min_r, max_r + 1):
-            row_cells: List[Tuple[str, str]] = []
+            row_cells: List[Tuple[str, str, bool]] = []
             for c in range(min_c, max_c + 1):
                 pos = (r, c)
                 if pos in agent_positions:
@@ -85,18 +85,20 @@ class AsciiRenderer:
                     symbol, color = PROFILE_AGENT_STYLE.get(
                         agent.profile_name, DEFAULT_AGENT_STYLE
                     )
-                    row_cells.append((symbol, color))
+                    row_cells.append((symbol, color, True))
                     continue
                 if pos in monster_positions:
                     monster = monster_positions[pos]
-                    row_cells.append((monster.symbol, TK_COLORS.get(monster.color, "#ff7675")))
+                    row_cells.append(
+                        (monster.symbol, TK_COLORS.get(monster.color, "#ff7675"), False)
+                    )
                     continue
                 if pos in chest_positions:
-                    row_cells.append(("C", TK_COLORS["yellow"]))
+                    row_cells.append(("C", TK_COLORS["yellow"], False))
                     continue
                 tile = self.tiles[state.grid[r][c]]
                 row_cells.append(
-                    (tile.glyph, TK_COLORS.get(tile.color, TK_COLORS["white"]))
+                    (tile.glyph, TK_COLORS.get(tile.color, TK_COLORS["white"]), False)
                 )
             cells.append(row_cells)
         return cells
@@ -206,6 +208,23 @@ class RenderWindow:
             command=self._on_zoom_change,
         )
         self.zoom_scale.pack(side="left", fill="x", expand=True)
+        self.highlight_agents_var = tk.BooleanVar(value=False)
+        self.highlight_mode_var = tk.StringVar(value="background")
+        ttk.Checkbutton(
+            controls,
+            text="Highlight Agents",
+            variable=self.highlight_agents_var,
+            command=self._on_highlight_toggle,
+        ).pack(side="left", padx=(10, 2))
+        self.highlight_mode_menu = ttk.Combobox(
+            controls,
+            textvariable=self.highlight_mode_var,
+            values=["background", "outline"],
+            width=11,
+            state="readonly",
+        )
+        self.highlight_mode_menu.pack(side="left")
+        self.highlight_mode_menu.bind("<<ComboboxSelected>>", self._on_highlight_mode_change)
 
         content = ttk.Frame(self.root)
         content.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -268,6 +287,12 @@ class RenderWindow:
             DEFAULT_AGENT_STYLE[1]
         }:
             self.text.tag_configure(color, foreground=color)
+            self.text.tag_configure(
+                self._agent_bg_tag(color),
+                background="#f8d64e",
+            )
+        self.text.tag_configure("agent_outline", borderwidth=1, relief="solid")
+        self.text.tag_configure("agent_bold")
         self.text.configure(state="disabled")
 
     def _current_focus(self) -> Optional[str]:
@@ -283,11 +308,23 @@ class RenderWindow:
         self._apply_zoom_font()
         self._redraw()
 
+    def _on_highlight_toggle(self) -> None:
+        self._redraw()
+
+    def _on_highlight_mode_change(self, _evt=None) -> None:
+        if self.highlight_mode_var.get() not in {"background", "outline"}:
+            self.highlight_mode_var.set("background")
+        self._redraw()
+
+    def _agent_bg_tag(self, color: str) -> str:
+        return f"agent_bg_{color.strip('#')}"
+
     def _apply_zoom_font(self) -> None:
         zoom = int(self.zoom_var.get())
         # Zoom scales map glyph size for clearer replay inspection.
         font_size = max(8, min(26, self._base_map_font_size + zoom))
         self.text.configure(font=("Courier", font_size))
+        self.text.tag_configure("agent_bold", font=("Courier", font_size, "bold"))
         # Keep side panes fixed-size for readability regardless of map zoom.
         self.action_log_text.configure(font=("Courier", self._base_log_font_size))
         self.agent_stats_text.configure(font=("Courier", self._base_stats_font_size))
@@ -304,12 +341,20 @@ class RenderWindow:
             if self.focus_var.get() not in self._focus_choices:
                 self.focus_var.set("all")
 
-    def _draw_cells(self, cells: List[List[Tuple[str, str]]]) -> None:
+    def _draw_cells(self, cells: List[List[Tuple[str, str, bool]]]) -> None:
         self.text.configure(state="normal")
         self.text.delete("1.0", self._tk.END)
         for row in cells:
-            for glyph, color in row:
-                self.text.insert(self._tk.END, glyph, color)
+            for glyph, color, is_agent in row:
+                tags: Tuple[str, ...]
+                if is_agent and bool(self.highlight_agents_var.get()):
+                    if self.highlight_mode_var.get() == "outline":
+                        tags = (color, "agent_outline", "agent_bold")
+                    else:
+                        tags = (color, self._agent_bg_tag(color), "agent_bold")
+                else:
+                    tags = (color,)
+                self.text.insert(self._tk.END, glyph, tags)
             self.text.insert(self._tk.END, "\n")
         self.text.configure(state="disabled")
 

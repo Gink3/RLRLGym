@@ -136,6 +136,23 @@ class EnvConfig:
     combat_training_mode: bool = False
     hunger_tick_enabled: bool = True
     missed_attack_opportunity_penalty: float = 0.03
+    # Exploration/search shaping (JSON-configurable).
+    new_tile_seen_reward: float = 0.02
+    frontier_step_reward: float = 0.008
+    stagnation_penalty: float = 0.01
+    stagnation_threshold_steps: int = 10
+    repeat_visit_penalty: float = 0.006
+    repeat_visit_window: int = 6
+    move_bias_reward: float = 0.002
+    wait_no_enemy_penalty: float = 0.01
+    wait_safe_hunger_ratio: float = 0.5
+    first_enemy_seen_bonus: float = 0.7
+    enemy_visible_reward: float = 0.01
+    enemy_distance_delta_reward_scale: float = 0.01
+    enemy_distance_delta_clip: float = 2.0
+    lost_enemy_penalty: float = 0.01
+    timeout_tie_penalty: float = 0.2
+    engagement_bonus: float = 0.15
     render_enabled: bool = True
 
     @classmethod
@@ -201,6 +218,12 @@ class MultiAgentRLRLGym:
         self._last_info: Dict[str, Dict[str, object]] = {}
         self._render_window: Optional[RenderWindow] = None
         self._winner_announced: bool = False
+        self._episode_metrics: Dict[str, Dict[str, object]] = {}
+        self._walkable_tile_count: int = 1
+        self._episode_combat_exchanges: int = 0
+        self._episode_any_enemy_seen: bool = False
+        self._episode_timeout_no_contact: bool = False
+        self._episode_terminal_rewards_applied: bool = False
 
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
@@ -286,6 +309,35 @@ class MultiAgentRLRLGym:
         self.state.monsters = self._spawn_monsters(
             occupied=starts + list(self.state.chests.keys())
         )
+        self._walkable_tile_count = max(
+            1,
+            sum(
+                1
+                for row in self.state.grid
+                for tile_id in row
+                if self.tiles[tile_id].walkable
+            ),
+        )
+        self._episode_combat_exchanges = 0
+        self._episode_any_enemy_seen = False
+        self._episode_timeout_no_contact = False
+        self._episode_terminal_rewards_applied = False
+        self._episode_metrics = {}
+        for aid in self.possible_agents:
+            visible = self._visible_tile_coords(aid)
+            first_enemy_visible = self._enemy_visible(aid)
+            self._episode_any_enemy_seen = self._episode_any_enemy_seen or first_enemy_visible
+            self._episode_metrics[aid] = {
+                "seen_tiles": set(visible),
+                "steps_since_new_tile": 0,
+                "first_enemy_seen_step": 0 if first_enemy_visible else None,
+                "enemy_visible_steps": 1 if first_enemy_visible else 0,
+                "last_enemy_distance": self._nearest_opponent_distance(aid),
+                "enemy_distance_delta_sum": 0.0,
+                "enemy_distance_delta_count": 0,
+                "combat_exchanges": 0,
+                "ever_enemy_seen": bool(first_enemy_visible),
+            }
         self._winner_announced = False
         self.agents = list(self.possible_agents)
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
@@ -314,6 +366,12 @@ class MultiAgentRLRLGym:
         terminations = {aid: False for aid in self.possible_agents}
         truncations = {aid: False for aid in self.possible_agents}
         info = {aid: {"events": []} for aid in self.possible_agents}
+        pre_enemy_distance = {
+            aid: self._nearest_opponent_distance(aid) for aid in self.possible_agents
+        }
+        pre_enemy_visible = {
+            aid: self._enemy_visible(aid) for aid in self.possible_agents
+        }
 
         for aid in self.possible_agents:
             agent = self.state.agents[aid]
@@ -331,6 +389,13 @@ class MultiAgentRLRLGym:
             rewards[aid] += delta_reward
             info[aid]["events"].extend(events)
             self._apply_survival_costs(agent, rewards, aid, info)
+            self._apply_search_and_exploration_rewards(
+                aid=aid,
+                rewards=rewards,
+                info=info,
+                pre_enemy_distance=pre_enemy_distance[aid],
+                pre_enemy_visible=pre_enemy_visible[aid],
+            )
 
             if agent.hp <= 0:
                 agent.alive = False
@@ -357,6 +422,20 @@ class MultiAgentRLRLGym:
             info[aid]["race"] = agent.race_name
             info[aid]["class"] = agent.class_name
             info[aid]["teammate_distance"] = self._nearest_teammate_distance(aid)
+            metrics = self._episode_metrics.get(aid, {})
+            seen_tiles = int(len(metrics.get("seen_tiles", set())))
+            info[aid]["new_tiles_seen_total"] = seen_tiles
+            info[aid]["explore_coverage"] = float(seen_tiles) / float(self._walkable_tile_count)
+            info[aid]["steps_since_new_tile"] = int(metrics.get("steps_since_new_tile", 0))
+            info[aid]["first_enemy_seen_step"] = metrics.get("first_enemy_seen_step")
+            info[aid]["enemy_visible_steps"] = int(metrics.get("enemy_visible_steps", 0))
+            info[aid]["enemy_distance"] = self._nearest_opponent_distance(aid)
+            dcnt = int(metrics.get("enemy_distance_delta_count", 0))
+            dsum = float(metrics.get("enemy_distance_delta_sum", 0.0))
+            info[aid]["enemy_distance_delta_mean"] = (dsum / dcnt) if dcnt > 0 else 0.0
+            info[aid]["combat_exchanges"] = int(metrics.get("combat_exchanges", 0))
+            info[aid]["ever_enemy_seen"] = bool(metrics.get("ever_enemy_seen", False))
+            info[aid]["timeout_no_contact"] = bool(self._episode_timeout_no_contact)
 
         alive_now = [
             aid
@@ -382,6 +461,40 @@ class MultiAgentRLRLGym:
             for aid in self.possible_agents:
                 info[aid]["events"].append("winner:none")
             self._winner_announced = True
+        elif (
+            not self._winner_announced
+            and self.config.n_agents > 1
+            and self.state.step_count >= self.config.max_steps
+        ):
+            for aid in self.possible_agents:
+                info[aid]["events"].append("winner:none")
+            self._winner_announced = True
+            self._episode_timeout_no_contact = (
+                self._episode_combat_exchanges <= 0
+                and not self._episode_any_enemy_seen
+            )
+            if self._episode_timeout_no_contact:
+                for aid in self.possible_agents:
+                    info[aid]["events"].append("episode_timeout_no_contact")
+
+        episode_done = all(
+            bool(terminations.get(aid, False) or truncations.get(aid, False))
+            for aid in self.possible_agents
+        )
+        if episode_done and not self._episode_terminal_rewards_applied:
+            if self._episode_combat_exchanges > 0:
+                for aid in self.possible_agents:
+                    rewards[aid] += float(self.config.engagement_bonus)
+                    info[aid]["events"].append("episode_engagement_bonus")
+            else:
+                for aid in self.possible_agents:
+                    info[aid]["events"].append("episode_no_combat")
+            if self.state.step_count >= self.config.max_steps:
+                for aid in self.possible_agents:
+                    rewards[aid] -= float(self.config.timeout_tie_penalty)
+                    info[aid]["events"].append("episode_timeout_tie")
+                    info[aid]["timeout_no_contact"] = bool(self._episode_timeout_no_contact)
+            self._episode_terminal_rewards_applied = True
 
         self.agents = [
             aid
@@ -509,6 +622,7 @@ class MultiAgentRLRLGym:
                 self._gain_skill_xp(agent, "athletics", 1, events)
                 self._gain_skill_xp(agent, "exploration", 1, events)
                 reward += MOVE_VALID_REWARD
+                reward += float(self.config.move_bias_reward)
                 reward -= MOVE_STEP_COST
                 reward -= encumbrance_penalty
                 new_food_distance = self._nearest_food_distance(agent.position)
@@ -537,8 +651,12 @@ class MultiAgentRLRLGym:
                 ):
                     reward -= max(0.0, 0.02 - 0.002 * athletics_level)
                     events.append("stutter_penalty")
+                repeat_window = max(2, int(self.config.repeat_visit_window))
+                if agent.recent_positions[-repeat_window:].count(agent.position) >= 2:
+                    reward -= float(self.config.repeat_visit_penalty)
+                    events.append("repeat_visit_penalty")
                 agent.recent_positions.append(agent.position)
-                agent.recent_positions = agent.recent_positions[-5:]
+                agent.recent_positions = agent.recent_positions[-max(5, repeat_window):]
                 agent.wait_streak = 0
             else:
                 reward -= max(0.0, 0.02 - 0.002 * athletics_level)
@@ -548,6 +666,13 @@ class MultiAgentRLRLGym:
             agent.wait_streak += 1
             reward -= 0.01
             events.append("wait")
+            if (
+                not self._enemy_visible(aid)
+                and (agent.hunger / max(1, agent.max_hunger))
+                >= float(self.config.wait_safe_hunger_ratio)
+            ):
+                reward -= float(self.config.wait_no_enemy_penalty)
+                events.append("wait_no_enemy_penalty")
             if agent.wait_streak > 3:
                 reward -= 0.02
                 events.append("wait_loop_penalty")
@@ -872,6 +997,181 @@ class MultiAgentRLRLGym:
             rewards[aid] -= LOW_HUNGER_PENALTY_SCALE * pressure
             info[aid]["events"].append("low_hunger_pressure")
 
+    def _apply_search_and_exploration_rewards(
+        self,
+        aid: str,
+        rewards: Dict[str, float],
+        info: Dict[str, Dict[str, object]],
+        pre_enemy_distance: int | None,
+        pre_enemy_visible: bool,
+    ) -> None:
+        assert self.state is not None
+        agent = self.state.agents[aid]
+        if not agent.alive:
+            return
+
+        metrics = self._episode_metrics.get(aid)
+        if metrics is None:
+            return
+
+        seen_tiles = metrics.setdefault("seen_tiles", set())
+        if not isinstance(seen_tiles, set):
+            seen_tiles = set()
+            metrics["seen_tiles"] = seen_tiles
+
+        visible_now = self._visible_tile_coords(aid)
+        unseen_before = set(seen_tiles)
+        new_tiles = [pos for pos in visible_now if pos not in unseen_before]
+        if new_tiles:
+            seen_tiles.update(new_tiles)
+            metrics["steps_since_new_tile"] = 0
+            rewards[aid] += float(self.config.new_tile_seen_reward) * float(len(new_tiles))
+            info[aid]["events"].append(f"new_tiles_seen:{len(new_tiles)}")
+        else:
+            steps_without = int(metrics.get("steps_since_new_tile", 0)) + 1
+            metrics["steps_since_new_tile"] = steps_without
+            if steps_without >= max(1, int(self.config.stagnation_threshold_steps)):
+                rewards[aid] -= float(self.config.stagnation_penalty)
+                info[aid]["events"].append("stagnation_penalty")
+
+        action = int(info[aid].get("action", ACTION_WAIT))
+        moved = any(
+            isinstance(evt, str) and evt.startswith("move:")
+            for evt in info[aid]["events"]
+        )
+        if moved and action in MOVE_DELTAS and self._is_frontier_tile(agent.position, unseen_before):
+            rewards[aid] += float(self.config.frontier_step_reward)
+            info[aid]["events"].append("frontier_step")
+
+        curr_enemy_visible = self._enemy_visible(aid)
+        curr_enemy_distance = self._nearest_opponent_distance(aid)
+        if curr_enemy_visible:
+            self._episode_any_enemy_seen = True
+            metrics["ever_enemy_seen"] = True
+            metrics["enemy_visible_steps"] = int(metrics.get("enemy_visible_steps", 0)) + 1
+            if metrics.get("first_enemy_seen_step") is None:
+                metrics["first_enemy_seen_step"] = int(self.state.step_count)
+                rewards[aid] += float(self.config.first_enemy_seen_bonus)
+                info[aid]["events"].append("first_enemy_seen")
+            rewards[aid] += float(self.config.enemy_visible_reward)
+            info[aid]["events"].append("enemy_visible")
+        if pre_enemy_visible and not curr_enemy_visible:
+            rewards[aid] -= float(self.config.lost_enemy_penalty)
+            info[aid]["events"].append("enemy_lost")
+        if pre_enemy_distance is not None and curr_enemy_distance is not None:
+            delta = float(pre_enemy_distance - curr_enemy_distance)
+            clip = max(0.0, float(self.config.enemy_distance_delta_clip))
+            if clip > 0.0:
+                delta = max(-clip, min(clip, delta))
+            if abs(delta) > 0.0:
+                rewards[aid] += float(self.config.enemy_distance_delta_reward_scale) * delta
+                info[aid]["events"].append(f"enemy_distance_delta:{delta:.2f}")
+            metrics["enemy_distance_delta_sum"] = float(
+                metrics.get("enemy_distance_delta_sum", 0.0)
+            ) + float(delta)
+            metrics["enemy_distance_delta_count"] = int(
+                metrics.get("enemy_distance_delta_count", 0)
+            ) + 1
+        metrics["last_enemy_distance"] = curr_enemy_distance
+
+        combat_exchange = any(
+            isinstance(evt, str)
+            and (
+                evt.startswith("agent_interact:attack:")
+                or evt.startswith("agent_interact:attack_monster:")
+                or evt.startswith("monster_attack:")
+                or evt.startswith("monster_hit:")
+                or evt.startswith("monster_miss:")
+                or evt.startswith("agent_interact:hit:")
+                or evt.startswith("agent_interact:hit_monster:")
+            )
+            for evt in info[aid]["events"]
+        )
+        if combat_exchange:
+            metrics["combat_exchanges"] = int(metrics.get("combat_exchanges", 0)) + 1
+            self._episode_combat_exchanges += 1
+
+    def _observation_window_dims(self, aid: str) -> Tuple[int, int]:
+        assert self.state is not None
+        cfg = self.config.agent_observation_config.get(aid, {})
+        agent = self.state.agents[aid]
+        profile = self._profile_for_agent(aid)
+        exploration_bonus = max(0, self._skill_level(agent, "exploration"))
+        view_width = int(cfg.get("view_width", profile.view_width)) + exploration_bonus
+        view_height = int(cfg.get("view_height", profile.view_height)) + exploration_bonus
+        return max(1, view_height), max(1, view_width)
+
+    def _visible_tile_coords(self, aid: str) -> List[Tuple[int, int]]:
+        assert self.state is not None
+        if aid not in self.state.agents:
+            return []
+        agent = self.state.agents[aid]
+        if not agent.alive:
+            return []
+        view_height, view_width = self._observation_window_dims(aid)
+        cr, cc = agent.position
+        start_r = cr - (view_height // 2)
+        start_c = cc - (view_width // 2)
+        out: List[Tuple[int, int]] = []
+        for r in range(start_r, start_r + view_height):
+            for c in range(start_c, start_c + view_width):
+                if (
+                    r < 0
+                    or c < 0
+                    or r >= len(self.state.grid)
+                    or c >= len(self.state.grid[0])
+                ):
+                    continue
+                out.append((r, c))
+        return out
+
+    def _is_frontier_tile(self, pos: Tuple[int, int], seen_before: set[Tuple[int, int]]) -> bool:
+        assert self.state is not None
+        r, c = pos
+        for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+            if (
+                nr < 0
+                or nc < 0
+                or nr >= len(self.state.grid)
+                or nc >= len(self.state.grid[0])
+            ):
+                continue
+            if (nr, nc) not in seen_before:
+                return True
+        return False
+
+    def _nearest_opponent_distance(self, aid: str) -> int | None:
+        assert self.state is not None
+        actor = self.state.agents[aid]
+        if not actor.alive:
+            return None
+        best: int | None = None
+        for other_id, other in self.state.agents.items():
+            if other_id == aid or not other.alive:
+                continue
+            d = self._manhattan(actor.position, other.position)
+            if best is None or d < best:
+                best = d
+        return best
+
+    def _enemy_visible(self, aid: str) -> bool:
+        assert self.state is not None
+        actor = self.state.agents[aid]
+        if not actor.alive:
+            return False
+        view_height, view_width = self._observation_window_dims(aid)
+        half_h = view_height // 2
+        half_w = view_width // 2
+        ar, ac = actor.position
+        for other_id, other in self.state.agents.items():
+            if other_id == aid or not other.alive:
+                continue
+            dr = abs(other.position[0] - ar)
+            dc = abs(other.position[1] - ac)
+            if dr <= half_h and dc <= half_w:
+                return True
+        return False
+
     def _walkable(self, r: int, c: int) -> bool:
         assert self.state is not None
         if r < 0 or c < 0 or r >= len(self.state.grid) or c >= len(self.state.grid[0]):
@@ -914,11 +1214,7 @@ class MultiAgentRLRLGym:
 
         agent = self.state.agents[aid]
         profile = self._profile_for_agent(aid)
-        exploration_bonus = max(0, self._skill_level(agent, "exploration"))
-        view_width = int(cfg.get("view_width", profile.view_width)) + exploration_bonus
-        view_height = int(cfg.get("view_height", profile.view_height)) + exploration_bonus
-        view_width = max(1, view_width)
-        view_height = max(1, view_height)
+        view_height, view_width = self._observation_window_dims(aid)
         include_grid = bool(cfg.get("include_grid", profile.include_grid))
         include_stats = bool(cfg.get("include_stats", profile.include_stats))
         include_inventory = bool(
@@ -937,6 +1233,10 @@ class MultiAgentRLRLGym:
             nearby_item_counts = self._nearby_item_counts(
                 center=agent.position, height=view_height, width=view_width
             )
+            metrics = self._episode_metrics.get(aid, {})
+            seen_tiles = int(len(metrics.get("seen_tiles", set())))
+            dcnt = int(metrics.get("enemy_distance_delta_count", 0))
+            dsum = float(metrics.get("enemy_distance_delta_sum", 0.0))
             obs["stats"] = {
                 "hp": agent.hp,
                 "hunger": agent.hunger,
@@ -954,6 +1254,13 @@ class MultiAgentRLRLGym:
                     agent.position
                 ),
                 "teammate_distance": self._nearest_teammate_distance(aid),
+                "enemy_distance": self._nearest_opponent_distance(aid),
+                "enemy_visible": self._enemy_visible(aid),
+                "explore_coverage": float(seen_tiles) / float(self._walkable_tile_count),
+                "steps_since_new_tile": int(metrics.get("steps_since_new_tile", 0)),
+                "first_enemy_seen_step": metrics.get("first_enemy_seen_step"),
+                "enemy_visible_steps": int(metrics.get("enemy_visible_steps", 0)),
+                "enemy_distance_delta_mean": (dsum / dcnt) if dcnt > 0 else 0.0,
                 "nearby_chests": self._nearby_chest_counts(
                     center=agent.position, height=view_height, width=view_width
                 ),
