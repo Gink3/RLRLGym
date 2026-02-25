@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--dashboard-update-every",
         type=int,
-        default=1,
+        default=10,
         help="Rewrite dashboard/summary artifacts every N episodes (custom) or iterations (rllib).",
     )
     p.add_argument(

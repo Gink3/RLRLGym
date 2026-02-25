@@ -53,6 +53,8 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         self._replay_actions = []
         self._replay_step_logs = []
         self._curriculum_phases = self._parse_curriculum_phases(cfg.get("curriculum_phases"))
+        self._active_phase_name = "default"
+        self._active_phase_index = 0
 
     @property
     def observation_space(self):
@@ -114,6 +116,8 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                 break
         if selected is None:
             selected = self._curriculum_phases[-1]
+        self._active_phase_name = str(selected.get("name", "phase"))
+        self._active_phase_index = int(self._curriculum_phases.index(selected)) + 1
 
         if "monster_density" in selected:
             self.base.mapgen_cfg.monster_density = float(selected["monster_density"])
@@ -133,6 +137,11 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
 
     def step(self, action_dict):
         obs, rewards, terminations, truncations, info = self.base.step(action_dict)
+        for aid in self.possible_agents:
+            info.setdefault(aid, {})
+            if isinstance(info[aid], dict):
+                info[aid]["phase_name"] = self._active_phase_name
+                info[aid]["phase_index"] = self._active_phase_index
         if self._replay_states:
             self._replay_states.append(self.base.capture_playback_state())
             self._replay_actions.append(

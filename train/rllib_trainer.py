@@ -7,12 +7,14 @@ import logging
 import numbers
 import os
 import shutil
+import subprocess
+import sys
 import warnings
 from collections.abc import MutableMapping
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from rlrlgym.curriculum import load_curriculum_phases
 
 
@@ -34,7 +36,7 @@ class RLlibTrainConfig:
     curriculum_path: str = "data/curriculum_phases.json"
     shared_policy: bool = False
     curriculum_enabled: bool = True
-    dashboard_update_every: int = 1
+    dashboard_update_every: int = 10
 
 
 class RLlibTrainer:
@@ -100,6 +102,12 @@ class RLlibTrainer:
         recent_survival: deque[float] = deque(maxlen=window)
         recent_loss: deque[float] = deque(maxlen=window)
 
+        curriculum_phases = (
+            load_curriculum_phases(self.config.curriculum_path)
+            if self.config.curriculum_enabled
+            else []
+        )
+        monster_name_map = self._load_monster_name_map(self.config.env_config_path)
         env_config = {
             "render_enabled": False,
             "agent_profile_map": {"agent_0": "human", "agent_1": "orc"},
@@ -107,11 +115,7 @@ class RLlibTrainer:
             "replay_output_dir": str(Path(self.config.output_dir).resolve()),
             "save_latest_replay": True,
             "env_config_path": self.config.env_config_path,
-            "curriculum_phases": (
-                load_curriculum_phases(self.config.curriculum_path)
-                if self.config.curriculum_enabled
-                else []
-            ),
+            "curriculum_phases": curriculum_phases,
         }
         if self.config.width is not None:
             env_config["width"] = int(self.config.width)
@@ -167,6 +171,16 @@ class RLlibTrainer:
                     "other": 0,
                     "total": 0,
                 }
+                store["reward_components"] = {
+                    "action_total": 0.0,
+                    "survival": 0.0,
+                    "search_explore": 0.0,
+                    "profile_shape": 0.0,
+                    "terminal": 0.0,
+                }
+                store["damage_events"] = 0
+                store["kill_events"] = 0
+                store["phase_index"] = 0.0
 
             def on_episode_step(self, *, episode, **kwargs):
                 store = self._get_episode_store(episode)
@@ -198,6 +212,34 @@ class RLlibTrainer:
                     else:
                         counts["other"] += 1
                     counts["total"] += 1
+                    rc = info.get("reward_components")
+                    if isinstance(rc, dict):
+                        rcs = store.get("reward_components")
+                        if isinstance(rcs, dict):
+                            for k in ("action_total", "survival", "search_explore", "profile_shape", "terminal"):
+                                val = rc.get(k)
+                                if isinstance(val, numbers.Real):
+                                    rcs[k] = float(rcs.get(k, 0.0)) + float(val)
+                    events = info.get("events", [])
+                    if isinstance(events, list):
+                        for evt in events:
+                            if not isinstance(evt, str):
+                                continue
+                            if (
+                                evt.startswith("agent_interact:hit:")
+                                or evt.startswith("agent_interact:hit_monster:")
+                                or evt.startswith("monster_hit:")
+                            ):
+                                store["damage_events"] = int(store.get("damage_events", 0)) + 1
+                            if (
+                                evt.startswith("agent_interact:kill:")
+                                or evt.startswith("agent_interact:kill_monster:")
+                                or evt.startswith("death_by_monster:")
+                            ):
+                                store["kill_events"] = int(store.get("kill_events", 0)) + 1
+                    pidx = info.get("phase_index")
+                    if isinstance(pidx, numbers.Real):
+                        store["phase_index"] = max(float(store.get("phase_index", 0.0)), float(pidx))
 
             def on_episode_end(self, *, episode, metrics_logger=None, **kwargs):
                 agent_ids = []
@@ -216,6 +258,7 @@ class RLlibTrainer:
                     "agent": 0,
                     "other": 0,
                 }
+                death_by_monster: Dict[str, int] = {}
                 coverages = []
                 stagnation_steps = []
                 enemy_visible_steps = []
@@ -280,6 +323,14 @@ class RLlibTrainer:
                             for evt in events
                         ):
                             death_counts["monster"] += 1
+                            for evt in events:
+                                if isinstance(evt, str) and evt.startswith("death_by_monster:"):
+                                    monster_id = evt.split(":", 1)[1].strip()
+                                    if monster_id:
+                                        death_by_monster[monster_id] = (
+                                            death_by_monster.get(monster_id, 0) + 1
+                                        )
+                                    break
                         elif death_reason.startswith("killed by agent"):
                             death_counts["agent"] += 1
                         else:
@@ -390,6 +441,62 @@ class RLlibTrainer:
                 self._emit_metric(
                     episode,
                     metrics_logger,
+                    "engagement_rate",
+                    1.0 if any(v > 0.0 for v in combat_exchange_counts) else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "damage_event_count",
+                    float(store.get("damage_events", 0)),
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "kill_event_count",
+                    float(store.get("kill_events", 0)),
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "phase_index",
+                    float(store.get("phase_index", 0.0)),
+                )
+                rcs = store.get("reward_components", {})
+                if isinstance(rcs, dict):
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        "reward_comp_action_total",
+                        float(rcs.get("action_total", 0.0)),
+                    )
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        "reward_comp_survival",
+                        float(rcs.get("survival", 0.0)),
+                    )
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        "reward_comp_search_explore",
+                        float(rcs.get("search_explore", 0.0)),
+                    )
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        "reward_comp_profile_shape",
+                        float(rcs.get("profile_shape", 0.0)),
+                    )
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        "reward_comp_terminal",
+                        float(rcs.get("terminal", 0.0)),
+                    )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
                     "death_starvation",
                     float(death_counts["starvation"]) / n_agents,
                 )
@@ -411,6 +518,13 @@ class RLlibTrainer:
                     "death_other",
                     float(death_counts["other"]) / n_agents,
                 )
+                for monster_id, cnt in death_by_monster.items():
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        f"death_by_monster__{monster_id}",
+                        float(cnt) / n_agents,
+                    )
                 self._episode_action_counts.pop(id(episode), None)
 
         # Reduce warning noise from known Ray transitional deprecations.
@@ -487,6 +601,7 @@ class RLlibTrainer:
             "agent": 0,
             "other": 0,
         }
+        death_by_monster_histogram: Dict[str, int] = {}
         n_agents = int(env_config.get("n_agents", 2))
         update_every = max(1, int(self.config.dashboard_update_every))
         episodes_total_running = 0.0
@@ -689,6 +804,117 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
+            engagement_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "engagement_rate_mean"),
+                    ("custom_metrics", "engagement_rate"),
+                    ("env_runners", "custom_metrics", "engagement_rate_mean"),
+                    ("env_runners", "custom_metrics", "engagement_rate"),
+                ],
+                default=0.0,
+            )
+            damage_event_count = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "damage_event_count_mean"),
+                    ("custom_metrics", "damage_event_count"),
+                    ("env_runners", "custom_metrics", "damage_event_count_mean"),
+                    ("env_runners", "custom_metrics", "damage_event_count"),
+                ],
+                default=0.0,
+            )
+            kill_event_count = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "kill_event_count_mean"),
+                    ("custom_metrics", "kill_event_count"),
+                    ("env_runners", "custom_metrics", "kill_event_count_mean"),
+                    ("env_runners", "custom_metrics", "kill_event_count"),
+                ],
+                default=0.0,
+            )
+            phase_index = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "phase_index_mean"),
+                    ("custom_metrics", "phase_index"),
+                    ("env_runners", "custom_metrics", "phase_index_mean"),
+                    ("env_runners", "custom_metrics", "phase_index"),
+                ],
+                default=0.0,
+            )
+            if phase_index <= 0.0:
+                phase_index = float(
+                    self._phase_index_for_episode(
+                        episode=int(episodes_total),
+                        phases=curriculum_phases,
+                    )
+                )
+            phase_name = self._phase_name_for_index(
+                phase_index=int(round(phase_index)),
+                phases=curriculum_phases,
+            )
+            reward_comp_action_total = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "reward_comp_action_total_mean"),
+                    ("custom_metrics", "reward_comp_action_total"),
+                    ("env_runners", "custom_metrics", "reward_comp_action_total_mean"),
+                    ("env_runners", "custom_metrics", "reward_comp_action_total"),
+                ],
+                default=0.0,
+            )
+            reward_comp_survival = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "reward_comp_survival_mean"),
+                    ("custom_metrics", "reward_comp_survival"),
+                    ("env_runners", "custom_metrics", "reward_comp_survival_mean"),
+                    ("env_runners", "custom_metrics", "reward_comp_survival"),
+                ],
+                default=0.0,
+            )
+            reward_comp_search_explore = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "reward_comp_search_explore_mean"),
+                    ("custom_metrics", "reward_comp_search_explore"),
+                    ("env_runners", "custom_metrics", "reward_comp_search_explore_mean"),
+                    ("env_runners", "custom_metrics", "reward_comp_search_explore"),
+                ],
+                default=0.0,
+            )
+            reward_comp_profile_shape = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "reward_comp_profile_shape_mean"),
+                    ("custom_metrics", "reward_comp_profile_shape"),
+                    ("env_runners", "custom_metrics", "reward_comp_profile_shape_mean"),
+                    ("env_runners", "custom_metrics", "reward_comp_profile_shape"),
+                ],
+                default=0.0,
+            )
+            reward_comp_terminal = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "reward_comp_terminal_mean"),
+                    ("custom_metrics", "reward_comp_terminal"),
+                    ("env_runners", "custom_metrics", "reward_comp_terminal_mean"),
+                    ("env_runners", "custom_metrics", "reward_comp_terminal"),
+                ],
+                default=0.0,
+            )
+            policy_entropy = self._extract_metric_by_substring(
+                result=result,
+                substrings=("entropy",),
+                default=0.0,
+            )
+            policy_kl = self._extract_metric_by_substring(
+                result=result,
+                substrings=("kl",),
+                default=0.0,
+            )
             death_starvation_rate = self._extract_float(
                 result,
                 [
@@ -729,6 +955,7 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
+            custom_metrics = self._extract_custom_metric_map(result)
             loss = self._extract_loss(result)
             if episodes_this_iter > 0:
                 deaths_scale = int(round(episodes_this_iter)) * max(1, n_agents)
@@ -736,6 +963,16 @@ class RLlibTrainer:
                 death_histogram["monster"] += int(round(death_monster_rate * deaths_scale))
                 death_histogram["agent"] += int(round(death_agent_rate * deaths_scale))
                 death_histogram["other"] += int(round(death_other_rate * deaths_scale))
+                for key, value in custom_metrics.items():
+                    if not key.startswith("death_by_monster__"):
+                        continue
+                    monster_id = key.split("__", 1)[1].strip()
+                    if not monster_id:
+                        continue
+                    death_by_monster_histogram[monster_id] = (
+                        death_by_monster_histogram.get(monster_id, 0)
+                        + int(round(float(value) * deaths_scale))
+                    )
 
             recent_returns.append(reward_mean)
             recent_agent0_wins.append(agent0_win)
@@ -770,6 +1007,18 @@ class RLlibTrainer:
                     "first_enemy_seen_step": first_enemy_seen_step,
                     "combat_exchanges": combat_exchanges,
                     "timeout_no_contact_rate": timeout_no_contact_rate,
+                    "engagement_rate": engagement_rate,
+                    "damage_event_count": damage_event_count,
+                    "kill_event_count": kill_event_count,
+                    "phase_index": int(round(phase_index)),
+                    "phase_name": phase_name,
+                    "reward_comp_action_total": reward_comp_action_total,
+                    "reward_comp_survival": reward_comp_survival,
+                    "reward_comp_search_explore": reward_comp_search_explore,
+                    "reward_comp_profile_shape": reward_comp_profile_shape,
+                    "reward_comp_terminal": reward_comp_terminal,
+                    "policy_entropy": policy_entropy,
+                    "policy_kl": policy_kl,
                     "death_starvation": int(death_histogram["starvation"]),
                     "death_monster": int(death_histogram["monster"]),
                     "death_agent": int(death_histogram["agent"]),
@@ -794,6 +1043,8 @@ class RLlibTrainer:
                     metrics_rows=metrics_rows,
                     checkpoint=None,
                     death_histogram=death_histogram,
+                    death_by_monster_histogram=death_by_monster_histogram,
+                    monster_name_map=monster_name_map,
                     replay_save_every=int(self.config.replay_save_every),
                 )
 
@@ -817,8 +1068,13 @@ class RLlibTrainer:
             "metrics": str(metrics_path),
             "replay_dir": str((out / "replays").resolve()),
             "replay_save_every": int(self.config.replay_save_every),
-            "cause_of_death_histogram": {k: int(v) for k, v in death_histogram.items()},
+            "cause_of_death_histogram": self._compose_cause_histogram(
+                death_histogram=death_histogram,
+                death_by_monster_histogram=death_by_monster_histogram,
+                monster_name_map=monster_name_map,
+            ),
         }
+        summary["plot_images"] = self._write_metric_plots(out=out, metrics_rows=metrics_rows)
         dashboard_path = out / "dashboard.html"
         dashboard_path.write_text(
             self._build_dashboard_html(metrics_rows=metrics_rows, summary=summary),
@@ -836,6 +1092,8 @@ class RLlibTrainer:
         metrics_rows: list[dict],
         checkpoint: str | None,
         death_histogram: dict[str, int],
+        death_by_monster_histogram: dict[str, int],
+        monster_name_map: Dict[str, str],
         replay_save_every: int,
     ) -> None:
         metrics_path = out / "rllib_metrics.json"
@@ -848,8 +1106,13 @@ class RLlibTrainer:
             "metrics": str(metrics_path),
             "replay_dir": str((out / "replays").resolve()),
             "replay_save_every": int(replay_save_every),
-            "cause_of_death_histogram": {k: int(v) for k, v in death_histogram.items()},
+            "cause_of_death_histogram": self._compose_cause_histogram(
+                death_histogram=death_histogram,
+                death_by_monster_histogram=death_by_monster_histogram,
+                monster_name_map=monster_name_map,
+            ),
         }
+        summary["plot_images"] = self._write_metric_plots(out=out, metrics_rows=metrics_rows)
         dashboard_path = out / "dashboard.html"
         dashboard_path.write_text(
             self._build_dashboard_html(metrics_rows=metrics_rows, summary=summary),
@@ -912,6 +1175,220 @@ class RLlibTrainer:
                     return sum(losses) / len(losses)
         return 0.0
 
+    def _extract_custom_metric_map(self, result: Dict[str, object]) -> Dict[str, float]:
+        merged: Dict[str, Tuple[int, float]] = {}
+
+        def _ingest(blob: object) -> None:
+            if not isinstance(blob, dict):
+                return
+            for raw_key, raw_val in blob.items():
+                if not isinstance(raw_key, str):
+                    continue
+                if not isinstance(raw_val, numbers.Real):
+                    continue
+                key = raw_key
+                priority = 1
+                if key.endswith("_mean"):
+                    key = key[: -len("_mean")]
+                    priority = 2
+                old = merged.get(key)
+                if old is None or priority >= old[0]:
+                    merged[key] = (priority, float(raw_val))
+
+        _ingest(result.get("custom_metrics"))
+        env_runners = result.get("env_runners")
+        if isinstance(env_runners, dict):
+            _ingest(env_runners.get("custom_metrics"))
+        return {k: v for k, (_, v) in merged.items()}
+
+    def _extract_metric_by_substring(
+        self,
+        result: Dict[str, object],
+        substrings: Tuple[str, ...],
+        default: float = 0.0,
+    ) -> float:
+        info = result.get("info", {})
+        if not isinstance(info, dict):
+            return default
+        learner = info.get("learner", {})
+        if not isinstance(learner, dict):
+            return default
+        vals: list[float] = []
+        needles = tuple(s.lower() for s in substrings)
+        for pdata in learner.values():
+            if not isinstance(pdata, dict):
+                continue
+            stats = pdata.get("learner_stats", pdata)
+            if not isinstance(stats, dict):
+                continue
+            for k, v in stats.items():
+                if not isinstance(v, numbers.Real):
+                    continue
+                key = str(k).lower()
+                if all(n in key for n in needles):
+                    vals.append(float(v))
+        if not vals:
+            return default
+        return sum(vals) / len(vals)
+
+    def _phase_index_for_episode(self, episode: int, phases: list[dict]) -> int:
+        if not phases:
+            return 0
+        ep = max(0, int(episode))
+        for idx, phase in enumerate(phases, start=1):
+            until = int(phase.get("until_episode", 0) or 0)
+            if until > 0 and ep <= until:
+                return idx
+        return len(phases)
+
+    def _phase_name_for_index(self, phase_index: int, phases: list[dict]) -> str:
+        if not phases or phase_index <= 0:
+            return "default"
+        idx = max(1, int(phase_index))
+        if idx > len(phases):
+            idx = len(phases)
+        return str(phases[idx - 1].get("name", f"phase_{idx}"))
+
+    def _compose_cause_histogram(
+        self,
+        death_histogram: Dict[str, int],
+        death_by_monster_histogram: Dict[str, int],
+        monster_name_map: Dict[str, str],
+    ) -> Dict[str, int]:
+        out: Dict[str, int] = {
+            "starvation": int(death_histogram.get("starvation", 0)),
+            "killed_by_monster": int(death_histogram.get("monster", 0)),
+            "killed_by_agent": int(death_histogram.get("agent", 0)),
+            "other": int(death_histogram.get("other", 0)),
+        }
+        for monster_id in sorted(death_by_monster_histogram.keys()):
+            monster_name = monster_name_map.get(monster_id, monster_id)
+            out[f"killed_by_monster:{monster_name}"] = int(
+                death_by_monster_histogram.get(monster_id, 0)
+            )
+        return out
+
+    def _load_monster_name_map(self, env_config_path: str) -> Dict[str, str]:
+        try:
+            raw = json.loads(Path(env_config_path).read_text(encoding="utf-8"))
+            payload = raw.get("env_config", raw) if isinstance(raw, dict) else {}
+            monsters_path = str(payload.get("monsters_path", "data/monsters.json"))
+            mon_raw = json.loads(Path(monsters_path).read_text(encoding="utf-8"))
+            out: Dict[str, str] = {}
+            if isinstance(mon_raw, dict):
+                rows = mon_raw.get("monsters", [])
+                if isinstance(rows, list):
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        mid = str(row.get("monster_id", "")).strip()
+                        name = str(row.get("name", "")).strip()
+                        if mid:
+                            out[mid] = name or mid
+            return out
+        except Exception:
+            return {}
+
+    def _write_metric_plots(self, out: Path, metrics_rows: list[dict]) -> Dict[str, str]:
+        plots_dir = out / "plots"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "reward": [float(r.get("episode_reward_mean", 0.0) or 0.0) for r in metrics_rows],
+            "rolling_reward50": [
+                float(
+                    sum(
+                        float(metrics_rows[j].get("episode_reward_mean", 0.0) or 0.0)
+                        for j in range(max(0, i - 49), i + 1)
+                    )
+                    / max(1, (i - max(0, i - 49) + 1))
+                )
+                for i in range(len(metrics_rows))
+            ],
+            "win_rate": [float(r.get("win_rate", 0.0) or 0.0) for r in metrics_rows],
+            "survival_mean": [float(r.get("survival_mean", 0.0) or 0.0) for r in metrics_rows],
+            "starvation_rate": [float(r.get("starvation_rate", 0.0) or 0.0) for r in metrics_rows],
+            "loss": [float(r.get("loss", 0.0) or 0.0) for r in metrics_rows],
+            "mean_teammate_distance": [
+                float(r.get("mean_teammate_distance", 0.0) or 0.0) for r in metrics_rows
+            ],
+            "explore_coverage": [float(r.get("explore_coverage", 0.0) or 0.0) for r in metrics_rows],
+            "steps_since_new_tile": [
+                float(r.get("steps_since_new_tile", 0.0) or 0.0) for r in metrics_rows
+            ],
+            "enemy_visible_steps": [
+                float(r.get("enemy_visible_steps", 0.0) or 0.0) for r in metrics_rows
+            ],
+            "enemy_distance": [float(r.get("enemy_distance", 0.0) or 0.0) for r in metrics_rows],
+            "enemy_distance_delta_mean": [
+                float(r.get("enemy_distance_delta_mean", 0.0) or 0.0) for r in metrics_rows
+            ],
+            "first_enemy_seen_rate": [
+                float(r.get("first_enemy_seen_rate", 0.0) or 0.0) for r in metrics_rows
+            ],
+            "first_enemy_seen_step": [
+                float(r.get("first_enemy_seen_step", 0.0) or 0.0) for r in metrics_rows
+            ],
+            "combat_exchanges": [float(r.get("combat_exchanges", 0.0) or 0.0) for r in metrics_rows],
+            "timeout_no_contact_rate": [
+                float(r.get("timeout_no_contact_rate", 0.0) or 0.0) for r in metrics_rows
+            ],
+            "action_wait_rate": [float(r.get("action_wait_rate", 0.0) or 0.0) for r in metrics_rows],
+            "action_move_rate": [float(r.get("action_move_rate", 0.0) or 0.0) for r in metrics_rows],
+            "action_interact_rate": [float(r.get("action_interact_rate", 0.0) or 0.0) for r in metrics_rows],
+            "engagement_rate": [float(r.get("engagement_rate", 0.0) or 0.0) for r in metrics_rows],
+            "damage_event_count": [float(r.get("damage_event_count", 0.0) or 0.0) for r in metrics_rows],
+            "kill_event_count": [float(r.get("kill_event_count", 0.0) or 0.0) for r in metrics_rows],
+            "reward_comp_action_total": [float(r.get("reward_comp_action_total", 0.0) or 0.0) for r in metrics_rows],
+            "reward_comp_survival": [float(r.get("reward_comp_survival", 0.0) or 0.0) for r in metrics_rows],
+            "reward_comp_search_explore": [float(r.get("reward_comp_search_explore", 0.0) or 0.0) for r in metrics_rows],
+            "reward_comp_profile_shape": [float(r.get("reward_comp_profile_shape", 0.0) or 0.0) for r in metrics_rows],
+            "reward_comp_terminal": [float(r.get("reward_comp_terminal", 0.0) or 0.0) for r in metrics_rows],
+            "policy_entropy": [float(r.get("policy_entropy", 0.0) or 0.0) for r in metrics_rows],
+            "policy_kl": [float(r.get("policy_kl", 0.0) or 0.0) for r in metrics_rows],
+            "phase_index": [int(float(r.get("phase_index", 0) or 0)) for r in metrics_rows],
+        }
+        payload_path = plots_dir / "curves.json"
+        payload_path.write_text(json.dumps(payload), encoding="utf-8")
+        script = (
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "import matplotlib\n"
+            "matplotlib.use('Agg')\n"
+            "import matplotlib.pyplot as plt\n"
+            "curves = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\n"
+            "out = Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)\n"
+            "phase_idx = curves.get('phase_index', [])\n"
+            "for name, y in curves.items():\n"
+            "    if name == 'phase_index':\n"
+            "        continue\n"
+            "    x = list(range(1, len(y)+1))\n"
+            "    plt.figure(figsize=(8,3))\n"
+            "    plt.plot(x, y, linewidth=1.8)\n"
+            "    if phase_idx and len(phase_idx) == len(y):\n"
+            "        last = phase_idx[0]\n"
+            "        for i, p in enumerate(phase_idx[1:], start=2):\n"
+            "            if p != last:\n"
+            "                plt.axvline(i, color='#ff7f0e', linestyle='--', linewidth=1, alpha=0.8)\n"
+            "                last = p\n"
+            "    plt.title(name)\n"
+            "    plt.xlabel('Iteration')\n"
+            "    plt.grid(alpha=0.25)\n"
+            "    plt.tight_layout()\n"
+            "    plt.savefig(out / f'{name}.png', dpi=130)\n"
+            "    plt.close()\n"
+        )
+        try:
+            subprocess.run(
+                [sys.executable, "-c", script, str(payload_path), str(plots_dir)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            return {}
+        names = sorted(k for k in payload.keys() if k != "phase_index")
+        return {name: f"plots/{name}.png" for name in names}
+
     def _print_live_progress(
         self,
         iteration: int,
@@ -963,8 +1440,21 @@ class RLlibTrainer:
         latest_first_seen_step = float(latest.get("first_enemy_seen_step", 0.0) or 0.0)
         latest_combat_exchanges = float(latest.get("combat_exchanges", 0.0) or 0.0)
         latest_timeout_no_contact = float(latest.get("timeout_no_contact_rate", 0.0) or 0.0)
+        latest_engagement_rate = float(latest.get("engagement_rate", 0.0) or 0.0)
+        latest_damage_events = float(latest.get("damage_event_count", 0.0) or 0.0)
+        latest_kill_events = float(latest.get("kill_event_count", 0.0) or 0.0)
+        latest_policy_entropy = float(latest.get("policy_entropy", 0.0) or 0.0)
+        latest_policy_kl = float(latest.get("policy_kl", 0.0) or 0.0)
+        latest_phase_idx = int(float(latest.get("phase_index", 0) or 0))
+        latest_phase_name = str(latest.get("phase_name", "default"))
+        latest_comp_action = float(latest.get("reward_comp_action_total", 0.0) or 0.0)
+        latest_comp_survival = float(latest.get("reward_comp_survival", 0.0) or 0.0)
+        latest_comp_search = float(latest.get("reward_comp_search_explore", 0.0) or 0.0)
+        latest_comp_profile = float(latest.get("reward_comp_profile_shape", 0.0) or 0.0)
+        latest_comp_terminal = float(latest.get("reward_comp_terminal", 0.0) or 0.0)
         latest_timesteps_total = int(float(latest.get("timesteps_total", 0) or 0))
         cause_hist = summary.get("cause_of_death_histogram", {}) or {}
+        plot_images = summary.get("plot_images", {}) or {}
         cause_hist_rows = "".join(
             [
                 (
@@ -998,6 +1488,36 @@ class RLlibTrainer:
         combat_exchanges_curve = [round(float(r.get("combat_exchanges", 0.0) or 0.0), 3) for r in metrics_rows]
         timeout_no_contact_curve = [round(float(r.get("timeout_no_contact_rate", 0.0) or 0.0), 4) for r in metrics_rows]
 
+        plot_rows = "".join(
+            [
+                (
+                    "<div class=\"plot-card\">"
+                    f"<div class=\"plot-title\">{name}</div>"
+                    f"<img src=\"{src}\" alt=\"{name}\" />"
+                    "</div>"
+                )
+                for name, src in sorted(plot_images.items())
+            ]
+        )
+        phase_rows = []
+        prev_phase = None
+        start_iter = 1
+        for idx, row in enumerate(metrics_rows, start=1):
+            p = str(row.get("phase_name", "default"))
+            if prev_phase is None:
+                prev_phase = p
+                start_iter = idx
+                continue
+            if p != prev_phase:
+                phase_rows.append((start_iter, idx - 1, prev_phase))
+                start_iter = idx
+                prev_phase = p
+        if prev_phase is not None:
+            phase_rows.append((start_iter, len(metrics_rows), prev_phase))
+        phase_timeline = "".join(
+            [f"<div class=\"phase-line\">iter {a}-{b}: {name}</div>" for a, b, name in phase_rows]
+        )
+
         rows_html = "".join(
             [
                 "<tr>"
@@ -1022,8 +1542,20 @@ class RLlibTrainer:
                 f"<td>{float(r.get('first_enemy_seen_step', 0.0) or 0.0):.2f}</td>"
                 f"<td>{float(r.get('combat_exchanges', 0.0) or 0.0):.2f}</td>"
                 f"<td>{float(r.get('timeout_no_contact_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('engagement_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('damage_event_count', 0.0) or 0.0):.2f}</td>"
+                f"<td>{float(r.get('kill_event_count', 0.0) or 0.0):.2f}</td>"
+                f"<td>{float(r.get('reward_comp_action_total', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('reward_comp_survival', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('reward_comp_search_explore', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('reward_comp_profile_shape', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('reward_comp_terminal', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('policy_entropy', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('policy_kl', 0.0) or 0.0):.6f}</td>"
+                f"<td>{int(float(r.get('phase_index', 0) or 0))}</td>"
+                f"<td>{str(r.get('phase_name', 'default'))}</td>"
                 "</tr>"
-                for r in metrics_rows
+                for r in reversed(metrics_rows)
             ]
         )
 
@@ -1092,6 +1624,32 @@ class RLlibTrainer:
       color: #d4def0;
       overflow-x: auto;
     }}
+    .plot-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 10px;
+    }}
+    .plot-card {{
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      background: #121a25;
+    }}
+    .plot-title {{
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }}
+    .plot-card img {{
+      width: 100%;
+      height: auto;
+      display: block;
+    }}
+    .phase-line {{
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 3px;
+    }}
   </style>
 </head>
 <body>
@@ -1118,33 +1676,38 @@ class RLlibTrainer:
     <div class="metric">Latest first_seen_step: {latest_first_seen_step:.2f}</div>
     <div class="metric">Latest combat_exchanges: {latest_combat_exchanges:.2f}</div>
     <div class="metric">Latest timeout_no_contact: {latest_timeout_no_contact:.4f}</div>
+    <div class="metric">Latest engagement rate: {latest_engagement_rate:.4f}</div>
+    <div class="metric">Latest damage events: {latest_damage_events:.2f}</div>
+    <div class="metric">Latest kill events: {latest_kill_events:.2f}</div>
+    <div class="metric">Latest policy entropy: {latest_policy_entropy:.4f}</div>
+    <div class="metric">Latest policy KL: {latest_policy_kl:.6f}</div>
+    <div class="metric">Latest phase: {latest_phase_idx} ({latest_phase_name})</div>
   </div>
   <div class="card">
-    <h3>Reward Curve (per iteration)</h3>
-    <pre>{reward_curve}</pre>
-    <h3>Rolling Reward50 (per iteration)</h3>
-    <pre>{rolling_reward50_curve}</pre>
+    <h3>Phase Timeline</h3>
+    {phase_timeline if phase_timeline else "<div class=\"phase-line\">No phase data.</div>"}
   </div>
   <div class="card">
-    <h3>All Metric Curves (per iteration)</h3>
-    <pre>win_rate={win_curve}</pre>
-    <pre>survival_mean={survival_curve}</pre>
-    <pre>starvation_rate={starvation_curve}</pre>
-    <pre>loss={loss_curve}</pre>
-    <pre>mean_teammate_distance={team_dist_curve}</pre>
-    <pre>action_wait_rate={wait_curve}</pre>
-    <pre>action_move_rate={move_curve}</pre>
-    <pre>action_interact_rate={interact_curve}</pre>
-    <pre>explore_coverage={explore_coverage_curve}</pre>
-    <pre>steps_since_new_tile={steps_since_new_curve}</pre>
-    <pre>enemy_visible_steps={enemy_visible_steps_curve}</pre>
-    <pre>enemy_distance={enemy_distance_curve}</pre>
-    <pre>enemy_distance_delta_mean={enemy_distance_delta_curve}</pre>
-    <pre>first_enemy_seen_rate={first_seen_rate_curve}</pre>
-    <pre>first_enemy_seen_step={first_seen_step_curve}</pre>
-    <pre>combat_exchanges={combat_exchanges_curve}</pre>
-    <pre>timeout_no_contact_rate={timeout_no_contact_curve}</pre>
-    <pre>rolling_reward50={rolling_reward50_curve}</pre>
+    <h3>Contact Funnel (Latest)</h3>
+    <div class="metric">enemy_seen_rate: {latest_first_seen_rate:.4f}</div>
+    <div class="metric">engagement_rate: {latest_engagement_rate:.4f}</div>
+    <div class="metric">damage_events: {latest_damage_events:.2f}</div>
+    <div class="metric">kills: {latest_kill_events:.2f}</div>
+    <div class="metric">timeout_no_contact: {latest_timeout_no_contact:.4f}</div>
+  </div>
+  <div class="card">
+    <h3>Reward Decomposition (Latest)</h3>
+    <div class="metric">action_total: {latest_comp_action:.4f}</div>
+    <div class="metric">survival: {latest_comp_survival:.4f}</div>
+    <div class="metric">search_explore: {latest_comp_search:.4f}</div>
+    <div class="metric">profile_shape: {latest_comp_profile:.4f}</div>
+    <div class="metric">terminal: {latest_comp_terminal:.4f}</div>
+  </div>
+  <div class="card">
+    <h3>Metric Curves (Images)</h3>
+    <div class="plot-grid">
+      {plot_rows if plot_rows else "<div class=\"plot-title\">Plot generation unavailable (matplotlib missing or subprocess failed).</div>"}
+    </div>
   </div>
   <div class="card">
     <h3>Cause Of Death Histogram</h3>
@@ -1154,7 +1717,7 @@ class RLlibTrainer:
     <h3>Iteration Metrics</h3>
     <table>
       <thead>
-        <tr><th>Iteration</th><th>Episodes Total</th><th>Timesteps Total</th><th>Reward Mean</th><th>Win Rate</th><th>Survival Mean</th><th>Starvation Rate</th><th>Loss</th><th>Team Dist</th><th>Wait</th><th>Move</th><th>Interact</th><th>ExploreCov</th><th>Stagnation</th><th>EnemyVis</th><th>EnemyDist</th><th>EnemyDistΔ</th><th>FirstSeenRate</th><th>FirstSeenStep</th><th>CombatX</th><th>TimeoutNoContact</th></tr>
+        <tr><th>Iteration</th><th>Episodes Total</th><th>Timesteps Total</th><th>Reward Mean</th><th>Win Rate</th><th>Survival Mean</th><th>Starvation Rate</th><th>Loss</th><th>Team Dist</th><th>Wait</th><th>Move</th><th>Interact</th><th>ExploreCov</th><th>Stagnation</th><th>EnemyVis</th><th>EnemyDist</th><th>EnemyDistΔ</th><th>FirstSeenRate</th><th>FirstSeenStep</th><th>CombatX</th><th>TimeoutNoContact</th><th>EngageRate</th><th>DamageEv</th><th>KillEv</th><th>RC:Action</th><th>RC:Survival</th><th>RC:Search</th><th>RC:Profile</th><th>RC:Terminal</th><th>Entropy</th><th>KL</th><th>PhaseIdx</th><th>Phase</th></tr>
       </thead>
       <tbody>
         {rows_html}
