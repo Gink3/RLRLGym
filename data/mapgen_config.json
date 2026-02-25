@@ -4,7 +4,7 @@
     "wall_tile_id": "wall",
     "floor_fallback_id": "floor",
     "chest_density": 0.06,
-    "monster_density": 0.2,
+    "monster_density": 0.05,
     "min_width": 4,
     "min_height": 4
   }
