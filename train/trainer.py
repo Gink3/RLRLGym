@@ -31,6 +31,7 @@ class TrainConfig:
     show_progress: bool = True
     replay_save_every: int = 1000
     env_config_path: str = "data/env_config.json"
+    dashboard_update_every: int = 10
 
 
 class MultiAgentTrainer:
@@ -75,6 +76,7 @@ class MultiAgentTrainer:
         recent_teammate_dist: deque[float] = deque(maxlen=window)
         recent_profile_metrics: Dict[str, Dict[str, deque[float]]] = {}
         replay_paths: list[str] = []
+        dashboard_update_every = max(1, int(self.config.dashboard_update_every))
 
         for ep in range(self.config.episodes):
             observations, _ = self.env.reset(seed=self.config.seed + ep)
@@ -225,6 +227,8 @@ class MultiAgentTrainer:
                     mean_teammate_distance=sum(recent_teammate_dist) / len(recent_teammate_dist),
                     profile_metrics=recent_profile_metrics,
                 )
+            if ((ep + 1) % dashboard_update_every) == 0:
+                self.logger.write_outputs()
 
         if self.config.show_progress:
             sys.stdout.write("\n")

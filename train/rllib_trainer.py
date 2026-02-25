@@ -34,6 +34,7 @@ class RLlibTrainConfig:
     curriculum_path: str = "data/curriculum_phases.json"
     shared_policy: bool = False
     curriculum_enabled: bool = True
+    dashboard_update_every: int = 1
 
 
 class RLlibTrainer:
@@ -209,6 +210,12 @@ class RLlibTrainer:
                 starvation_flags = []
                 teammate_dists = []
                 winner_tag = None
+                death_counts = {
+                    "starvation": 0,
+                    "monster": 0,
+                    "agent": 0,
+                    "other": 0,
+                }
                 for aid in agent_ids:
                     info = episode.last_info_for(aid)
                     if not info:
@@ -230,6 +237,19 @@ class RLlibTrainer:
                     starvation_flags.append(1.0 if starved else 0.0)
                     if td is not None:
                         teammate_dists.append(float(td))
+                    if not alive:
+                        death_reason = str(info.get("death_reason", ""))
+                        if starved:
+                            death_counts["starvation"] += 1
+                        elif any(
+                            isinstance(evt, str) and evt.startswith("death_by_monster:")
+                            for evt in events
+                        ):
+                            death_counts["monster"] += 1
+                        elif death_reason.startswith("killed by agent"):
+                            death_counts["agent"] += 1
+                        else:
+                            death_counts["other"] += 1
 
                 if winner_tag is None and alive_flags:
                     # Fallback for episodes lacking explicit winner tag in events.
@@ -270,6 +290,31 @@ class RLlibTrainer:
                     metrics_logger,
                     "action_interact_rate",
                     float(counts.get("interact", 0)) / total_actions,
+                )
+                agent_count = max(1, len(agent_ids))
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "death_starvation",
+                    float(death_counts["starvation"]) / agent_count,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "death_monster",
+                    float(death_counts["monster"]) / agent_count,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "death_agent",
+                    float(death_counts["agent"]) / agent_count,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "death_other",
+                    float(death_counts["other"]) / agent_count,
                 )
                 self._episode_action_counts.pop(id(episode), None)
 
@@ -341,6 +386,14 @@ class RLlibTrainer:
         out.mkdir(parents=True, exist_ok=True)
 
         metrics_rows = []
+        death_histogram = {
+            "starvation": 0,
+            "monster": 0,
+            "agent": 0,
+            "other": 0,
+        }
+        n_agents = int(env_config.get("n_agents", 2))
+        update_every = max(1, int(self.config.dashboard_update_every))
         episodes_total_running = 0.0
         for i in range(self.config.iterations):
             result = algo.train()
@@ -446,7 +499,53 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
+            death_starvation_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "death_starvation_mean"),
+                    ("custom_metrics", "death_starvation"),
+                    ("env_runners", "custom_metrics", "death_starvation_mean"),
+                    ("env_runners", "custom_metrics", "death_starvation"),
+                ],
+                default=0.0,
+            )
+            death_monster_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "death_monster_mean"),
+                    ("custom_metrics", "death_monster"),
+                    ("env_runners", "custom_metrics", "death_monster_mean"),
+                    ("env_runners", "custom_metrics", "death_monster"),
+                ],
+                default=0.0,
+            )
+            death_agent_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "death_agent_mean"),
+                    ("custom_metrics", "death_agent"),
+                    ("env_runners", "custom_metrics", "death_agent_mean"),
+                    ("env_runners", "custom_metrics", "death_agent"),
+                ],
+                default=0.0,
+            )
+            death_other_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "death_other_mean"),
+                    ("custom_metrics", "death_other"),
+                    ("env_runners", "custom_metrics", "death_other_mean"),
+                    ("env_runners", "custom_metrics", "death_other"),
+                ],
+                default=0.0,
+            )
             loss = self._extract_loss(result)
+            if episodes_this_iter > 0:
+                deaths_scale = int(round(episodes_this_iter)) * max(1, n_agents)
+                death_histogram["starvation"] += int(round(death_starvation_rate * deaths_scale))
+                death_histogram["monster"] += int(round(death_monster_rate * deaths_scale))
+                death_histogram["agent"] += int(round(death_agent_rate * deaths_scale))
+                death_histogram["other"] += int(round(death_other_rate * deaths_scale))
 
             recent_returns.append(reward_mean)
             recent_agent0_wins.append(agent0_win)
@@ -472,6 +571,10 @@ class RLlibTrainer:
                     "action_wait_rate": action_wait_rate,
                     "action_move_rate": action_move_rate,
                     "action_interact_rate": action_interact_rate,
+                    "death_starvation": int(death_histogram["starvation"]),
+                    "death_monster": int(death_histogram["monster"]),
+                    "death_agent": int(death_histogram["agent"]),
+                    "death_other": int(death_histogram["other"]),
                 }
             )
             self._print_live_progress(
@@ -486,6 +589,14 @@ class RLlibTrainer:
                 loss=sum(recent_loss) / len(recent_loss),
                 episodes_total=int(episodes_total),
             )
+            if ((i + 1) % update_every) == 0:
+                self._write_live_artifacts(
+                    out=out,
+                    metrics_rows=metrics_rows,
+                    checkpoint=None,
+                    death_histogram=death_histogram,
+                    replay_save_every=int(self.config.replay_save_every),
+                )
 
         print()
         checkpoint_dir = (out / "checkpoint").resolve()
@@ -507,6 +618,7 @@ class RLlibTrainer:
             "metrics": str(metrics_path),
             "replay_dir": str((out / "replays").resolve()),
             "replay_save_every": int(self.config.replay_save_every),
+            "cause_of_death_histogram": {k: int(v) for k, v in death_histogram.items()},
         }
         dashboard_path = out / "dashboard.html"
         dashboard_path.write_text(
@@ -518,6 +630,34 @@ class RLlibTrainer:
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
         return summary
+
+    def _write_live_artifacts(
+        self,
+        out: Path,
+        metrics_rows: list[dict],
+        checkpoint: str | None,
+        death_histogram: dict[str, int],
+        replay_save_every: int,
+    ) -> None:
+        metrics_path = out / "rllib_metrics.json"
+        metrics_path.write_text(json.dumps(metrics_rows, indent=2), encoding="utf-8")
+        episodes_total = int(metrics_rows[-1]["episodes_total"]) if metrics_rows else 0
+        summary = {
+            "iterations": int(metrics_rows[-1]["iteration"]) if metrics_rows else 0,
+            "episodes_total": episodes_total,
+            "checkpoint": checkpoint,
+            "metrics": str(metrics_path),
+            "replay_dir": str((out / "replays").resolve()),
+            "replay_save_every": int(replay_save_every),
+            "cause_of_death_histogram": {k: int(v) for k, v in death_histogram.items()},
+        }
+        dashboard_path = out / "dashboard.html"
+        dashboard_path.write_text(
+            self._build_dashboard_html(metrics_rows=metrics_rows, summary=summary),
+            encoding="utf-8",
+        )
+        summary["dashboard"] = str(dashboard_path)
+        (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     def _ensure_final_replay_exists(self, output_dir: Path, final_episode: int) -> None:
         if final_episode <= 0:
@@ -616,6 +756,16 @@ class RLlibTrainer:
         latest_move_rate = float(latest.get("action_move_rate", 0.0) or 0.0)
         latest_interact_rate = float(latest.get("action_interact_rate", 0.0) or 0.0)
         latest_timesteps_total = int(float(latest.get("timesteps_total", 0) or 0))
+        cause_hist = summary.get("cause_of_death_histogram", {}) or {}
+        cause_hist_rows = "".join(
+            [
+                (
+                    f"<div class=\"hist-label\">{k}: {int(v)}</div>"
+                    f"<div class=\"bar\" style=\"width:{20 + int(v) * 8}px\"></div>"
+                )
+                for k, v in cause_hist.items()
+            ]
+        )
         reward_curve = [round(float(r.get("episode_reward_mean", 0.0) or 0.0), 4) for r in metrics_rows]
         win_curve = [round(float(r.get("win_rate", 0.0) or 0.0), 4) for r in metrics_rows]
         survival_curve = [round(float(r.get("survival_mean", 0.0) or 0.0), 4) for r in metrics_rows]
@@ -680,6 +830,20 @@ class RLlibTrainer:
       font-weight: 700;
       color: var(--accent);
     }}
+    .hist-label {{
+      display: inline-block;
+      min-width: 180px;
+      margin-right: 10px;
+      color: var(--muted);
+    }}
+    .bar {{
+      display: inline-block;
+      height: 12px;
+      background: var(--accent);
+      margin: 2px 0 8px 0;
+      border-radius: 3px;
+      vertical-align: middle;
+    }}
     table {{ border-collapse: collapse; width: 100%; }}
     th, td {{
       border: 1px solid var(--border);
@@ -729,6 +893,10 @@ class RLlibTrainer:
     <pre>action_wait_rate={wait_curve}</pre>
     <pre>action_move_rate={move_curve}</pre>
     <pre>action_interact_rate={interact_curve}</pre>
+  </div>
+  <div class="card">
+    <h3>Cause Of Death Histogram</h3>
+    {cause_hist_rows if cause_hist_rows else "<div class=\"hist-label\">No deaths logged yet.</div>"}
   </div>
   <div class="card">
     <h3>Iteration Metrics</h3>

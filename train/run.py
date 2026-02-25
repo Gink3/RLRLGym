@@ -30,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--env-config-path", type=str, default="data/env_config.json")
     p.add_argument("--curriculum-path", type=str, default="data/curriculum_phases.json")
     p.add_argument(
+        "--dashboard-update-every",
+        type=int,
+        default=1,
+        help="Rewrite dashboard/summary artifacts every N episodes (custom) or iterations (rllib).",
+    )
+    p.add_argument(
         "--shared-policy",
         action="store_true",
         help="Use one shared policy for all agents (stabilizes early training).",
@@ -58,6 +64,8 @@ def _timestamped_output_dir(raw_output_dir: str) -> str:
 def main() -> None:
     args = build_parser().parse_args()
     resolved_output_dir = _timestamped_output_dir(args.output_dir)
+    dashboard_path = Path(resolved_output_dir) / "dashboard.html"
+    print(f"Dashboard path: {dashboard_path.resolve()}")
     if args.backend == "custom":
         config = TrainConfig(
             episodes=args.episodes,
@@ -71,6 +79,7 @@ def main() -> None:
             networks_path=args.networks_path,
             replay_save_every=args.replay_save_every,
             env_config_path=args.env_config_path,
+            dashboard_update_every=args.dashboard_update_every,
         )
         trainer = MultiAgentTrainer(config)
         result = trainer.train()
@@ -97,6 +106,7 @@ def main() -> None:
         curriculum_path=args.curriculum_path,
         shared_policy=bool(args.shared_policy),
         curriculum_enabled=not bool(args.no_curriculum),
+        dashboard_update_every=args.dashboard_update_every,
     )
     trainer = RLlibTrainer(rllib_cfg)
     summary = trainer.train()
