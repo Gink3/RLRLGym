@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+from pathlib import Path
 
 from .rllib_trainer import RLlibTrainConfig, RLlibTrainer
 from .trainer import MultiAgentTrainer, TrainConfig
@@ -12,12 +14,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Train multi-agent policies in RLRLGym")
     p.add_argument("--backend", choices=["custom", "rllib"], default="rllib")
     p.add_argument("--episodes", type=int, default=100)
-    p.add_argument("--max-steps", type=int, default=120)
+    p.add_argument("--max-steps", type=int, default=None)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output-dir", type=str, default="outputs/train")
-    p.add_argument("--width", type=int, default=20)
-    p.add_argument("--height", type=int, default=12)
-    p.add_argument("--agents", type=int, default=2)
+    p.add_argument("--width", type=int, default=None)
+    p.add_argument("--height", type=int, default=None)
+    p.add_argument("--agents", type=int, default=None)
     p.add_argument("--networks-path", type=str, default="data/agent_networks.json")
     p.add_argument("--iterations", type=int, default=50)
     p.add_argument("--framework", type=str, default="torch")
@@ -40,14 +42,28 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _timestamped_output_dir(raw_output_dir: str) -> str:
+    ts = datetime.now().strftime("%Y%m%d-%H%M")
+    out = Path(raw_output_dir)
+    parts = out.parts
+    if parts and parts[0] == "outputs":
+        remainder = list(parts[1:])
+        if remainder and remainder[0] == "train":
+            remainder = remainder[1:]
+        suffix = Path(*remainder) if remainder else Path()
+        return str(Path("outputs") / ts / suffix)
+    return str(out / ts)
+
+
 def main() -> None:
     args = build_parser().parse_args()
+    resolved_output_dir = _timestamped_output_dir(args.output_dir)
     if args.backend == "custom":
         config = TrainConfig(
             episodes=args.episodes,
             max_steps=args.max_steps,
             seed=args.seed,
-            output_dir=args.output_dir,
+            output_dir=resolved_output_dir,
             width=args.width,
             height=args.height,
             n_agents=args.agents,
@@ -67,7 +83,7 @@ def main() -> None:
     rllib_cfg = RLlibTrainConfig(
         iterations=args.iterations,
         seed=args.seed,
-        output_dir=args.output_dir,
+        output_dir=resolved_output_dir,
         width=args.width,
         height=args.height,
         n_agents=args.agents,

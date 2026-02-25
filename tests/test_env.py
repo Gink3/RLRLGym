@@ -4,7 +4,13 @@ import unittest
 from pathlib import Path
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import ACTION_INTERACT, ACTION_LOOT, ACTION_MOVE_NORTH, ACTION_WAIT
+from rlrlgym.constants import (
+    ACTION_ATTACK,
+    ACTION_INTERACT,
+    ACTION_LOOT,
+    ACTION_MOVE_NORTH,
+    ACTION_WAIT,
+)
 from rlrlgym.models import MonsterState
 
 
@@ -52,7 +58,7 @@ class TestEnv(unittest.TestCase):
         env.reset(seed=3)
         self.assertIsNone(env.render())
 
-    def test_interact_can_attack_adjacent_agent(self):
+    def test_attack_can_attack_adjacent_agent(self):
         env = PettingZooParallelRLRLGym(
             EnvConfig(width=12, height=10, n_agents=2, max_steps=20, render_enabled=False)
         )
@@ -66,7 +72,7 @@ class TestEnv(unittest.TestCase):
         damaged_seen = False
         for _ in range(8):
             _, _, _, _, info = env.step(
-                {"agent_0": ACTION_INTERACT, "agent_1": ACTION_WAIT}
+                {"agent_0": ACTION_ATTACK, "agent_1": ACTION_WAIT}
             )
             events = info["agent_0"]["events"]
             if any(e.startswith("agent_interact:attack:") for e in events):
@@ -77,6 +83,21 @@ class TestEnv(unittest.TestCase):
 
         self.assertTrue(attack_seen)
         self.assertTrue(damaged_seen)
+
+    def test_interact_no_longer_attacks_adjacent_agent(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=2, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=31)
+        env.state.agents["agent_0"].position = (4, 4)
+        env.state.agents["agent_1"].position = (4, 5)
+        env.state.agents["agent_0"].equipped.append("dagger")
+        starting_hp = env.state.agents["agent_1"].hp
+        _, _, _, _, info = env.step({"agent_0": ACTION_INTERACT, "agent_1": ACTION_WAIT})
+        self.assertEqual(env.state.agents["agent_1"].hp, starting_hp)
+        self.assertFalse(
+            any(e.startswith("agent_interact:attack:") for e in info["agent_0"]["events"])
+        )
 
     def test_chest_entity_can_be_opened(self):
         env = PettingZooParallelRLRLGym(

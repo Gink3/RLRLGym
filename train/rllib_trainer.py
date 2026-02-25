@@ -12,7 +12,7 @@ from collections.abc import MutableMapping
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 from rlrlgym.curriculum import load_curriculum_phases
 
 
@@ -21,10 +21,10 @@ class RLlibTrainConfig:
     iterations: int = 100
     seed: int = 0
     output_dir: str = "outputs/train_rllib"
-    width: int = 20
-    height: int = 12
-    n_agents: int = 2
-    max_steps: int = 120
+    width: Optional[int] = None
+    height: Optional[int] = None
+    n_agents: Optional[int] = None
+    max_steps: Optional[int] = None
     framework: str = "torch"
     num_gpus: int = 0
     num_rollout_workers: int = 0
@@ -93,17 +93,13 @@ class RLlibTrainer:
         env_name = "RLRLGymRLlib-v0"
         window = 50
         recent_returns: deque[float] = deque(maxlen=window)
-        recent_wins: deque[float] = deque(maxlen=window)
+        recent_agent0_wins: deque[float] = deque(maxlen=window)
+        recent_agent1_wins: deque[float] = deque(maxlen=window)
+        recent_ties: deque[float] = deque(maxlen=window)
         recent_survival: deque[float] = deque(maxlen=window)
-        recent_starvation: deque[float] = deque(maxlen=window)
         recent_loss: deque[float] = deque(maxlen=window)
-        recent_teammate_dist: deque[float] = deque(maxlen=window)
 
         env_config = {
-            "width": self.config.width,
-            "height": self.config.height,
-            "max_steps": self.config.max_steps,
-            "n_agents": self.config.n_agents,
             "render_enabled": False,
             "agent_profile_map": {"agent_0": "human", "agent_1": "orc"},
             "replay_save_every": int(self.config.replay_save_every),
@@ -116,6 +112,14 @@ class RLlibTrainer:
                 else []
             ),
         }
+        if self.config.width is not None:
+            env_config["width"] = int(self.config.width)
+        if self.config.height is not None:
+            env_config["height"] = int(self.config.height)
+        if self.config.max_steps is not None:
+            env_config["max_steps"] = int(self.config.max_steps)
+        if self.config.n_agents is not None:
+            env_config["n_agents"] = int(self.config.n_agents)
 
         self._register_env(env_name, lambda cfg: self._RLRLGymRLlibEnv(cfg))
         probe_env = self._RLRLGymRLlibEnv(env_config)
@@ -204,15 +208,22 @@ class RLlibTrainer:
                 alive_flags = []
                 starvation_flags = []
                 teammate_dists = []
-                winner_seen = False
+                winner_tag = None
                 for aid in agent_ids:
                     info = episode.last_info_for(aid)
                     if not info:
                         continue
                     alive = bool(info.get("alive", False))
                     events = info.get("events", [])
-                    if any(str(e).startswith("winner:") for e in events):
-                        winner_seen = any(str(e) != "winner:none" for e in events if str(e).startswith("winner:"))
+                    for e in events:
+                        if not isinstance(e, str) or not e.startswith("winner:"):
+                            continue
+                        if e == "winner:none":
+                            winner_tag = "tie"
+                        elif e == "winner:agent_0":
+                            winner_tag = "agent_0"
+                        elif e == "winner:agent_1":
+                            winner_tag = "agent_1"
                     starved = bool("starve_tick" in events and "death" in events)
                     td = info.get("teammate_distance")
                     alive_flags.append(1.0 if alive else 0.0)
@@ -220,29 +231,25 @@ class RLlibTrainer:
                     if td is not None:
                         teammate_dists.append(float(td))
 
-                if winner_seen:
-                    self._emit_metric(episode, metrics_logger, "win_rate", 1.0)
-                elif alive_flags:
-                    self._emit_metric(
-                        episode,
-                        metrics_logger,
-                        "win_rate",
-                        1.0 if any(v > 0 for v in alive_flags) else 0.0,
-                    )
-                if starvation_flags:
-                    self._emit_metric(
-                        episode,
-                        metrics_logger,
-                        "starvation_rate",
-                        sum(starvation_flags) / len(starvation_flags),
-                    )
-                if teammate_dists:
-                    self._emit_metric(
-                        episode,
-                        metrics_logger,
-                        "mean_teammate_distance",
-                        sum(teammate_dists) / len(teammate_dists),
-                    )
+                if winner_tag is None and alive_flags:
+                    # Fallback for episodes lacking explicit winner tag in events.
+                    n_alive = int(sum(1 for v in alive_flags if v > 0))
+                    if n_alive == 0:
+                        winner_tag = "tie"
+                    elif n_alive == 1:
+                        # Ambiguous without explicit tag; leave as tie fallback.
+                        winner_tag = "tie"
+                    else:
+                        winner_tag = "tie"
+                self._emit_metric(
+                    episode, metrics_logger, "agent0_win", 1.0 if winner_tag == "agent_0" else 0.0
+                )
+                self._emit_metric(
+                    episode, metrics_logger, "agent1_win", 1.0 if winner_tag == "agent_1" else 0.0
+                )
+                self._emit_metric(
+                    episode, metrics_logger, "tie", 1.0 if winner_tag == "tie" else 0.0
+                )
                 store = self._get_episode_store(episode)
                 counts = store.get("action_counts", {})
                 total_actions = max(1, int(counts.get("total", 0)))
@@ -379,33 +386,33 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
-            win_rate = self._extract_float(
+            agent0_win = self._extract_float(
                 result,
                 [
-                    ("custom_metrics", "win_rate_mean"),
-                    ("custom_metrics", "win_rate"),
-                    ("env_runners", "custom_metrics", "win_rate_mean"),
-                    ("env_runners", "custom_metrics", "win_rate"),
+                    ("custom_metrics", "agent0_win_mean"),
+                    ("custom_metrics", "agent0_win"),
+                    ("env_runners", "custom_metrics", "agent0_win_mean"),
+                    ("env_runners", "custom_metrics", "agent0_win"),
                 ],
                 default=0.0,
             )
-            starvation_rate = self._extract_float(
+            agent1_win = self._extract_float(
                 result,
                 [
-                    ("custom_metrics", "starvation_rate_mean"),
-                    ("custom_metrics", "starvation_rate"),
-                    ("env_runners", "custom_metrics", "starvation_rate_mean"),
-                    ("env_runners", "custom_metrics", "starvation_rate"),
+                    ("custom_metrics", "agent1_win_mean"),
+                    ("custom_metrics", "agent1_win"),
+                    ("env_runners", "custom_metrics", "agent1_win_mean"),
+                    ("env_runners", "custom_metrics", "agent1_win"),
                 ],
                 default=0.0,
             )
-            team_dist = self._extract_float(
+            tie_rate = self._extract_float(
                 result,
                 [
-                    ("custom_metrics", "mean_teammate_distance_mean"),
-                    ("custom_metrics", "mean_teammate_distance"),
-                    ("env_runners", "custom_metrics", "mean_teammate_distance_mean"),
-                    ("env_runners", "custom_metrics", "mean_teammate_distance"),
+                    ("custom_metrics", "tie_mean"),
+                    ("custom_metrics", "tie"),
+                    ("env_runners", "custom_metrics", "tie_mean"),
+                    ("env_runners", "custom_metrics", "tie"),
                 ],
                 default=0.0,
             )
@@ -442,11 +449,11 @@ class RLlibTrainer:
             loss = self._extract_loss(result)
 
             recent_returns.append(reward_mean)
-            recent_wins.append(win_rate)
+            recent_agent0_wins.append(agent0_win)
+            recent_agent1_wins.append(agent1_win)
+            recent_ties.append(tie_rate)
             recent_survival.append(survival_mean)
-            recent_starvation.append(starvation_rate)
             recent_loss.append(loss)
-            recent_teammate_dist.append(team_dist)
 
             metrics_rows.append(
                 {
@@ -454,11 +461,14 @@ class RLlibTrainer:
                     "episode_reward_mean": reward_mean,
                     "episodes_total": episodes_total,
                     "timesteps_total": result.get("timesteps_total"),
-                    "win_rate": win_rate,
+                    "win_rate": agent0_win + agent1_win,
                     "survival_mean": survival_mean,
-                    "starvation_rate": starvation_rate,
+                    "starvation_rate": 0.0,
                     "loss": loss,
-                    "mean_teammate_distance": team_dist,
+                    "mean_teammate_distance": 0.0,
+                    "agent0_win": agent0_win,
+                    "agent1_win": agent1_win,
+                    "tie": tie_rate,
                     "action_wait_rate": action_wait_rate,
                     "action_move_rate": action_move_rate,
                     "action_interact_rate": action_interact_rate,
@@ -469,11 +479,11 @@ class RLlibTrainer:
                 total=self.config.iterations,
                 window=window,
                 ret=sum(recent_returns) / len(recent_returns),
-                win=sum(recent_wins) / len(recent_wins),
+                agent0_win_count=int(round(sum(recent_agent0_wins))),
+                agent1_win_count=int(round(sum(recent_agent1_wins))),
+                tie_count=int(round(sum(recent_ties))),
                 surv=sum(recent_survival) / len(recent_survival),
-                starve=sum(recent_starvation) / len(recent_starvation),
                 loss=sum(recent_loss) / len(recent_loss),
-                team_dist=sum(recent_teammate_dist) / len(recent_teammate_dist),
                 episodes_total=int(episodes_total),
             )
 
@@ -569,11 +579,11 @@ class RLlibTrainer:
         total: int,
         window: int,
         ret: float,
-        win: float,
+        agent0_win_count: int,
+        agent1_win_count: int,
+        tie_count: int,
         surv: float,
-        starve: float,
         loss: float,
-        team_dist: float,
         episodes_total: int,
     ) -> None:
         bar_width = 26
@@ -583,11 +593,11 @@ class RLlibTrainer:
         line = (
             f"\r[{bar}] {iteration}/{total} "
             f"ret{window}={ret:.3f} "
-            f"win{window}={win:.3f} "
+            f"a0_wins{window}={agent0_win_count} "
+            f"a1_wins{window}={agent1_win_count} "
+            f"ties{window}={tie_count} "
             f"surv{window}={surv:.1f} "
-            f"starve{window}={starve:.3f} "
             f"loss{window}={loss:.4f} "
-            f"team_dist{window}={team_dist:.2f} "
             f"episodes_total={episodes_total}"
         )
         print(line, end="", flush=True)

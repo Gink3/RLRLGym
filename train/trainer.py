@@ -7,7 +7,7 @@ import sys
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym, TrainingLogger
 
@@ -18,12 +18,12 @@ from .policies import NeuralQPolicy
 @dataclass
 class TrainConfig:
     episodes: int = 100
-    max_steps: int = 120
+    max_steps: Optional[int] = None
     seed: int = 0
     output_dir: str = "outputs/train"
-    width: int = 20
-    height: int = 12
-    n_agents: int = 2
+    width: Optional[int] = None
+    height: Optional[int] = None
+    n_agents: Optional[int] = None
     render_enabled: bool = False
     networks_path: str = "data/agent_networks.json"
     agent_profile_map: Dict[str, str] | None = None
@@ -38,10 +38,14 @@ class MultiAgentTrainer:
         self.config = config
         profile_map = config.agent_profile_map or {"agent_0": "human", "agent_1": "orc"}
         env_cfg = EnvConfig.from_json(config.env_config_path)
-        env_cfg.width = config.width
-        env_cfg.height = config.height
-        env_cfg.max_steps = config.max_steps
-        env_cfg.n_agents = config.n_agents
+        if config.width is not None:
+            env_cfg.width = int(config.width)
+        if config.height is not None:
+            env_cfg.height = int(config.height)
+        if config.max_steps is not None:
+            env_cfg.max_steps = int(config.max_steps)
+        if config.n_agents is not None:
+            env_cfg.n_agents = int(config.n_agents)
         env_cfg.render_enabled = config.render_enabled
         env_cfg.agent_profile_map = dict(profile_map)
         self.env = PettingZooParallelRLRLGym(
@@ -97,7 +101,7 @@ class MultiAgentTrainer:
             episode_agent_survival = {aid: 0 for aid in self.env.possible_agents}
             episode_agent_done = {aid: False for aid in self.env.possible_agents}
 
-            for _ in range(self.config.max_steps):
+            for _ in range(self.env.config.max_steps):
                 for aid in self.env.possible_agents:
                     if not episode_agent_done[aid]:
                         episode_agent_survival[aid] += 1
@@ -438,6 +442,9 @@ class MultiAgentTrainer:
             payload["agent_damage"] = self._agent_damage_events(
                 prev_state=prev_state, curr_state=curr_state, info=info
             )
+            payload["monster_damage"] = self._monster_damage_events(
+                prev_state=prev_state, curr_state=curr_state, info=info
+            )
             payload["monster_deaths"] = self._monster_death_events(
                 prev_state=prev_state, curr_state=curr_state, info=info
             )
@@ -512,6 +519,39 @@ class MultiAgentTrainer:
                         "reason": reason,
                     }
                 )
+        return out
+
+    def _monster_damage_events(self, prev_state, curr_state, info) -> list[dict]:
+        out = []
+        for entity_id, curr_mon in curr_state.monsters.items():
+            prev_mon = prev_state.monsters.get(entity_id)
+            if prev_mon is None:
+                continue
+            dmg = int(prev_mon.hp) - int(curr_mon.hp)
+            if dmg <= 0:
+                continue
+            source = "unknown"
+            for src_aid, src_info in info.items():
+                for evt in list(src_info.get("events", [])):
+                    if (
+                        isinstance(evt, str)
+                        and evt == f"agent_interact:hit_monster:{entity_id}"
+                    ):
+                        source = f"agent:{src_aid}"
+                        break
+                if source != "unknown":
+                    break
+            out.append(
+                {
+                    "entity_id": entity_id,
+                    "monster_id": curr_mon.monster_id,
+                    "amount": dmg,
+                    "hp_before": int(prev_mon.hp),
+                    "hp_after": int(curr_mon.hp),
+                    "hp_max": int(curr_mon.max_hp),
+                    "source": source,
+                }
+            )
         return out
 
     def _serialize_state(self, state) -> Dict[str, object]:

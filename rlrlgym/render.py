@@ -486,6 +486,19 @@ class RenderWindow:
                     self._tk.END,
                     f"  DAMAGE: {dmg.get('agent_id')} -{int(dmg.get('amount', 0))} ({dmg.get('source', 'unknown')})\n",
                 )
+            for mdmg in entry.get("monster_damage", []):
+                if not isinstance(mdmg, dict):
+                    continue
+                self.action_log_text.insert(
+                    self._tk.END,
+                    (
+                        f"  MONSTER_DAMAGE: {mdmg.get('monster_id')} [{mdmg.get('entity_id')}] "
+                        f"-{int(mdmg.get('amount', 0))} "
+                        f"({int(mdmg.get('hp_before', 0))}->{int(mdmg.get('hp_after', 0))}) "
+                        f"hp={int(mdmg.get('hp_after', 0))}/{int(mdmg.get('hp_max', 0))} "
+                        f"src={mdmg.get('source', 'unknown')}\n"
+                    ),
+                )
             for md in entry.get("monster_deaths", []):
                 if not isinstance(md, dict):
                     continue
@@ -493,7 +506,7 @@ class RenderWindow:
                     self._tk.END,
                     f"  MONSTER_DEATH: {md.get('monster_id')} [{md.get('entity_id')}] {md.get('reason', 'unknown')}\n",
                 )
-            if entry.get("agent_damage") or entry.get("monster_deaths"):
+            if entry.get("agent_damage") or entry.get("monster_damage") or entry.get("monster_deaths"):
                 self.action_log_text.insert(self._tk.END, "\n")
             return
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .constants import (
+    ACTION_ATTACK,
     ACTION_EAT,
     ACTION_EQUIP,
     ACTION_INTERACT,
@@ -204,7 +205,7 @@ class MultiAgentRLRLGym:
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
             raise KeyError(f"Unknown agent: {agent_id}")
-        return (0, 10)
+        return (0, 11)
 
     def observation_space(self, agent_id: str) -> Dict[str, object]:
         if agent_id not in self.possible_agents:
@@ -290,7 +291,7 @@ class MultiAgentRLRLGym:
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
         info = {
             aid: {
-                "action_mask": [1] * 11,
+                "action_mask": [1] * 12,
                 "alive": True,
                 "profile": self.state.agents[aid].profile_name,
                 "race": self.state.agents[aid].race_name,
@@ -490,7 +491,7 @@ class MultiAgentRLRLGym:
         if (
             self.config.combat_training_mode
             and adjacent_hostile
-            and action != ACTION_INTERACT
+            and action != ACTION_ATTACK
         ):
             reward -= float(self.config.missed_attack_opportunity_penalty)
             events.append("missed_attack_opportunity")
@@ -609,10 +610,13 @@ class MultiAgentRLRLGym:
                 reward -= 0.01
 
         elif action == ACTION_INTERACT:
+            reward += self._interact(agent, aid, events)
+
+        elif action == ACTION_ATTACK:
             if self.config.combat_training_mode and adjacent_hostile:
                 reward += 0.02
                 events.append("combat_engage_bonus")
-            reward += self._interact(agent, aid, events)
+            reward += self._attack(agent, aid, events)
 
         return reward, events
 
@@ -647,7 +651,11 @@ class MultiAgentRLRLGym:
         else:
             events.append("interact_exhausted")
             reward -= 0.02
+        return reward
 
+    def _attack(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
+        assert self.state is not None
+        reward = 0.0
         for monster in self.state.monsters.values():
             if not monster.alive:
                 continue
@@ -668,7 +676,9 @@ class MultiAgentRLRLGym:
                 == 1
             ):
                 reward += self._attack_agent(actor, other, events)
-                break
+                return reward
+        events.append("attack_no_target")
+        reward -= 0.01
         return reward
 
     def _attack_agent(

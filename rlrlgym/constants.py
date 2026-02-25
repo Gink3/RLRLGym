@@ -11,6 +11,7 @@ ACTION_PICKUP = 7
 ACTION_EQUIP = 8
 ACTION_USE = 9
 ACTION_INTERACT = 10
+ACTION_ATTACK = 11
 
 ACTION_NAMES = {
     ACTION_MOVE_NORTH: "move_north",
@@ -24,6 +25,7 @@ ACTION_NAMES = {
     ACTION_EQUIP: "equip",
     ACTION_USE: "use",
     ACTION_INTERACT: "interact",
+    ACTION_ATTACK: "attack",
 }
 
 MOVE_DELTAS = {

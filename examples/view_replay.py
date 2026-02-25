@@ -130,10 +130,24 @@ def _fallback_step_logs(
                     {"agent_id": aid, "amount": dmg, "source": "unknown"}
                 )
         monster_deaths = []
+        monster_damage = []
         for entity_id, mon in curr.monsters.items():
             prev_mon = prev.monsters.get(entity_id)
             if prev_mon is None:
                 continue
+            dmg = int(prev_mon.hp) - int(mon.hp)
+            if dmg > 0:
+                monster_damage.append(
+                    {
+                        "entity_id": entity_id,
+                        "monster_id": mon.monster_id,
+                        "amount": dmg,
+                        "hp_before": int(prev_mon.hp),
+                        "hp_after": int(mon.hp),
+                        "hp_max": int(mon.max_hp),
+                        "source": "unknown",
+                    }
+                )
             if prev_mon.alive and not mon.alive:
                 monster_deaths.append(
                     {
@@ -146,6 +160,7 @@ def _fallback_step_logs(
             {
                 "agents": agents,
                 "agent_damage": agent_damage,
+                "monster_damage": monster_damage,
                 "monster_deaths": monster_deaths,
             }
         )

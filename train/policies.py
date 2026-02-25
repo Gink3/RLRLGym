@@ -132,7 +132,7 @@ class MLPQNetwork:
 class NeuralQPolicy:
     net_cfg: NetworkConfig
     action_min: int = 0
-    action_max: int = 10
+    action_max: int = 11
     seed: int = 0
 
     def __post_init__(self) -> None:

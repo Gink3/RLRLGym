@@ -209,3 +209,5 @@ __marimo__/
 # RLRLGym generated training artifacts
 outputs/
 outputs_test/
+
+archive/

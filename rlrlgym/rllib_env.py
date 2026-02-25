@@ -37,7 +37,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             shape=(observation_vector_size(),),
             dtype=np.float32,
         )
-        self._action_space = spaces.Discrete(11)
+        self._action_space = spaces.Discrete(12)
         self.possible_agents = list(self.base.possible_agents)
         self.agents = []
         self.observation_spaces = {aid: self._obs_space for aid in self.possible_agents}
@@ -300,6 +300,9 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             payload["agent_damage"] = self._agent_damage_events(
                 prev_state=prev_state, curr_state=curr_state, info=info
             )
+            payload["monster_damage"] = self._monster_damage_events(
+                prev_state=prev_state, curr_state=curr_state, info=info
+            )
             payload["monster_deaths"] = self._monster_death_events(
                 prev_state=prev_state, curr_state=curr_state, info=info
             )
@@ -374,6 +377,39 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                         "reason": reason,
                     }
                 )
+        return out
+
+    def _monster_damage_events(self, prev_state, curr_state, info) -> list[dict]:
+        out = []
+        for entity_id, curr_mon in curr_state.monsters.items():
+            prev_mon = prev_state.monsters.get(entity_id)
+            if prev_mon is None:
+                continue
+            dmg = int(prev_mon.hp) - int(curr_mon.hp)
+            if dmg <= 0:
+                continue
+            source = "unknown"
+            for src_aid, src_info in info.items():
+                for evt in list(src_info.get("events", [])):
+                    if (
+                        isinstance(evt, str)
+                        and evt == f"agent_interact:hit_monster:{entity_id}"
+                    ):
+                        source = f"agent:{src_aid}"
+                        break
+                if source != "unknown":
+                    break
+            out.append(
+                {
+                    "entity_id": entity_id,
+                    "monster_id": curr_mon.monster_id,
+                    "amount": dmg,
+                    "hp_before": int(prev_mon.hp),
+                    "hp_after": int(curr_mon.hp),
+                    "hp_max": int(curr_mon.max_hp),
+                    "source": source,
+                }
+            )
         return out
 
     def _serialize_state(self, state) -> Dict[str, object]:
