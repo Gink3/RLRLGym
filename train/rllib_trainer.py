@@ -767,6 +767,11 @@ class RLlibTrainer:
             ]
         )
         reward_curve = [round(float(r.get("episode_reward_mean", 0.0) or 0.0), 4) for r in metrics_rows]
+        reward_curve_raw = [float(r.get("episode_reward_mean", 0.0) or 0.0) for r in metrics_rows]
+        rolling_reward50_curve = [
+            round(sum(reward_curve_raw[max(0, idx - 49): idx + 1]) / (idx - max(0, idx - 49) + 1), 4)
+            for idx in range(len(reward_curve_raw))
+        ]
         win_curve = [round(float(r.get("win_rate", 0.0) or 0.0), 4) for r in metrics_rows]
         survival_curve = [round(float(r.get("survival_mean", 0.0) or 0.0), 4) for r in metrics_rows]
         starvation_curve = [round(float(r.get("starvation_rate", 0.0) or 0.0), 4) for r in metrics_rows]
@@ -882,6 +887,8 @@ class RLlibTrainer:
   <div class="card">
     <h3>Reward Curve (per iteration)</h3>
     <pre>{reward_curve}</pre>
+    <h3>Rolling Reward50 (per iteration)</h3>
+    <pre>{rolling_reward50_curve}</pre>
   </div>
   <div class="card">
     <h3>All Metric Curves (per iteration)</h3>
@@ -893,6 +900,7 @@ class RLlibTrainer:
     <pre>action_wait_rate={wait_curve}</pre>
     <pre>action_move_rate={move_curve}</pre>
     <pre>action_interact_rate={interact_curve}</pre>
+    <pre>rolling_reward50={rolling_reward50_curve}</pre>
   </div>
   <div class="card">
     <h3>Cause Of Death Histogram</h3>

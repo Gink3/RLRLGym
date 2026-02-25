@@ -218,6 +218,13 @@ class TrainingLogger:
         data = [asdict(e) for e in self.episode_summaries]
         aggregate = self.aggregate_metrics()
         returns = [e["team_return"] for e in data]
+        rolling_reward50 = [
+            round(
+                sum(returns[max(0, idx - 49): idx + 1]) / (idx - max(0, idx - 49) + 1),
+                4,
+            )
+            for idx in range(len(returns))
+        ]
 
         return f"""<!doctype html>
 <html>
@@ -310,6 +317,8 @@ class TrainingLogger:
   <div class=\"card\">
     <h3>Episode Return Curve</h3>
     <pre>{returns}</pre>
+    <h3>Rolling Reward50</h3>
+    <pre>{rolling_reward50}</pre>
   </div>
   <div class=\"card\">
     <h3>Cause of Death Histogram</h3>
