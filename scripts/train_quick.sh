@@ -9,8 +9,14 @@ fi
 
 "$PY_BIN" -m train \
   --backend rllib \
-  --iterations 10 \
-  --max-steps 80 \
+  --iterations 200 \
+  --max-steps 120 \
+  --width 14 \
+  --height 14 \
+  --train-batch-size 8000 \
+  --num-rollout-workers 2 \
+  --shared-policy \
+  --replay-save-every 100 \
   --seed 0 \
   --output-dir outputs/train/quick \
   "$@"

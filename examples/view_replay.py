@@ -94,20 +94,96 @@ def _state_from_payload(frame: dict) -> EnvState:
     )
 
 
+def _fallback_step_logs(
+    states: list[EnvState], actions_raw: list[dict]
+) -> list[dict]:
+    out: list[dict] = []
+    for i in range(1, len(states)):
+        prev = states[i - 1]
+        curr = states[i]
+        acts = actions_raw[i - 1] if (i - 1) < len(actions_raw) else {}
+        agents = {}
+        for aid, agent in curr.agents.items():
+            prev_agent = prev.agents.get(aid)
+            events = []
+            if prev_agent is not None and prev_agent.hp > agent.hp:
+                events.append("damage_taken")
+            if prev_agent is not None and prev_agent.alive and not agent.alive:
+                events.append("death")
+            agents[aid] = {
+                "action": int(acts.get(aid, -1)) if isinstance(acts, dict) else -1,
+                "reward": 0.0,
+                "events": events,
+                "terminated": bool(not agent.alive),
+                "truncated": False,
+                "death_reason": "unknown" if "death" in events else None,
+                "winner": False,
+            }
+        agent_damage = []
+        for aid, agent in curr.agents.items():
+            prev_agent = prev.agents.get(aid)
+            if prev_agent is None:
+                continue
+            dmg = int(prev_agent.hp) - int(agent.hp)
+            if dmg > 0:
+                agent_damage.append(
+                    {"agent_id": aid, "amount": dmg, "source": "unknown"}
+                )
+        monster_deaths = []
+        for entity_id, mon in curr.monsters.items():
+            prev_mon = prev.monsters.get(entity_id)
+            if prev_mon is None:
+                continue
+            if prev_mon.alive and not mon.alive:
+                monster_deaths.append(
+                    {
+                        "entity_id": entity_id,
+                        "monster_id": mon.monster_id,
+                        "reason": "unknown",
+                    }
+                )
+        out.append(
+            {
+                "agents": agents,
+                "agent_damage": agent_damage,
+                "monster_deaths": monster_deaths,
+            }
+        )
+    return out
+
+
+def _load_replay_payload(replay_path: Path) -> tuple[list[EnvState], list[dict]]:
+    payload = json.loads(replay_path.read_text(encoding="utf-8"))
+    frames_raw = payload.get("frames", [])
+    actions_raw = payload.get("actions", [])
+    step_logs_raw = payload.get("step_logs", [])
+    if not frames_raw:
+        raise ValueError(f"No frames in replay file: {replay_path}")
+
+    states = [_state_from_payload(frame) for frame in frames_raw]
+    action_log: list[dict] = []
+    if isinstance(step_logs_raw, list) and step_logs_raw:
+        for row in step_logs_raw:
+            if isinstance(row, dict):
+                action_log.append(dict(row))
+    else:
+        raw_actions = [
+            {str(aid): int(action) for aid, action in dict(row).items()}
+            for row in actions_raw
+            if isinstance(row, dict)
+        ]
+        action_log = _fallback_step_logs(states, raw_actions)
+    return states, action_log
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="View a saved episode replay")
     parser.add_argument("replay_path", type=str, help="Path to *.replay.json file")
     parser.add_argument("--title", type=str, default="RLRLGym Replay Viewer")
     args = parser.parse_args()
 
-    replay_path = Path(args.replay_path)
-    payload = json.loads(replay_path.read_text(encoding="utf-8"))
-    frames_raw = payload.get("frames", [])
-    actions_raw = payload.get("actions", [])
-    if not frames_raw:
-        raise ValueError(f"No frames in replay file: {replay_path}")
-
-    states = [_state_from_payload(frame) for frame in frames_raw]
+    replay_path = Path(args.replay_path).resolve()
+    states, action_log = _load_replay_payload(replay_path)
     first = states[0]
     width = len(first.grid[0]) if first.grid else 1
     height = len(first.grid)
@@ -121,12 +197,43 @@ def main() -> None:
             render_enabled=True,
         )
     )
-    action_log = [
-        {str(aid): int(action) for aid, action in dict(row).items()}
-        for row in actions_raw
-        if isinstance(row, dict)
-    ]
-    env.play_frames_in_window(states, title=args.title, playback_actions=action_log)
+
+    replay_files = sorted(replay_path.parent.glob("*.replay.json"))
+    if replay_path in replay_files:
+        current_idx = replay_files.index(replay_path)
+    else:
+        replay_files.append(replay_path)
+        replay_files = sorted(replay_files)
+        current_idx = replay_files.index(replay_path)
+
+    def _load_idx(idx: int) -> None:
+        nonlocal current_idx, states, action_log
+        if idx < 0 or idx >= len(replay_files):
+            return
+        current_idx = idx
+        p = replay_files[current_idx]
+        states, action_log = _load_replay_payload(p)
+        env.play_frames_in_window(
+            states,
+            title=f"{args.title} - {p.name}",
+            playback_actions=action_log,
+            on_prev_episode=_prev,
+            on_next_episode=_next,
+        )
+
+    def _prev() -> None:
+        _load_idx(current_idx - 1)
+
+    def _next() -> None:
+        _load_idx(current_idx + 1)
+
+    env.play_frames_in_window(
+        states,
+        title=f"{args.title} - {replay_path.name}",
+        playback_actions=action_log,
+        on_prev_episode=_prev,
+        on_next_episode=_next,
+    )
     env.run_render_window()
 
 

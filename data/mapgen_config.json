@@ -3,7 +3,7 @@
   "mapgen": {
     "wall_tile_id": "wall",
     "floor_fallback_id": "floor",
-    "chest_density": 0.02,
+    "chest_density": 0.06,
     "monster_density": 0.0,
     "min_width": 4,
     "min_height": 4

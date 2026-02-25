@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "phases": [
+    {
+      "name": "phase_1_survival",
+      "until_episode": 800,
+      "width": 12,
+      "height": 12,
+      "max_steps": 90,
+      "monster_density": 0.0,
+      "chest_density": 0.08,
+      "combat_training_mode": false,
+      "hunger_tick_enabled": true
+    },
+    {
+      "name": "phase_2_combat",
+      "until_episode": 0,
+      "width": 10,
+      "height": 10,
+      "max_steps": 120,
+      "monster_density": 0.06,
+      "chest_density": 0.03,
+      "combat_training_mode": true,
+      "hunger_tick_enabled": false,
+      "missed_attack_opportunity_penalty": 0.05
+    }
+  ]
+}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .constants import ACTION_NAMES
 from .models import EnvState, TileDef
@@ -34,22 +34,32 @@ class AsciiRenderer:
     def __init__(self, tiles: Dict[str, TileDef]) -> None:
         self.tiles = tiles
 
-    def render_cells(
+    def view_bounds(
         self,
         state: EnvState,
         focus_agent: Optional[str] = None,
         zoom: int = 0,
-    ) -> List[List[Tuple[str, str]]]:
+    ) -> Tuple[int, int, int, int]:
         zoom = max(0, min(10, int(zoom)))
         min_r, max_r = 0, len(state.grid) - 1
         min_c, max_c = 0, len(state.grid[0]) - 1
-
         if focus_agent and focus_agent in state.agents and zoom > 0:
             ar, ac = state.agents[focus_agent].position
             min_r = max(0, ar - zoom)
             max_r = min(len(state.grid) - 1, ar + zoom)
             min_c = max(0, ac - zoom)
             max_c = min(len(state.grid[0]) - 1, ac + zoom)
+        return min_r, max_r, min_c, max_c
+
+    def render_cells(
+        self,
+        state: EnvState,
+        focus_agent: Optional[str] = None,
+        zoom: int = 0,
+    ) -> List[List[Tuple[str, str]]]:
+        min_r, max_r, min_c, max_c = self.view_bounds(
+            state=state, focus_agent=focus_agent, zoom=zoom
+        )
 
         agent_positions = {
             a.position: aid for aid, a in state.agents.items() if a.alive
@@ -132,10 +142,16 @@ class RenderWindow:
 
         self._live_state: Optional[EnvState] = None
         self._playback_states: List[EnvState] = []
-        self._playback_actions: List[Dict[str, int]] = []
+        self._playback_actions: List[Dict[str, object]] = []
         self._cursor = 0
         self._playing = False
         self._focus_choices: List[str] = ["all"]
+        self._last_view_bounds: Optional[Tuple[int, int, int, int]] = None
+        self._tooltip_window = None
+        self._tooltip_label = None
+        self._tooltip_cell: Optional[Tuple[int, int]] = None
+        self._on_prev_episode: Optional[Callable[[], None]] = None
+        self._on_next_episode: Optional[Callable[[], None]] = None
 
         self.root = tk.Tk()
         self.root.title(title)
@@ -146,7 +162,16 @@ class RenderWindow:
         ttk.Button(controls, text="Pause", command=self.pause).pack(
             side="left", padx=(4, 0)
         )
+        ttk.Button(controls, text="Restart", command=self.restart).pack(
+            side="left", padx=(4, 0)
+        )
         ttk.Button(controls, text="Step", command=self.step).pack(
+            side="left", padx=(4, 0)
+        )
+        ttk.Button(controls, text="Prev Ep", command=self.prev_episode).pack(
+            side="left", padx=(10, 0)
+        )
+        ttk.Button(controls, text="Next Ep", command=self.next_episode).pack(
             side="left", padx=(4, 0)
         )
         ttk.Button(controls, text="1x", command=self.playback.set_speed_1x).pack(
@@ -184,9 +209,21 @@ class RenderWindow:
 
         content = ttk.Frame(self.root)
         content.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.panes = ttk.Panedwindow(content, orient="horizontal")
+        self.panes.pack(fill="both", expand=True)
+        map_frame = ttk.Frame(self.panes)
+        log_frame = ttk.Frame(self.panes)
+        self.panes.add(map_frame, weight=4)
+        self.panes.add(log_frame, weight=2)
+        self.right_panes = ttk.Panedwindow(log_frame, orient="vertical")
+        self.right_panes.pack(fill="both", expand=True)
+        action_frame = ttk.Frame(self.right_panes)
+        stats_frame = ttk.Frame(self.right_panes)
+        self.right_panes.add(action_frame, weight=3)
+        self.right_panes.add(stats_frame, weight=2)
 
         self.text = tk.Text(
-            content,
+            map_frame,
             width=100,
             height=35,
             font=("Courier", 11),
@@ -195,16 +232,32 @@ class RenderWindow:
         )
         self.text.pack(side="left", fill="both", expand=True)
         self.text.configure(state="disabled")
+        self.text.bind("<Motion>", self._on_text_motion)
+        self.text.bind("<Leave>", self._on_text_leave)
         self.action_log_text = tk.Text(
-            content,
+            action_frame,
             width=48,
             height=35,
             font=("Courier", 10),
             bg="#10161f",
             fg="#dbe7ff",
         )
-        self.action_log_text.pack(side="left", fill="y", padx=(8, 0))
+        self.action_log_text.pack(side="left", fill="both", expand=True)
         self.action_log_text.configure(state="disabled")
+        self.agent_stats_text = tk.Text(
+            stats_frame,
+            width=48,
+            height=14,
+            font=("Courier", 10),
+            bg="#0e141c",
+            fg="#d4ffe5",
+        )
+        self.agent_stats_text.pack(side="left", fill="both", expand=True)
+        self.agent_stats_text.configure(state="disabled")
+        self._base_map_font_size = 11
+        self._base_log_font_size = 10
+        self._base_stats_font_size = 10
+        self._apply_zoom_font()
 
         self._configure_color_tags()
 
@@ -227,7 +280,17 @@ class RenderWindow:
     def _on_zoom_change(self, _evt=None) -> None:
         z = int(self.zoom_var.get())
         self.zoom_var.set(max(0, min(10, z)))
+        self._apply_zoom_font()
         self._redraw()
+
+    def _apply_zoom_font(self) -> None:
+        zoom = int(self.zoom_var.get())
+        # Zoom scales map glyph size for clearer replay inspection.
+        font_size = max(8, min(26, self._base_map_font_size + zoom))
+        self.text.configure(font=("Courier", font_size))
+        # Keep side panes fixed-size for readability regardless of map zoom.
+        self.action_log_text.configure(font=("Courier", self._base_log_font_size))
+        self.agent_stats_text.configure(font=("Courier", self._base_stats_font_size))
 
     def _active_state(self) -> Optional[EnvState]:
         if self._playback_states:
@@ -253,7 +316,13 @@ class RenderWindow:
     def _redraw(self) -> None:
         state = self._active_state()
         if state is None:
+            self._hide_tooltip()
             return
+        self._last_view_bounds = self.renderer.view_bounds(
+            state=state,
+            focus_agent=self._current_focus(),
+            zoom=int(self.zoom_var.get()),
+        )
         cells = self.renderer.render_cells(
             state,
             focus_agent=self._current_focus(),
@@ -261,34 +330,220 @@ class RenderWindow:
         )
         self._draw_cells(cells)
         self._redraw_action_log()
+        self._redraw_agent_stats()
+
+    def _on_text_leave(self, _evt=None) -> None:
+        self._hide_tooltip()
+
+    def _on_text_motion(self, evt) -> None:
+        state = self._active_state()
+        bounds = self._last_view_bounds
+        if state is None or bounds is None:
+            self._hide_tooltip()
+            return
+
+        try:
+            idx = self.text.index(f"@{evt.x},{evt.y}")
+            line_str, col_str = idx.split(".")
+            line = int(line_str)
+            col = int(col_str)
+        except Exception:
+            self._hide_tooltip()
+            return
+
+        min_r, max_r, min_c, max_c = bounds
+        height = max_r - min_r + 1
+        width = max_c - min_c + 1
+        if line < 1 or line > height or col < 0 or col >= width:
+            self._hide_tooltip()
+            return
+
+        grid_r = min_r + (line - 1)
+        grid_c = min_c + col
+        if self._tooltip_cell == (grid_r, grid_c):
+            return
+        self._tooltip_cell = (grid_r, grid_c)
+        self._show_tooltip(
+            x=evt.x_root + 14,
+            y=evt.y_root + 14,
+            text=self._tile_tooltip_text(state, grid_r, grid_c),
+        )
+
+    def _show_tooltip(self, x: int, y: int, text: str) -> None:
+        if self._tooltip_window is None:
+            win = self._tk.Toplevel(self.root)
+            win.overrideredirect(True)
+            win.attributes("-topmost", True)
+            label = self._tk.Label(
+                win,
+                justify="left",
+                bg="#111827",
+                fg="#e5e7eb",
+                relief="solid",
+                borderwidth=1,
+                font=("Courier", 9),
+                padx=6,
+                pady=4,
+            )
+            label.pack()
+            self._tooltip_window = win
+            self._tooltip_label = label
+        assert self._tooltip_window is not None
+        assert self._tooltip_label is not None
+        self._tooltip_label.configure(text=text)
+        self._tooltip_window.geometry(f"+{int(x)}+{int(y)}")
+        self._tooltip_window.deiconify()
+
+    def _hide_tooltip(self) -> None:
+        self._tooltip_cell = None
+        if self._tooltip_window is not None:
+            self._tooltip_window.withdraw()
+
+    def _tile_tooltip_text(self, state: EnvState, r: int, c: int) -> str:
+        tile_id = state.grid[r][c]
+        tile = self.renderer.tiles[tile_id]
+        lines = [
+            f"pos=({r},{c})",
+            f"tile={tile_id}",
+            f"walkable={tile.walkable} interactions={tile.max_interactions}",
+        ]
+        if tile.loot_table:
+            lines.append(f"tile_loot={','.join(tile.loot_table[:6])}")
+
+        for aid, agent in sorted(state.agents.items()):
+            if agent.alive and agent.position == (r, c):
+                lines.append(
+                    f"agent={aid} profile={agent.profile_name} hp={agent.hp}/{agent.max_hp} hunger={agent.hunger}/{agent.max_hunger}"
+                )
+                break
+
+        for _, monster in sorted(state.monsters.items()):
+            if monster.alive and monster.position == (r, c):
+                lines.append(
+                    f"monster={monster.name} ({monster.monster_id}) hp={monster.hp}/{monster.max_hp}"
+                )
+                break
+
+        chest = state.chests.get((r, c))
+        if chest is not None:
+            lines.append(
+                f"chest={'opened' if chest.opened else 'closed'} loot_count={len(chest.loot)}"
+            )
+
+        ground = state.ground_items.get((r, c), [])
+        if ground:
+            lines.append(f"ground_items={','.join(ground[:8])}")
+
+        return "\n".join(lines)
 
     def _redraw_action_log(self) -> None:
         self.action_log_text.configure(state="normal")
         self.action_log_text.delete("1.0", self._tk.END)
-        self.action_log_text.insert(self._tk.END, "Recent Actions\n")
-        self.action_log_text.insert(self._tk.END, "--------------\n")
+        self.action_log_text.insert(self._tk.END, "Turn Log\n")
+        self.action_log_text.insert(self._tk.END, "--------\n")
 
         if not self._playback_states:
             self.action_log_text.insert(self._tk.END, "No playback loaded.\n")
         elif not self._playback_actions or self._cursor == 0:
-            self.action_log_text.insert(self._tk.END, "No actions yet.\n")
+            self.action_log_text.insert(self._tk.END, "No turns yet.\n")
         else:
             total = min(len(self._playback_actions), self._cursor)
             shown = 0
             for step_idx in range(total, 0, -1):
-                acts = self._playback_actions[step_idx - 1]
+                entry = self._playback_actions[step_idx - 1]
                 step_num = step_idx
-                rendered = ", ".join(
-                    f"{aid}={ACTION_NAMES.get(int(a), str(a))}({int(a)})"
-                    for aid, a in sorted(acts.items())
-                )
-                self.action_log_text.insert(
-                    self._tk.END, f"step {step_num}: {rendered}\n"
-                )
+                self._write_action_log_entry(step_num, entry)
                 shown += 1
-                if shown >= 25:
+                if shown >= 20:
                     break
         self.action_log_text.configure(state="disabled")
+
+    def _write_action_log_entry(self, step_num: int, entry: Dict[str, object]) -> None:
+        if "agents" in entry and isinstance(entry.get("agents"), dict):
+            agents = entry["agents"]
+            self.action_log_text.insert(self._tk.END, f"step {step_num}\n")
+            for aid, row in sorted(agents.items()):
+                if not isinstance(row, dict):
+                    continue
+                action = int(row.get("action", -1))
+                action_name = ACTION_NAMES.get(action, str(action))
+                reward = float(row.get("reward", 0.0))
+                self.action_log_text.insert(
+                    self._tk.END, f"  {aid}: {action_name}({action}) r={reward:+.3f}\n"
+                )
+                death_reason = row.get("death_reason")
+                if death_reason:
+                    self.action_log_text.insert(
+                        self._tk.END, f"    DEATH: {str(death_reason)}\n"
+                    )
+                if bool(row.get("winner", False)):
+                    self.action_log_text.insert(self._tk.END, "    WINNER\n")
+            self.action_log_text.insert(self._tk.END, "\n")
+            for dmg in entry.get("agent_damage", []):
+                if not isinstance(dmg, dict):
+                    continue
+                self.action_log_text.insert(
+                    self._tk.END,
+                    f"  DAMAGE: {dmg.get('agent_id')} -{int(dmg.get('amount', 0))} ({dmg.get('source', 'unknown')})\n",
+                )
+            for md in entry.get("monster_deaths", []):
+                if not isinstance(md, dict):
+                    continue
+                self.action_log_text.insert(
+                    self._tk.END,
+                    f"  MONSTER_DEATH: {md.get('monster_id')} [{md.get('entity_id')}] {md.get('reason', 'unknown')}\n",
+                )
+            if entry.get("agent_damage") or entry.get("monster_deaths"):
+                self.action_log_text.insert(self._tk.END, "\n")
+            return
+
+        acts = {
+            str(aid): int(a)
+            for aid, a in entry.items()
+            if isinstance(a, (int, float))
+        }
+        rendered = ", ".join(
+            f"{aid}={ACTION_NAMES.get(int(a), str(a))}({int(a)})"
+            for aid, a in sorted(acts.items())
+        )
+        self.action_log_text.insert(self._tk.END, f"step {step_num}: {rendered}\n")
+
+    def _redraw_agent_stats(self) -> None:
+        state = self._active_state()
+        self.agent_stats_text.configure(state="normal")
+        self.agent_stats_text.delete("1.0", self._tk.END)
+        self.agent_stats_text.insert(self._tk.END, "Agent Stats\n")
+        self.agent_stats_text.insert(self._tk.END, "----------\n")
+        if state is None:
+            self.agent_stats_text.insert(self._tk.END, "No state loaded.\n")
+            self.agent_stats_text.configure(state="disabled")
+            return
+
+        alive_agents = sum(1 for a in state.agents.values() if a.alive)
+        alive_monsters = sum(1 for m in state.monsters.values() if m.alive)
+        self.agent_stats_text.insert(
+            self._tk.END,
+            f"step={state.step_count} alive_agents={alive_agents} alive_monsters={alive_monsters}\n\n",
+        )
+        for aid, agent in sorted(state.agents.items()):
+            status = "alive" if agent.alive else "dead"
+            self.agent_stats_text.insert(
+                self._tk.END,
+                f"{aid} [{status}] {agent.profile_name}/{agent.race_name}/{agent.class_name}\n",
+            )
+            self.agent_stats_text.insert(
+                self._tk.END,
+                f"  hp={agent.hp}/{agent.max_hp} hunger={agent.hunger}/{agent.max_hunger} pos={agent.position}\n",
+            )
+            self.agent_stats_text.insert(
+                self._tk.END,
+                f"  str={agent.strength} dex={agent.dexterity} int={agent.intellect} inv={len(agent.inventory)} eq={len(agent.equipped)}\n",
+            )
+            self.agent_stats_text.insert(
+                self._tk.END,
+                f"  skills={agent.skills}\n\n",
+            )
+        self.agent_stats_text.configure(state="disabled")
 
     def update_state(
         self, state: EnvState, focus_choices: Optional[List[str]] = None
@@ -303,7 +558,7 @@ class RenderWindow:
         self,
         states: List[EnvState],
         focus_choices: Optional[List[str]] = None,
-        action_log: Optional[List[Dict[str, int]]] = None,
+        action_log: Optional[List[Dict[str, object]]] = None,
     ) -> None:
         self._playback_states = [copy.deepcopy(state) for state in states]
         self._playback_actions = [dict(x) for x in (action_log or [])]
@@ -334,6 +589,30 @@ class RenderWindow:
         self._redraw()
         self.pump()
 
+    def restart(self) -> None:
+        if not self._playback_states:
+            return
+        self._cursor = 0
+        self.playback.pause()
+        self._redraw()
+        self.pump()
+
+    def set_episode_navigation(
+        self,
+        on_prev_episode: Optional[Callable[[], None]] = None,
+        on_next_episode: Optional[Callable[[], None]] = None,
+    ) -> None:
+        self._on_prev_episode = on_prev_episode
+        self._on_next_episode = on_next_episode
+
+    def prev_episode(self) -> None:
+        if self._on_prev_episode is not None:
+            self._on_prev_episode()
+
+    def next_episode(self) -> None:
+        if self._on_next_episode is not None:
+            self._on_next_episode()
+
     def _tick(self) -> None:
         if not self._playing:
             return
@@ -358,6 +637,10 @@ class RenderWindow:
 
     def close(self) -> None:
         self._playing = False
+        if self._tooltip_window is not None:
+            self._tooltip_window.destroy()
+            self._tooltip_window = None
+            self._tooltip_label = None
         self.root.destroy()
 
     def run(self) -> None:

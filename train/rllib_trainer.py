@@ -6,11 +6,14 @@ import json
 import logging
 import numbers
 import os
+import shutil
 import warnings
+from collections.abc import MutableMapping
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
+from rlrlgym.curriculum import load_curriculum_phases
 
 
 @dataclass
@@ -28,6 +31,9 @@ class RLlibTrainConfig:
     train_batch_size: int = 4000
     replay_save_every: int = 1000
     env_config_path: str = "data/env_config.json"
+    curriculum_path: str = "data/curriculum_phases.json"
+    shared_policy: bool = False
+    curriculum_enabled: bool = True
 
 
 class RLlibTrainer:
@@ -102,7 +108,13 @@ class RLlibTrainer:
             "agent_profile_map": {"agent_0": "human", "agent_1": "orc"},
             "replay_save_every": int(self.config.replay_save_every),
             "replay_output_dir": str(Path(self.config.output_dir).resolve()),
+            "save_latest_replay": True,
             "env_config_path": self.config.env_config_path,
+            "curriculum_phases": (
+                load_curriculum_phases(self.config.curriculum_path)
+                if self.config.curriculum_enabled
+                else []
+            ),
         }
 
         self._register_env(env_name, lambda cfg: self._RLRLGymRLlibEnv(cfg))
@@ -111,7 +123,78 @@ class RLlibTrainer:
         sample_action_space = probe_env.action_spaces["agent_0"]
 
         class MetricsCallbacks(self._DefaultCallbacks):
-            def on_episode_end(self, *, episode, **kwargs):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._episode_action_counts: Dict[int, Dict[str, int]] = {}
+
+            def _get_episode_store(self, episode):
+                custom = getattr(episode, "custom_data", None)
+                if isinstance(custom, MutableMapping):
+                    return custom
+                key = id(episode)
+                if key not in self._episode_action_counts:
+                    self._episode_action_counts[key] = {}
+                return self._episode_action_counts[key]
+
+            def _emit_metric(self, episode, metrics_logger, key: str, value: float) -> None:
+                # New RLlib API stack uses metrics_logger in callbacks.
+                if metrics_logger is not None:
+                    try:
+                        metrics_logger.log_value(
+                            ("custom_metrics", key),
+                            float(value),
+                            reduce="mean",
+                        )
+                        return
+                    except Exception:
+                        pass
+                # Backward-compatible fallback for older Episode objects.
+                cm = getattr(episode, "custom_metrics", None)
+                if isinstance(cm, MutableMapping):
+                    cm[key] = float(value)
+
+            def on_episode_start(self, *, episode, **kwargs):
+                store = self._get_episode_store(episode)
+                store["action_counts"] = {
+                    "move": 0,
+                    "wait": 0,
+                    "interact": 0,
+                    "other": 0,
+                    "total": 0,
+                }
+
+            def on_episode_step(self, *, episode, **kwargs):
+                store = self._get_episode_store(episode)
+                counts = store.get("action_counts")
+                if not isinstance(counts, dict):
+                    return
+                agent_ids = []
+                if hasattr(episode, "get_agents"):
+                    agent_ids = list(episode.get_agents())
+                elif hasattr(episode, "_agent_to_last_info"):
+                    agent_ids = list(episode._agent_to_last_info.keys())
+                for aid in agent_ids:
+                    info = episode.last_info_for(aid)
+                    if not info:
+                        continue
+                    action = info.get("action")
+                    if action is None:
+                        continue
+                    try:
+                        a = int(action)
+                    except Exception:
+                        continue
+                    if a in (0, 1, 2, 3):
+                        counts["move"] += 1
+                    elif a == 4:
+                        counts["wait"] += 1
+                    elif a == 10:
+                        counts["interact"] += 1
+                    else:
+                        counts["other"] += 1
+                    counts["total"] += 1
+
+            def on_episode_end(self, *, episode, metrics_logger=None, **kwargs):
                 agent_ids = []
                 if hasattr(episode, "get_agents"):
                     agent_ids = list(episode.get_agents())
@@ -121,12 +204,15 @@ class RLlibTrainer:
                 alive_flags = []
                 starvation_flags = []
                 teammate_dists = []
+                winner_seen = False
                 for aid in agent_ids:
                     info = episode.last_info_for(aid)
                     if not info:
                         continue
                     alive = bool(info.get("alive", False))
                     events = info.get("events", [])
+                    if any(str(e).startswith("winner:") for e in events):
+                        winner_seen = any(str(e) != "winner:none" for e in events if str(e).startswith("winner:"))
                     starved = bool("starve_tick" in events and "death" in events)
                     td = info.get("teammate_distance")
                     alive_flags.append(1.0 if alive else 0.0)
@@ -134,37 +220,92 @@ class RLlibTrainer:
                     if td is not None:
                         teammate_dists.append(float(td))
 
-                if alive_flags:
-                    episode.custom_metrics["win_rate"] = 1.0 if any(v > 0 for v in alive_flags) else 0.0
+                if winner_seen:
+                    self._emit_metric(episode, metrics_logger, "win_rate", 1.0)
+                elif alive_flags:
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        "win_rate",
+                        1.0 if any(v > 0 for v in alive_flags) else 0.0,
+                    )
                 if starvation_flags:
-                    episode.custom_metrics["starvation_rate"] = sum(starvation_flags) / len(starvation_flags)
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        "starvation_rate",
+                        sum(starvation_flags) / len(starvation_flags),
+                    )
                 if teammate_dists:
-                    episode.custom_metrics["mean_teammate_distance"] = sum(teammate_dists) / len(teammate_dists)
+                    self._emit_metric(
+                        episode,
+                        metrics_logger,
+                        "mean_teammate_distance",
+                        sum(teammate_dists) / len(teammate_dists),
+                    )
+                store = self._get_episode_store(episode)
+                counts = store.get("action_counts", {})
+                total_actions = max(1, int(counts.get("total", 0)))
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "action_wait_rate",
+                    float(counts.get("wait", 0)) / total_actions,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "action_move_rate",
+                    float(counts.get("move", 0)) / total_actions,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "action_interact_rate",
+                    float(counts.get("interact", 0)) / total_actions,
+                )
+                self._episode_action_counts.pop(id(episode), None)
 
         # Reduce warning noise from known Ray transitional deprecations.
         warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"ray\..*")
         warnings.filterwarnings("ignore", category=FutureWarning, module=r"ray\..*")
 
-        policy_ids = ["human_policy", "orc_policy"]
-        rl_module_spec = self._MultiRLModuleSpec(
-            rl_module_specs={
-                "human_policy": self._RLModuleSpec(
-                    observation_space=sample_obs_space,
-                    action_space=sample_action_space,
-                    inference_only=False,
-                    model_config={},
-                ),
-                "orc_policy": self._RLModuleSpec(
-                    observation_space=sample_obs_space,
-                    action_space=sample_action_space,
-                    inference_only=False,
-                    model_config={},
-                ),
-            }
-        )
+        if self.config.shared_policy:
+            policy_ids = ["shared_policy"]
+            rl_module_spec = self._MultiRLModuleSpec(
+                rl_module_specs={
+                    "shared_policy": self._RLModuleSpec(
+                        observation_space=sample_obs_space,
+                        action_space=sample_action_space,
+                        inference_only=False,
+                        model_config={},
+                    )
+                }
+            )
 
-        def policy_mapping_fn(agent_id, *args, **kwargs):
-            return "human_policy" if agent_id == "agent_0" else "orc_policy"
+            def policy_mapping_fn(agent_id, *args, **kwargs):
+                return "shared_policy"
+        else:
+            policy_ids = ["human_policy", "orc_policy"]
+            rl_module_spec = self._MultiRLModuleSpec(
+                rl_module_specs={
+                    "human_policy": self._RLModuleSpec(
+                        observation_space=sample_obs_space,
+                        action_space=sample_action_space,
+                        inference_only=False,
+                        model_config={},
+                    ),
+                    "orc_policy": self._RLModuleSpec(
+                        observation_space=sample_obs_space,
+                        action_space=sample_action_space,
+                        inference_only=False,
+                        model_config={},
+                    ),
+                }
+            )
+
+            def policy_mapping_fn(agent_id, *args, **kwargs):
+                return "human_policy" if agent_id == "agent_0" else "orc_policy"
 
         ppo = (
             self._PPOConfig()
@@ -242,7 +383,9 @@ class RLlibTrainer:
                 result,
                 [
                     ("custom_metrics", "win_rate_mean"),
+                    ("custom_metrics", "win_rate"),
                     ("env_runners", "custom_metrics", "win_rate_mean"),
+                    ("env_runners", "custom_metrics", "win_rate"),
                 ],
                 default=0.0,
             )
@@ -250,7 +393,9 @@ class RLlibTrainer:
                 result,
                 [
                     ("custom_metrics", "starvation_rate_mean"),
+                    ("custom_metrics", "starvation_rate"),
                     ("env_runners", "custom_metrics", "starvation_rate_mean"),
+                    ("env_runners", "custom_metrics", "starvation_rate"),
                 ],
                 default=0.0,
             )
@@ -258,7 +403,39 @@ class RLlibTrainer:
                 result,
                 [
                     ("custom_metrics", "mean_teammate_distance_mean"),
+                    ("custom_metrics", "mean_teammate_distance"),
                     ("env_runners", "custom_metrics", "mean_teammate_distance_mean"),
+                    ("env_runners", "custom_metrics", "mean_teammate_distance"),
+                ],
+                default=0.0,
+            )
+            action_wait_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "action_wait_rate_mean"),
+                    ("custom_metrics", "action_wait_rate"),
+                    ("env_runners", "custom_metrics", "action_wait_rate_mean"),
+                    ("env_runners", "custom_metrics", "action_wait_rate"),
+                ],
+                default=0.0,
+            )
+            action_move_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "action_move_rate_mean"),
+                    ("custom_metrics", "action_move_rate"),
+                    ("env_runners", "custom_metrics", "action_move_rate_mean"),
+                    ("env_runners", "custom_metrics", "action_move_rate"),
+                ],
+                default=0.0,
+            )
+            action_interact_rate = self._extract_float(
+                result,
+                [
+                    ("custom_metrics", "action_interact_rate_mean"),
+                    ("custom_metrics", "action_interact_rate"),
+                    ("env_runners", "custom_metrics", "action_interact_rate_mean"),
+                    ("env_runners", "custom_metrics", "action_interact_rate"),
                 ],
                 default=0.0,
             )
@@ -282,6 +459,9 @@ class RLlibTrainer:
                     "starvation_rate": starvation_rate,
                     "loss": loss,
                     "mean_teammate_distance": team_dist,
+                    "action_wait_rate": action_wait_rate,
+                    "action_move_rate": action_move_rate,
+                    "action_interact_rate": action_interact_rate,
                 }
             )
             self._print_live_progress(
@@ -306,6 +486,9 @@ class RLlibTrainer:
         metrics_path = out / "rllib_metrics.json"
         metrics_path.write_text(json.dumps(metrics_rows, indent=2), encoding="utf-8")
         episodes_total_final = int(metrics_rows[-1]["episodes_total"]) if metrics_rows else 0
+        self._ensure_final_replay_exists(
+            output_dir=out, final_episode=episodes_total_final
+        )
 
         summary = {
             "iterations": self.config.iterations,
@@ -325,6 +508,17 @@ class RLlibTrainer:
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
         return summary
+
+    def _ensure_final_replay_exists(self, output_dir: Path, final_episode: int) -> None:
+        if final_episode <= 0:
+            return
+        replay_dir = output_dir / "replays"
+        latest = replay_dir / "latest_episode.replay.json"
+        final = replay_dir / f"episode_{final_episode:06d}.replay.json"
+        if final.exists() or not latest.exists():
+            return
+        replay_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(latest, final)
 
     def _save_checkpoint(self, algo, checkpoint_dir: Path) -> str:
         try:
@@ -404,19 +598,39 @@ class RLlibTrainer:
         latest = metrics_rows[-1] if metrics_rows else {}
         latest_reward = float(latest.get("episode_reward_mean", 0.0) or 0.0)
         latest_win = float(latest.get("win_rate", 0.0) or 0.0)
+        latest_survival = float(latest.get("survival_mean", 0.0) or 0.0)
         latest_starve = float(latest.get("starvation_rate", 0.0) or 0.0)
         latest_loss = float(latest.get("loss", 0.0) or 0.0)
+        latest_team_dist = float(latest.get("mean_teammate_distance", 0.0) or 0.0)
+        latest_wait_rate = float(latest.get("action_wait_rate", 0.0) or 0.0)
+        latest_move_rate = float(latest.get("action_move_rate", 0.0) or 0.0)
+        latest_interact_rate = float(latest.get("action_interact_rate", 0.0) or 0.0)
+        latest_timesteps_total = int(float(latest.get("timesteps_total", 0) or 0))
         reward_curve = [round(float(r.get("episode_reward_mean", 0.0) or 0.0), 4) for r in metrics_rows]
+        win_curve = [round(float(r.get("win_rate", 0.0) or 0.0), 4) for r in metrics_rows]
+        survival_curve = [round(float(r.get("survival_mean", 0.0) or 0.0), 4) for r in metrics_rows]
+        starvation_curve = [round(float(r.get("starvation_rate", 0.0) or 0.0), 4) for r in metrics_rows]
+        loss_curve = [round(float(r.get("loss", 0.0) or 0.0), 6) for r in metrics_rows]
+        team_dist_curve = [round(float(r.get("mean_teammate_distance", 0.0) or 0.0), 4) for r in metrics_rows]
+        wait_curve = [round(float(r.get("action_wait_rate", 0.0) or 0.0), 4) for r in metrics_rows]
+        move_curve = [round(float(r.get("action_move_rate", 0.0) or 0.0), 4) for r in metrics_rows]
+        interact_curve = [round(float(r.get("action_interact_rate", 0.0) or 0.0), 4) for r in metrics_rows]
 
         rows_html = "".join(
             [
                 "<tr>"
                 f"<td>{int(r.get('iteration', 0))}</td>"
                 f"<td>{int(float(r.get('episodes_total', 0) or 0))}</td>"
+                f"<td>{int(float(r.get('timesteps_total', 0) or 0))}</td>"
                 f"<td>{float(r.get('episode_reward_mean', 0.0) or 0.0):.4f}</td>"
                 f"<td>{float(r.get('win_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('survival_mean', 0.0) or 0.0):.2f}</td>"
                 f"<td>{float(r.get('starvation_rate', 0.0) or 0.0):.4f}</td>"
                 f"<td>{float(r.get('loss', 0.0) or 0.0):.6f}</td>"
+                f"<td>{float(r.get('mean_teammate_distance', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('action_wait_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('action_move_rate', 0.0) or 0.0):.4f}</td>"
+                f"<td>{float(r.get('action_interact_rate', 0.0) or 0.0):.4f}</td>"
                 "</tr>"
                 for r in metrics_rows
             ]
@@ -480,20 +694,37 @@ class RLlibTrainer:
   <div class="card">
     <div class="metric">Episodes (from episodes_total): {episodes_total}</div>
     <div class="metric">Iterations: {iterations}</div>
+    <div class="metric">Latest timesteps total: {latest_timesteps_total}</div>
     <div class="metric">Latest reward: {latest_reward:.4f}</div>
     <div class="metric">Latest win rate: {latest_win:.4f}</div>
+    <div class="metric">Latest survival mean: {latest_survival:.2f}</div>
     <div class="metric">Latest starvation rate: {latest_starve:.4f}</div>
     <div class="metric">Latest loss: {latest_loss:.6f}</div>
+    <div class="metric">Latest teammate dist: {latest_team_dist:.4f}</div>
+    <div class="metric">Latest wait rate: {latest_wait_rate:.4f}</div>
+    <div class="metric">Latest move rate: {latest_move_rate:.4f}</div>
+    <div class="metric">Latest interact rate: {latest_interact_rate:.4f}</div>
   </div>
   <div class="card">
     <h3>Reward Curve (per iteration)</h3>
     <pre>{reward_curve}</pre>
   </div>
   <div class="card">
+    <h3>All Metric Curves (per iteration)</h3>
+    <pre>win_rate={win_curve}</pre>
+    <pre>survival_mean={survival_curve}</pre>
+    <pre>starvation_rate={starvation_curve}</pre>
+    <pre>loss={loss_curve}</pre>
+    <pre>mean_teammate_distance={team_dist_curve}</pre>
+    <pre>action_wait_rate={wait_curve}</pre>
+    <pre>action_move_rate={move_curve}</pre>
+    <pre>action_interact_rate={interact_curve}</pre>
+  </div>
+  <div class="card">
     <h3>Iteration Metrics</h3>
     <table>
       <thead>
-        <tr><th>Iteration</th><th>Episodes Total</th><th>Reward Mean</th><th>Win Rate</th><th>Starvation Rate</th><th>Loss</th></tr>
+        <tr><th>Iteration</th><th>Episodes Total</th><th>Timesteps Total</th><th>Reward Mean</th><th>Win Rate</th><th>Survival Mean</th><th>Starvation Rate</th><th>Loss</th><th>Team Dist</th><th>Wait</th><th>Move</th><th>Interact</th></tr>
       </thead>
       <tbody>
         {rows_html}

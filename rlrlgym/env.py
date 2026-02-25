@@ -7,7 +7,7 @@ import json
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .constants import (
     ACTION_EAT,
@@ -35,14 +35,14 @@ from .tiles import load_tileset
 
 EDIBLE_ITEMS = {"ration", "fruit"}
 MOVE_VALID_REWARD = 0.005
-MOVE_STEP_COST = 0.003
+MOVE_STEP_COST = 0.002
 MOVE_FOOD_PROGRESS_REWARD = 0.01
 MOVE_FOOD_REGRESS_PENALTY = 0.005
-EAT_PER_HUNGER_GAIN_REWARD = 0.04
+EAT_PER_HUNGER_GAIN_REWARD = 0.06
 EAT_WASTE_THRESHOLD = 0.8
 EAT_WASTE_PENALTY = 0.05
 LOW_HUNGER_THRESHOLD = 0.4
-LOW_HUNGER_PENALTY_SCALE = 0.01
+LOW_HUNGER_PENALTY_SCALE = 0.006
 
 DAMAGE_TYPE_SLASH = "slash"
 DAMAGE_TYPE_PIERCE = "pierce"
@@ -132,6 +132,9 @@ class EnvConfig:
     agent_profile_map: Dict[str, str] = field(default_factory=dict)
     agent_race_map: Dict[str, str] = field(default_factory=dict)
     agent_class_map: Dict[str, str] = field(default_factory=dict)
+    combat_training_mode: bool = False
+    hunger_tick_enabled: bool = True
+    missed_attack_opportunity_penalty: float = 0.03
     render_enabled: bool = True
 
     @classmethod
@@ -196,6 +199,7 @@ class MultiAgentRLRLGym:
         self.state: Optional[EnvState] = None
         self._last_info: Dict[str, Dict[str, object]] = {}
         self._render_window: Optional[RenderWindow] = None
+        self._winner_announced: bool = False
 
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
@@ -237,6 +241,8 @@ class MultiAgentRLRLGym:
         starts = sample_walkable_positions(
             grid, self.tiles, self.config.n_agents, self._rng
         )
+        if self.config.combat_training_mode:
+            starts = self._cluster_agent_starts_for_combat(grid=grid, starts=starts)
 
         agents: Dict[str, AgentState] = {}
         for i, agent_id in enumerate(self.possible_agents):
@@ -279,6 +285,7 @@ class MultiAgentRLRLGym:
         self.state.monsters = self._spawn_monsters(
             occupied=starts + list(self.state.chests.keys())
         )
+        self._winner_announced = False
         self.agents = list(self.possible_agents)
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
         info = {
@@ -318,6 +325,7 @@ class MultiAgentRLRLGym:
                 continue
 
             action = int(actions.get(aid, ACTION_WAIT))
+            info[aid]["action"] = action
             delta_reward, events = self._apply_action(aid, action)
             rewards[aid] += delta_reward
             info[aid]["events"].extend(events)
@@ -348,6 +356,31 @@ class MultiAgentRLRLGym:
             info[aid]["race"] = agent.race_name
             info[aid]["class"] = agent.class_name
             info[aid]["teammate_distance"] = self._nearest_teammate_distance(aid)
+
+        alive_now = [
+            aid
+            for aid in self.possible_agents
+            if self.state.agents[aid].alive and not truncations[aid]
+        ]
+        if (
+            not self._winner_announced
+            and self.config.n_agents > 1
+            and len(alive_now) == 1
+        ):
+            winner = alive_now[0]
+            info[winner]["events"].append(f"winner:{winner}")
+            info[winner]["events"].append("episode_end:last_survivor")
+            # End competitive episodes immediately once a single survivor remains.
+            truncations[winner] = True
+            self._winner_announced = True
+        elif (
+            not self._winner_announced
+            and self.config.n_agents > 1
+            and len(alive_now) == 0
+        ):
+            for aid in self.possible_agents:
+                info[aid]["events"].append("winner:none")
+            self._winner_announced = True
 
         self.agents = [
             aid
@@ -397,12 +430,19 @@ class MultiAgentRLRLGym:
         self,
         states: List[EnvState],
         title: str = "RLRLGym Playback",
-        playback_actions: Optional[List[Dict[str, int]]] = None,
+        playback_actions: Optional[List[Dict[str, object]]] = None,
+        on_prev_episode: Optional[Callable[[], None]] = None,
+        on_next_episode: Optional[Callable[[], None]] = None,
     ) -> None:
         if not self.config.render_enabled:
             return
         if self._render_window is None:
             self._render_window = RenderWindow(self.tiles, title=title)
+        self._render_window.root.title(title)
+        self._render_window.set_episode_navigation(
+            on_prev_episode=on_prev_episode,
+            on_next_episode=on_next_episode,
+        )
         self._render_window.set_playback_states(
             states,
             focus_choices=self.possible_agents,
@@ -446,6 +486,14 @@ class MultiAgentRLRLGym:
         agent = self.state.agents[aid]
         reward = 0.0
         events: List[str] = []
+        adjacent_hostile = self._has_adjacent_hostile(agent=agent, actor_id=aid)
+        if (
+            self.config.combat_training_mode
+            and adjacent_hostile
+            and action != ACTION_INTERACT
+        ):
+            reward -= float(self.config.missed_attack_opportunity_penalty)
+            events.append("missed_attack_opportunity")
 
         if action in MOVE_DELTAS:
             old_food_distance = self._nearest_food_distance(agent.position)
@@ -486,7 +534,7 @@ class MultiAgentRLRLGym:
                     len(agent.recent_positions) >= 2
                     and agent.recent_positions[-2] == agent.position
                 ):
-                    reward -= max(0.0, 0.03 - 0.003 * athletics_level)
+                    reward -= max(0.0, 0.02 - 0.002 * athletics_level)
                     events.append("stutter_penalty")
                 agent.recent_positions.append(agent.position)
                 agent.recent_positions = agent.recent_positions[-5:]
@@ -497,10 +545,10 @@ class MultiAgentRLRLGym:
 
         elif action == ACTION_WAIT:
             agent.wait_streak += 1
-            reward -= 0.02
+            reward -= 0.01
             events.append("wait")
             if agent.wait_streak > 3:
-                reward -= 0.03
+                reward -= 0.02
                 events.append("wait_loop_penalty")
 
         elif action in (ACTION_LOOT, ACTION_PICKUP):
@@ -561,6 +609,9 @@ class MultiAgentRLRLGym:
                 reward -= 0.01
 
         elif action == ACTION_INTERACT:
+            if self.config.combat_training_mode and adjacent_hostile:
+                reward += 0.02
+                events.append("combat_engage_bonus")
             reward += self._interact(agent, aid, events)
 
         return reward, events
@@ -798,6 +849,8 @@ class MultiAgentRLRLGym:
         aid: str,
         info: Dict[str, Dict[str, object]],
     ) -> None:
+        if not self.config.hunger_tick_enabled:
+            return
         agent.hunger = max(0, agent.hunger - 1)
         if agent.hunger == 0:
             agent.hp -= 1
@@ -1211,6 +1264,64 @@ class MultiAgentRLRLGym:
                 else:
                     counts["closed"] += 1
         return counts
+
+    def _has_adjacent_hostile(self, agent: AgentState, actor_id: str) -> bool:
+        assert self.state is not None
+        ar, ac = agent.position
+        for monster in self.state.monsters.values():
+            if not monster.alive:
+                continue
+            if abs(monster.position[0] - ar) + abs(monster.position[1] - ac) == 1:
+                return True
+        for other_id, other in self.state.agents.items():
+            if other_id == actor_id or not other.alive:
+                continue
+            if abs(other.position[0] - ar) + abs(other.position[1] - ac) == 1:
+                return True
+        return False
+
+    def _cluster_agent_starts_for_combat(
+        self, grid: List[List[str]], starts: List[Tuple[int, int]]
+    ) -> List[Tuple[int, int]]:
+        if len(starts) <= 1:
+            return starts
+        occupied = {starts[0]}
+        out = [starts[0]]
+        base = starts[0]
+        ring = [
+            (base[0] - 1, base[1]),
+            (base[0] + 1, base[1]),
+            (base[0], base[1] - 1),
+            (base[0], base[1] + 1),
+            (base[0] - 1, base[1] - 1),
+            (base[0] - 1, base[1] + 1),
+            (base[0] + 1, base[1] - 1),
+            (base[0] + 1, base[1] + 1),
+        ]
+        fallback = list(starts[1:])
+        for _ in starts[1:]:
+            placed = None
+            for r, c in ring:
+                if r < 0 or c < 0 or r >= len(grid) or c >= len(grid[0]):
+                    continue
+                if (r, c) in occupied:
+                    continue
+                tile_id = grid[r][c]
+                if not self.tiles[tile_id].walkable:
+                    continue
+                placed = (r, c)
+                break
+            if placed is None:
+                while fallback:
+                    cand = fallback.pop(0)
+                    if cand not in occupied:
+                        placed = cand
+                        break
+            if placed is None:
+                placed = starts[1]
+            out.append(placed)
+            occupied.add(placed)
+        return out
 
     def _apply_monster_turn(
         self,

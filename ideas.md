@@ -89,17 +89,10 @@ Ordered roughly from high impact / low complexity to more complex:
 - Only include enemies/items in observation when visible.
 - Later: memory map.
 
-### 4) Items as tactical choices
-- Consumables: healing potion, food, bomb, teleport scroll.
-- Inventory limit / encumbrance to force tradeoffs.
-- Add cooldowns/charges later.
 
 ### 5) Status effects
 - Keep a small set at first: poison, bleed, stun, regen.
 
-### 6) Progression (XP/levels/perks)
-- XP on kill; level thresholds grant small bonuses.
-- Can destabilize balance; add after combat is solid.
 
 ### 7) Objectives that force engagement
 - Control points (shrines), loot rooms, or a shrinking safe zone to prevent hiding.
@@ -111,61 +104,66 @@ Given existing systems (tiles, interactions, inventory, hunger):
 2) Add **doors/walls** in mapgen
 3) Add **LOS-limited** observations
 
-## Experiment Tracking: Model Size Across Runs
 
-Goal: track how big the learned policies are across training runs (architecture + parameter count).
+## Magic System (design)
 
-### Where the model is saved
-- Each training run writes: `outputs/train/neural_policies.json` via `MultiAgentTrainer._write_checkpoint()`.
-- This checkpoint includes per-agent:
-  - `config.hidden_layers`, `activation`, etc.
-  - `network.weights` and `network.biases` (so you can compute exact param counts)
+### Action space
+- Add a distinct **CAST** action id (separate from USE).
+- Keep scroll learning under **USE**.
 
-### Recommended “size” metrics
-1) **Parameter count** (best apples-to-apples):
-   - For each layer: `dout * din` (weights) + `dout` (biases)
-   - Total params = sum over layers of `dout * (din + 1)`
-2) **Checkpoint file size (bytes)** as a quick sanity check (less clean than params)
-3) **Architecture signature**: `input_dim -> hidden_layers -> output_dim`
+### Spells are knowledge (not items)
+- Each agent has a list of known spells:
+  - `known_spells: [spell_id, ...]`
+- Casting consumes **MP** (mana) and triggers per-spell cooldowns (optional but recommended).
 
-### Minimal script to compute param counts
-Save as `scripts/model_size.py`:
+### MP / INT integration
+- `MaxMP = MP_BASE + INT * MP_PER_INT` (tunable constants).
+- INT also influences spell effectiveness (damage/heal scaling) and resistance (later).
 
-```python
-import json
-import os
-import sys
+### Scrolls teach spells
+- Scroll items map to a spell id (e.g., `scroll_firebolt -> firebolt`).
+- On **USE(scroll)**:
+  - if spell not known: add to `known_spells`
+  - consume scroll
+  - emit event `learn_spell:<spell_id>` for rewards/analytics
 
-def count_params(net):
-    weights = net.get("weights", [])  # [layer][out][in]
-    biases = net.get("biases", [])
-    wcount = sum(len(out_row) for layer in weights for out_row in layer)
-    bcount = sum(len(layer_b) for layer_b in biases)
-    return wcount + bcount, wcount, bcount
+### Spellbook items
+- A **spellbook** is just gear that modifies INT (e.g., `INT +1/+2`).
+- It does **not** contain spells.
 
-path = sys.argv[1] if len(sys.argv) > 1 else "outputs/train/neural_policies.json"
-with open(path, "r") as f:
-    data = json.load(f)
+### Starter vs found spells
+- Classes can grant a small starter `known_spells` list.
+- Stronger/situational spells are learned via scroll loot from chests/monsters.
 
-print(f"checkpoint: {path}")
-print(f"file_bytes: {os.path.getsize(path)}")
+---
 
-for aid, payload in data.items():
-    net = payload.get("network")
-    cfg = payload.get("config", {})
-    if not net:
-        print(f"{aid}: (no network saved)")
-        continue
-    total, w, b = count_params(net)
-    print(
-        f"{aid}: params={total} (W={w}, b={b}) "
-        f"arch={net['input_dim']}->{cfg.get('hidden_layers')}->{net['output_dim']} act={cfg.get('activation')}"
-    )
-```
+## Scenario Builder (Tkinter UI) (design)
 
-Run:
-- `python scripts/model_size.py outputs/train/neural_policies.json`
+Goal: a UI to build scenarios with **N teams** and **K agents per team**.
 
-### Automation idea
-- Write `model_sizes.json` next to the checkpoint each run, or add `param_count` into the checkpoint payload for easy aggregation.
+### Scenario structure
+- Each agent selects:
+  - **race** (predefined list; current agents ≈ races)
+  - **class** (predefined list)
+  - starting skills/items (different per agent)
+  - starting `known_spells` (not items)
+- Each team has a shared:
+  - **policy** (one NN/policy per team; parameter sharing within team)
 
+### Required UI features
+- Add/remove teams; set K and generate agents.
+- Per-team policy editor (NN config) + checkpoint picker.
+- Per-agent editor (race/class/skills/items/known_spells).
+- Save/Load scenario files.
+- "Resume training" workflow: pick scenario + optionally load checkpoints.
+- Final review step: raw editable JSON panel with validate/apply (manual overrides).
+
+### Optional: map generation in scenario builder
+- Expose mapgen parameters + seed.
+- Provide a map preview and regenerate button.
+- Allow editing mapgen values directly in the scenario UI.
+
+* Monsters need to be able to move and attack
+* Agents should be referenced by their name and class
+* replay viewer - zoom should not affect the turn log or the agent stats windows
+* replay viewer - Should have a prev/next button to look for the next episode replay in the same directory

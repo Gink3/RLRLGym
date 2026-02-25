@@ -82,6 +82,7 @@ class MultiAgentTrainer:
                 [self.env.capture_playback_state()] if capture_replay else []
             )
             replay_actions = [] if capture_replay else None
+            replay_step_logs = [] if capture_replay else None
             if not self._run_metrics_initialized:
                 self._initialize_run_metrics(observations)
             self.logger.start_episode(
@@ -118,6 +119,20 @@ class MultiAgentTrainer:
                     replay_states.append(self.env.capture_playback_state())
                     assert replay_actions is not None
                     replay_actions.append({aid: int(a) for aid, a in actions.items()})
+                    assert replay_step_logs is not None
+                    prev_state = replay_states[-2] if len(replay_states) >= 2 else None
+                    curr_state = replay_states[-1]
+                    replay_step_logs.append(
+                        self._build_replay_step_log(
+                            actions=actions,
+                            rewards=rewards,
+                            terminations=terminations,
+                            truncations=truncations,
+                            info=info,
+                            prev_state=prev_state,
+                            curr_state=curr_state,
+                        )
+                    )
                 self.logger.log_step(
                     rewards,
                     terminations,
@@ -156,6 +171,7 @@ class MultiAgentTrainer:
                         seed=self.config.seed + ep,
                         frames=replay_states,
                         action_history=replay_actions or [],
+                        step_logs=replay_step_logs or [],
                     )
                 )
 
@@ -363,6 +379,7 @@ class MultiAgentTrainer:
         seed: int,
         frames: list,
         action_history: list[Dict[str, int]],
+        step_logs: list[Dict[str, object]] | None = None,
     ) -> str:
         out = Path(self.config.output_dir) / "replays"
         out.mkdir(parents=True, exist_ok=True)
@@ -374,9 +391,128 @@ class MultiAgentTrainer:
             "frame_count": len(frames),
             "frames": [self._serialize_state(s) for s in frames],
             "actions": [{aid: int(a) for aid, a in x.items()} for x in action_history],
+            "step_logs": list(step_logs or []),
         }
         p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return str(p)
+
+    def _build_replay_step_log(
+        self,
+        actions: Dict[str, int],
+        rewards: Dict[str, float],
+        terminations: Dict[str, bool],
+        truncations: Dict[str, bool],
+        info: Dict[str, Dict[str, object]],
+        prev_state=None,
+        curr_state=None,
+    ) -> Dict[str, object]:
+        derived_death_reasons: Dict[str, str] = {}
+        for source_aid, agent_info in info.items():
+            if not isinstance(agent_info, dict):
+                continue
+            events = list(agent_info.get("events", []))
+            for evt in events:
+                if isinstance(evt, str) and evt.startswith("agent_interact:kill:"):
+                    victim = evt.split(":", 2)[2]
+                    derived_death_reasons[victim] = f"killed by agent ({source_aid})"
+        logs: Dict[str, Dict[str, object]] = {}
+        for aid in self.env.possible_agents:
+            agent_info = info.get(aid, {})
+            events = list(agent_info.get("events", [])) if isinstance(agent_info, dict) else []
+            reason = self._death_reason_from_events(events)
+            if reason is None:
+                reason = derived_death_reasons.get(aid)
+            if reason is None and bool(terminations.get(aid, False)):
+                reason = "terminated/unknown"
+            logs[aid] = {
+                "action": int(actions.get(aid, -1)),
+                "reward": float(rewards.get(aid, 0.0)),
+                "events": events,
+                "terminated": bool(terminations.get(aid, False)),
+                "truncated": bool(truncations.get(aid, False)),
+                "death_reason": reason,
+                "winner": any(str(evt) == f"winner:{aid}" for evt in events),
+            }
+        payload: Dict[str, object] = {"agents": logs}
+        if prev_state is not None and curr_state is not None:
+            payload["agent_damage"] = self._agent_damage_events(
+                prev_state=prev_state, curr_state=curr_state, info=info
+            )
+            payload["monster_deaths"] = self._monster_death_events(
+                prev_state=prev_state, curr_state=curr_state, info=info
+            )
+        return payload
+
+    def _death_reason_from_events(self, events: list[str]) -> str | None:
+        if not events:
+            return None
+        for evt in events:
+            if evt.startswith("death_by_monster:"):
+                monster = evt.split(":", 1)[1]
+                return f"killed by monster ({monster})"
+        if "death" in events:
+            if "starve_tick" in events:
+                return "starvation"
+            return "combat/unknown"
+        return None
+
+    def _agent_damage_events(self, prev_state, curr_state, info) -> list[dict]:
+        out = []
+        for aid, curr_agent in curr_state.agents.items():
+            prev_agent = prev_state.agents.get(aid)
+            if prev_agent is None:
+                continue
+            dmg = int(prev_agent.hp) - int(curr_agent.hp)
+            if dmg <= 0:
+                continue
+            source = "unknown"
+            events = list(info.get(aid, {}).get("events", []))
+            if "starve_tick" in events:
+                source = "starvation"
+            else:
+                for evt in events:
+                    if isinstance(evt, str) and evt.startswith("death_by_monster:"):
+                        source = evt.split(":", 1)[1]
+                        break
+                    if isinstance(evt, str) and evt.startswith("monster_hit:"):
+                        parts = evt.split(":")
+                        if len(parts) >= 2:
+                            source = f"monster:{parts[1]}"
+                            break
+                if source == "unknown":
+                    for src_aid, src_info in info.items():
+                        for evt in list(src_info.get("events", [])):
+                            if isinstance(evt, str) and evt == f"agent_interact:hit:{aid}":
+                                source = f"agent:{src_aid}"
+                                break
+                        if source != "unknown":
+                            break
+            out.append({"agent_id": aid, "amount": dmg, "source": source})
+        return out
+
+    def _monster_death_events(self, prev_state, curr_state, info) -> list[dict]:
+        out = []
+        killer_by_monster_id: Dict[str, str] = {}
+        for src_aid, src_info in info.items():
+            for evt in list(src_info.get("events", [])):
+                if isinstance(evt, str) and evt.startswith("agent_interact:kill_monster:"):
+                    monster_id = evt.split(":", 2)[2]
+                    killer_by_monster_id[monster_id] = src_aid
+        for entity_id, curr_mon in curr_state.monsters.items():
+            prev_mon = prev_state.monsters.get(entity_id)
+            if prev_mon is None:
+                continue
+            if bool(prev_mon.alive) and not bool(curr_mon.alive):
+                killer = killer_by_monster_id.get(curr_mon.monster_id)
+                reason = f"killed by agent ({killer})" if killer else "died/unknown"
+                out.append(
+                    {
+                        "entity_id": entity_id,
+                        "monster_id": curr_mon.monster_id,
+                        "reason": reason,
+                    }
+                )
+        return out
 
     def _serialize_state(self, state) -> Dict[str, object]:
         return {
