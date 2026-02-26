@@ -41,6 +41,17 @@ SKILL_VOCAB = [
     "athletics",
     "exploration",
 ]
+MONSTER_VOCAB = [
+    "rat",
+    "bat",
+    "kobold_skirmisher",
+    "goblin_scout",
+    "skeleton",
+    "giant_spider",
+    "cult_acolyte",
+    "armored_beetle",
+    "unknown",
+]
 
 
 def vectorize_observation(obs: Dict[str, object]) -> List[float]:
@@ -72,6 +83,30 @@ def vectorize_observation(obs: Dict[str, object]) -> List[float]:
         nearby_chests = {}
     nearby_chests_closed = float(nearby_chests.get("closed", 0.0)) / 30.0
     nearby_chests_opened = float(nearby_chests.get("opened", 0.0)) / 30.0
+
+    nearby_agents = stats.get("nearby_agents", {})
+    if not isinstance(nearby_agents, dict):
+        nearby_agents = {}
+    nearby_agents_visible = float(nearby_agents.get("visible", 0.0)) / 8.0
+    nearby_agents_adjacent = float(nearby_agents.get("adjacent", 0.0)) / 4.0
+    nearby_agents_nearest_raw = nearby_agents.get("nearest_distance")
+    nearby_agents_nearest = (
+        1.0
+        if nearby_agents_nearest_raw is None
+        else min(1.0, float(nearby_agents_nearest_raw) / 50.0)
+    )
+
+    nearby_monsters = stats.get("nearby_monsters", {})
+    if not isinstance(nearby_monsters, dict):
+        nearby_monsters = {}
+    nearby_monsters_visible = float(nearby_monsters.get("visible", 0.0)) / 20.0
+    nearby_monsters_adjacent = float(nearby_monsters.get("adjacent", 0.0)) / 4.0
+    nearby_monsters_nearest_raw = nearby_monsters.get("nearest_distance")
+    nearby_monsters_nearest = (
+        1.0
+        if nearby_monsters_nearest_raw is None
+        else min(1.0, float(nearby_monsters_nearest_raw) / 50.0)
+    )
 
     skills = stats.get("skills", {})
     if not isinstance(skills, dict):
@@ -107,6 +142,16 @@ def vectorize_observation(obs: Dict[str, object]) -> List[float]:
     total_items = max(1.0, sum(item_counts.values()))
     item_features = [item_counts[k] / total_items for k in ITEM_VOCAB]
 
+    monster_by_type = nearby_monsters.get("by_type", {})
+    if not isinstance(monster_by_type, dict):
+        monster_by_type = {}
+    monster_counts = {k: 0.0 for k in MONSTER_VOCAB}
+    for monster_id, count in monster_by_type.items():
+        key = monster_id if monster_id in monster_counts else "unknown"
+        monster_counts[key] += float(count)
+    total_monsters = max(1.0, sum(monster_counts.values()))
+    monster_features = [monster_counts[k] / total_monsters for k in MONSTER_VOCAB]
+
     return [
         hp,
         hunger,
@@ -122,11 +167,22 @@ def vectorize_observation(obs: Dict[str, object]) -> List[float]:
         total_used,
         nearby_chests_closed,
         nearby_chests_opened,
-    ] + skill_features + profile_features + tile_features + item_features
+        nearby_agents_visible,
+        nearby_agents_adjacent,
+        nearby_agents_nearest,
+        nearby_monsters_visible,
+        nearby_monsters_adjacent,
+        nearby_monsters_nearest,
+    ] + skill_features + profile_features + tile_features + item_features + monster_features
 
 
 def observation_vector_size() -> int:
-    # 14 scalar stats + skill features + profile one-hot + tile histogram + item histogram
+    # 20 scalar stats + skill features + profile one-hot + tile histogram + item histogram + monster histogram
     return (
-        14 + len(SKILL_VOCAB) + len(PROFILE_VOCAB) + len(TILE_VOCAB) + len(ITEM_VOCAB)
+        20
+        + len(SKILL_VOCAB)
+        + len(PROFILE_VOCAB)
+        + len(TILE_VOCAB)
+        + len(ITEM_VOCAB)
+        + len(MONSTER_VOCAB)
     )

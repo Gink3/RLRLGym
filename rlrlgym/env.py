@@ -1311,6 +1311,12 @@ class MultiAgentRLRLGym:
                 "nearby_chests": self._nearby_chest_counts(
                     center=agent.position, height=view_height, width=view_width
                 ),
+                "nearby_agents": self._nearby_agent_counts(
+                    aid=aid, center=agent.position, height=view_height, width=view_width
+                ),
+                "nearby_monsters": self._nearby_monster_counts(
+                    center=agent.position, height=view_height, width=view_width
+                ),
             }
         if include_inventory:
             obs["inventory"] = list(agent.inventory)
@@ -1628,6 +1634,69 @@ class MultiAgentRLRLGym:
                 else:
                     counts["closed"] += 1
         return counts
+
+    def _nearby_agent_counts(
+        self, aid: str, center: Tuple[int, int], height: int, width: int
+    ) -> Dict[str, int | None]:
+        assert self.state is not None
+        cr, cc = center
+        start_r = cr - (height // 2)
+        start_c = cc - (width // 2)
+        end_r = start_r + height - 1
+        end_c = start_c + width - 1
+        total_visible = 0
+        adjacent = 0
+        nearest: int | None = None
+        for other_id, other in self.state.agents.items():
+            if other_id == aid or not other.alive:
+                continue
+            r, c = other.position
+            if r < start_r or r > end_r or c < start_c or c > end_c:
+                continue
+            total_visible += 1
+            dist = self._manhattan(center, other.position)
+            if dist == 1:
+                adjacent += 1
+            if nearest is None or dist < nearest:
+                nearest = dist
+        return {
+            "visible": total_visible,
+            "adjacent": adjacent,
+            "nearest_distance": nearest,
+        }
+
+    def _nearby_monster_counts(
+        self, center: Tuple[int, int], height: int, width: int
+    ) -> Dict[str, object]:
+        assert self.state is not None
+        cr, cc = center
+        start_r = cr - (height // 2)
+        start_c = cc - (width // 2)
+        end_r = start_r + height - 1
+        end_c = start_c + width - 1
+        total_visible = 0
+        adjacent = 0
+        nearest: int | None = None
+        by_type: Dict[str, int] = {}
+        for monster in self.state.monsters.values():
+            if not monster.alive:
+                continue
+            r, c = monster.position
+            if r < start_r or r > end_r or c < start_c or c > end_c:
+                continue
+            total_visible += 1
+            by_type[monster.monster_id] = by_type.get(monster.monster_id, 0) + 1
+            dist = self._manhattan(center, monster.position)
+            if dist == 1:
+                adjacent += 1
+            if nearest is None or dist < nearest:
+                nearest = dist
+        return {
+            "visible": total_visible,
+            "adjacent": adjacent,
+            "nearest_distance": nearest,
+            "by_type": by_type,
+        }
 
     def _has_adjacent_hostile(self, agent: AgentState, actor_id: str) -> bool:
         assert self.state is not None
