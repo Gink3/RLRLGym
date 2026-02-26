@@ -54,7 +54,7 @@
         {"item": "dagger", "weight": 12, "min_qty": 1, "max_qty": 1},
         {"item": "ration", "weight": 12, "min_qty": 1, "max_qty": 1},
         {"item": "bandage", "weight": 6, "min_qty": 1, "max_qty": 1},
-        {"item": "leather_armor", "weight": 3, "min_qty": 1, "max_qty": 1}
+        {"item": "leather_bracers", "weight": 3, "min_qty": 1, "max_qty": 1}
       ]
     },
     {
@@ -74,7 +74,7 @@
         {"item": "coin", "weight": 50, "min_qty": 1, "max_qty": 6},
         {"item": "ration", "weight": 15, "min_qty": 1, "max_qty": 1},
         {"item": "dagger", "weight": 10, "min_qty": 1, "max_qty": 1},
-        {"item": "leather_armor", "weight": 4, "min_qty": 1, "max_qty": 1},
+        {"item": "leather_cap", "weight": 4, "min_qty": 1, "max_qty": 1},
         {"item": "bandage", "weight": 8, "min_qty": 1, "max_qty": 1}
       ]
     },
@@ -151,7 +151,7 @@
       "dr_min": 2,
       "dr_max": 4,
       "loot": [
-        {"item": "leather_armor", "weight": 6, "min_qty": 1, "max_qty": 1},
+        {"item": "bronze_greaves", "weight": 6, "min_qty": 1, "max_qty": 1},
         {"item": "coin", "weight": 25, "min_qty": 1, "max_qty": 6}
       ]
     }

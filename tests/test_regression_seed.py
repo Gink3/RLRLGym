@@ -29,7 +29,7 @@ class TestRegressionSeed(unittest.TestCase):
         expected = (
             ("wall", "floor", "floor", "floor", "floor"),
             ("wall", "water", "floor", "floor", "floor"),
-            ((-0.03, -0.04), (-0.03, -0.04), (-0.03, -0.04), (-0.07, -0.09)),
+            ((-0.005, -0.008), (-0.005, -0.008), (-0.125, -0.008), (-0.12, -0.036)),
         )
         self.assertEqual(signature, expected)
 

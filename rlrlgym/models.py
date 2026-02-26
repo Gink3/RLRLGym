@@ -12,6 +12,26 @@ DEFAULT_SKILL_LEVELS = {
     "medic": 0,
     "athletics": 0,
     "exploration": 0,
+    "armor_head": 0,
+    "armor_chest": 0,
+    "armor_back": 0,
+    "armor_arms": 0,
+    "armor_legs": 0,
+    "armor_neck": 0,
+    "armor_rings": 0,
+}
+
+DEFAULT_ARMOR_SLOTS = {
+    "head": None,
+    "chest": None,
+    "back": None,
+    "arms": None,
+    "legs": None,
+    "neck": None,
+    "ring_1": None,
+    "ring_2": None,
+    "ring_3": None,
+    "ring_4": None,
 }
 
 
@@ -39,6 +59,9 @@ class AgentState:
     max_hunger: int = 20
     inventory: List[str] = field(default_factory=list)
     equipped: List[str] = field(default_factory=list)
+    armor_slots: Dict[str, str | None] = field(
+        default_factory=lambda: dict(DEFAULT_ARMOR_SLOTS)
+    )
     alive: bool = True
     visited: Set[Tuple[int, int]] = field(default_factory=set)
     wait_streak: int = 0

@@ -4,6 +4,7 @@ from .classes import AgentClass, load_classes
 from .env import EnvConfig, MultiAgentRLRLGym
 from .env import PettingZooParallelRLRLGym
 from .featurize import observation_vector_size, vectorize_observation
+from .items import ItemCatalog, ItemDef, WeaponDef, load_items
 from .mapgen_config import MapGenConfig, load_mapgen_config
 from .monsters import load_monster_spawns, load_monsters
 from .profiles import AgentProfile, load_profiles
@@ -24,6 +25,10 @@ __all__ = [
     "load_classes",
     "AgentRace",
     "load_races",
+    "ItemCatalog",
+    "ItemDef",
+    "WeaponDef",
+    "load_items",
     "load_monsters",
     "load_monster_spawns",
     "MapGenConfig",

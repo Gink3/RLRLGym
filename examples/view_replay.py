@@ -45,6 +45,10 @@ def _state_from_payload(frame: dict) -> EnvState:
             max_hunger=int(row.get("max_hunger", 0)),
             inventory=list(row.get("inventory", [])),
             equipped=list(row.get("equipped", [])),
+            armor_slots={
+                str(k): (None if v is None else str(v))
+                for k, v in dict(row.get("armor_slots", {})).items()
+            },
             alive=bool(row.get("alive", True)),
             visited={
                 (int(pos[0]), int(pos[1]))

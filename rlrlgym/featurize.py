@@ -40,6 +40,13 @@ SKILL_VOCAB = [
     "medic",
     "athletics",
     "exploration",
+    "armor_head",
+    "armor_chest",
+    "armor_back",
+    "armor_arms",
+    "armor_legs",
+    "armor_neck",
+    "armor_rings",
 ]
 MONSTER_VOCAB = [
     "rat",

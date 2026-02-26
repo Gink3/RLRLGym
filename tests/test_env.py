@@ -6,11 +6,13 @@ from pathlib import Path
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
 from rlrlgym.constants import (
     ACTION_ATTACK,
+    ACTION_EQUIP,
     ACTION_INTERACT,
     ACTION_LOOT,
     ACTION_MOVE_NORTH,
     ACTION_WAIT,
 )
+from rlrlgym.env import DAMAGE_TYPE_BLUNT, DAMAGE_TYPE_PIERCE, DAMAGE_TYPE_SLASH
 from rlrlgym.models import MonsterState
 
 
@@ -136,6 +138,32 @@ class TestEnv(unittest.TestCase):
         self.assertEqual(obs["agent_0"]["class"], "scout")
         self.assertEqual(info["agent_0"]["class"], "scout")
 
+    def test_raises_when_class_references_unknown_item(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_classes = {
+                "schema_version": 1,
+                "classes": [
+                    {
+                        "name": "wanderer",
+                        "starting_items": ["missing_item"],
+                        "skill_modifiers": {},
+                    }
+                ],
+            }
+            classes_path = Path(tmp) / "agent_classes.json"
+            classes_path.write_text(json.dumps(bad_classes), encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                PettingZooParallelRLRLGym(
+                    EnvConfig(
+                        width=12,
+                        height=10,
+                        n_agents=1,
+                        render_enabled=False,
+                        classes_path=str(classes_path),
+                    )
+                )
+
     def test_custom_race_config_applies_stats(self):
         with tempfile.TemporaryDirectory() as tmp:
             races = {
@@ -202,13 +230,113 @@ class TestEnv(unittest.TestCase):
         self.assertEqual(env._skill_xp_to_next(2), 50)
 
         events = []
+        a0.hp = 2
         env._gain_skill_xp(a0, "exploration", 20, events)
         self.assertEqual(a0.skills.get("exploration", 0), 1)
         self.assertEqual(a0.skill_xp.get("exploration", 0), 0)
+        self.assertEqual(a0.hp, 7)
+        a0.hp = 1
         env._gain_skill_xp(a0, "athletics", 55, events)
         self.assertEqual(a0.skills.get("athletics", 0), 2)
         self.assertEqual(a0.skill_xp.get("athletics", 0), 0)
+        self.assertEqual(a0.hp, a0.max_hp)
         self.assertEqual(env._overall_level(a0), 3)
+
+    def test_equip_armor_replaces_existing_slot_item(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=37)
+        a0 = env.state.agents["agent_0"]
+        a0.inventory = ["leather_cap", "bronze_helm"]
+
+        env.step({"agent_0": ACTION_EQUIP})
+        self.assertIn("leather_cap", a0.equipped)
+        self.assertNotIn("leather_cap", a0.inventory)
+        self.assertEqual(a0.armor_slots.get("head"), "leather_cap")
+
+        _, _, _, _, info = env.step({"agent_0": ACTION_EQUIP})
+        self.assertIn("bronze_helm", a0.equipped)
+        self.assertNotIn("leather_cap", a0.equipped)
+        self.assertIn("leather_cap", a0.inventory)
+        self.assertEqual(a0.armor_slots.get("head"), "bronze_helm")
+        self.assertTrue(
+            any(evt.startswith("unequip:head:leather_cap") for evt in info["agent_0"]["events"])
+        )
+
+    def test_armor_slots_add_damage_reduction(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=41)
+        a0 = env.state.agents["agent_0"]
+        a0.equipped = ["steel_plate", "chain_mantle", "leather_cap", "guardian_torc"]
+        a0.armor_slots["chest"] = "steel_plate"
+        a0.armor_slots["back"] = "chain_mantle"
+        a0.armor_slots["head"] = "leather_cap"
+        a0.armor_slots["neck"] = "guardian_torc"
+
+        chest_dr, chest_hit_slot, _, _ = env._roll_hit_location_dr(
+            a0, DAMAGE_TYPE_SLASH, forced_hit_slot="chest"
+        )
+        back_dr, back_hit_slot, _, _ = env._roll_hit_location_dr(
+            a0, DAMAGE_TYPE_PIERCE, forced_hit_slot="back"
+        )
+        neck_dr, neck_hit_slot, _, _ = env._roll_hit_location_dr(
+            a0, DAMAGE_TYPE_BLUNT, forced_hit_slot="neck"
+        )
+        self.assertEqual(chest_hit_slot, "chest")
+        self.assertEqual(back_hit_slot, "back")
+        self.assertEqual(neck_hit_slot, "neck")
+        self.assertGreaterEqual(chest_dr, 4)
+        self.assertGreaterEqual(back_dr, 1)
+        self.assertGreaterEqual(neck_dr, 2)
+
+    def test_ring_items_fill_ring_slots_in_order(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=1, max_steps=8, render_enabled=False)
+        )
+        env.reset(seed=43)
+        a0 = env.state.agents["agent_0"]
+        a0.inventory = [
+            "ring_of_guarding",
+            "ring_of_blades",
+            "ring_of_warding",
+            "ring_of_bastion",
+            "ring_of_balance",
+        ]
+
+        for _ in range(5):
+            env.step({"agent_0": ACTION_EQUIP})
+
+        self.assertEqual(a0.armor_slots.get("ring_1"), "ring_of_balance")
+        self.assertEqual(a0.armor_slots.get("ring_2"), "ring_of_blades")
+        self.assertEqual(a0.armor_slots.get("ring_3"), "ring_of_warding")
+        self.assertEqual(a0.armor_slots.get("ring_4"), "ring_of_bastion")
+        self.assertIn("ring_of_guarding", a0.inventory)
+
+    def test_armor_skill_xp_gained_when_hit_location_armor_mitigates(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=2, max_steps=12, render_enabled=False)
+        )
+        env.reset(seed=47)
+        attacker = env.state.agents["agent_0"]
+        defender = env.state.agents["agent_1"]
+        attacker.position = (4, 4)
+        defender.position = (4, 5)
+        attacker.dexterity = 20
+        attacker.equipped.append("dagger")
+        defender.hp = 100
+        defender.max_hp = 100
+        defender.armor_slots["head"] = "steel_helm"
+        defender.equipped.append("steel_helm")
+
+        start_xp = int(defender.skill_xp.get("armor_head", 0))
+        for _ in range(20):
+            env._attack_agent(attacker, defender, events=[])
+            if int(defender.skill_xp.get("armor_head", 0)) > start_xp:
+                break
+        self.assertGreater(int(defender.skill_xp.get("armor_head", 0)), start_xp)
 
     def test_monster_attacks_when_adjacent(self):
         env = PettingZooParallelRLRLGym(

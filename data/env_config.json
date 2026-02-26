@@ -9,6 +9,7 @@
     "profiles_path": "data/agent_profiles.json",
     "races_path": "data/agent_races.json",
     "classes_path": "data/agent_classes.json",
+    "items_path": "data/items.json",
     "monsters_path": "data/monsters.json",
     "monster_spawns_path": "data/monster_spawns.json",
     "mapgen_config_path": "data/mapgen_config.json",

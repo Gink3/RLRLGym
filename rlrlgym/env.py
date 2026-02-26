@@ -25,6 +25,7 @@ from .constants import (
     MOVE_DELTAS,
 )
 from .classes import AgentClass, load_classes
+from .items import ItemCatalog, load_items
 from .mapgen import generate_map, sample_walkable_positions
 from .mapgen_config import MapGenConfig, load_mapgen_config
 from .models import AgentState, ChestState, EnvState, MonsterState
@@ -34,7 +35,6 @@ from .races import AgentRace, load_races
 from .render import RenderWindow
 from .tiles import load_tileset
 
-EDIBLE_ITEMS = {"ration", "fruit"}
 MOVE_VALID_REWARD = 0.005
 MOVE_STEP_COST = 0.002
 MOVE_FOOD_PROGRESS_REWARD = 0.01
@@ -49,72 +49,36 @@ DAMAGE_TYPE_SLASH = "slash"
 DAMAGE_TYPE_PIERCE = "pierce"
 DAMAGE_TYPE_BLUNT = "blunt"
 
-WEAPON_DAMAGE_TYPE = {
-    "dagger": DAMAGE_TYPE_PIERCE,
-    "short_sword": DAMAGE_TYPE_SLASH,
-    "long_sword": DAMAGE_TYPE_SLASH,
-    "spear": DAMAGE_TYPE_PIERCE,
-    "club": DAMAGE_TYPE_BLUNT,
-    "mace": DAMAGE_TYPE_BLUNT,
-    "bow": DAMAGE_TYPE_PIERCE,
-    "crossbow": DAMAGE_TYPE_PIERCE,
-    "thrown_rock": DAMAGE_TYPE_BLUNT,
-    "thrown_knife": DAMAGE_TYPE_PIERCE,
-}
-WEAPON_DAMAGE_RANGE = {
-    "dagger": (2, 4),
-    "short_sword": (3, 5),
-    "long_sword": (4, 7),
-    "spear": (3, 6),
-    "club": (2, 5),
-    "mace": (3, 6),
-    "bow": (2, 5),
-    "crossbow": (3, 6),
-    "thrown_rock": (1, 3),
-    "thrown_knife": (2, 4),
-}
-ITEM_DR_BONUS_VS = {
-    "shield": {DAMAGE_TYPE_SLASH: 1, DAMAGE_TYPE_PIERCE: 1, DAMAGE_TYPE_BLUNT: 0},
-    "leather_armor": {DAMAGE_TYPE_SLASH: 1, DAMAGE_TYPE_PIERCE: 0, DAMAGE_TYPE_BLUNT: 0},
-    "chain_mail": {DAMAGE_TYPE_SLASH: 2, DAMAGE_TYPE_PIERCE: 1, DAMAGE_TYPE_BLUNT: -1},
-}
 UNARMED_DAMAGE_RANGE = (1, 2)
-
-ITEM_WEIGHT = {
-    "ration": 1.0,
-    "fruit": 0.5,
-    "bandage": 0.3,
-    "antidote": 0.4,
-    "healing_potion": 0.6,
-    "dagger": 1.0,
-    "short_sword": 1.8,
-    "long_sword": 2.4,
-    "spear": 2.2,
-    "club": 2.0,
-    "mace": 2.5,
-    "bow": 1.8,
-    "crossbow": 2.6,
-    "thrown_rock": 0.8,
-    "thrown_knife": 0.6,
-    "torch": 0.7,
+RING_ARMOR_SLOTS = ("ring_1", "ring_2", "ring_3", "ring_4")
+RING_ITEM_SLOT = "ring"
+HIT_SLOT_WEIGHTS: Tuple[Tuple[str, int], ...] = (
+    ("head", 14),
+    ("chest", 30),
+    ("back", 14),
+    ("arms", 14),
+    ("legs", 18),
+    ("neck", 6),
+    ("rings", 4),
+)
+HIT_SLOT_TO_ARMOR_SLOTS: Dict[str, Tuple[str, ...]] = {
+    "head": ("head",),
+    "chest": ("chest",),
+    "back": ("back",),
+    "arms": ("arms",),
+    "legs": ("legs",),
+    "neck": ("neck",),
+    "rings": RING_ARMOR_SLOTS,
 }
-CHEST_LOOT_TABLE = [
-    "bandage",
-    "healing_potion",
-    "antidote",
-    "dagger",
-    "short_sword",
-    "long_sword",
-    "spear",
-    "club",
-    "mace",
-    "bow",
-    "crossbow",
-    "thrown_rock",
-    "thrown_knife",
-    "ration",
-    "fruit",
-]
+HIT_SLOT_TO_ARMOR_SKILL: Dict[str, str] = {
+    "head": "armor_head",
+    "chest": "armor_chest",
+    "back": "armor_back",
+    "arms": "armor_arms",
+    "legs": "armor_legs",
+    "neck": "armor_neck",
+    "rings": "armor_rings",
+}
 
 @dataclass
 class EnvConfig:
@@ -126,6 +90,7 @@ class EnvConfig:
     profiles_path: str = str(Path("data") / "agent_profiles.json")
     races_path: str = str(Path("data") / "agent_races.json")
     classes_path: str = str(Path("data") / "agent_classes.json")
+    items_path: str = str(Path("data") / "items.json")
     monsters_path: str = str(Path("data") / "monsters.json")
     monster_spawns_path: str = str(Path("data") / "monster_spawns.json")
     mapgen_config_path: str = str(Path("data") / "mapgen_config.json")
@@ -205,10 +170,20 @@ class MultiAgentRLRLGym:
         )
         self.races: Dict[str, AgentRace] = load_races(self.config.races_path)
         self.classes: Dict[str, AgentClass] = load_classes(self.config.classes_path)
+        self.items: ItemCatalog = load_items(self.config.items_path)
         self.monsters: Dict[str, MonsterDef] = load_monsters(self.config.monsters_path)
         self.monster_spawns: List[MonsterSpawnEntry] = load_monster_spawns(
             self.config.monster_spawns_path, self.monsters
         )
+        self.weapon_damage_type = dict(self.items.weapon_damage_type)
+        self.weapon_damage_range = dict(self.items.weapon_damage_range)
+        self.weapon_skill_by_item = dict(self.items.weapon_skill)
+        self.item_dr_bonus_vs = dict(self.items.item_dr_bonus_vs)
+        self.armor_slot_by_item = dict(self.items.armor_slot_by_item)
+        self.item_weight = dict(self.items.item_weight)
+        self.edible_items = set(self.items.edible_items)
+        self.chest_loot_table = list(self.items.chest_loot_table)
+        self._validate_item_references()
         self.mapgen_cfg: MapGenConfig = load_mapgen_config(
             self.config.mapgen_config_path
         )
@@ -735,9 +710,30 @@ class MultiAgentRLRLGym:
         elif action == ACTION_EQUIP:
             if agent.inventory:
                 item = agent.inventory.pop(0)
+                armor_slot = self.armor_slot_by_item.get(item)
+                if armor_slot is not None:
+                    target_slot = armor_slot
+                    if armor_slot == RING_ITEM_SLOT:
+                        target_slot = RING_ARMOR_SLOTS[0]
+                        for candidate in RING_ARMOR_SLOTS:
+                            if agent.armor_slots.get(candidate) is None:
+                                target_slot = candidate
+                                break
+                    replaced_item = agent.armor_slots.get(target_slot)
+                    if replaced_item:
+                        for idx in range(len(agent.equipped) - 1, -1, -1):
+                            if agent.equipped[idx] == replaced_item:
+                                agent.equipped.pop(idx)
+                                break
+                        agent.inventory.append(replaced_item)
+                        events.append(f"unequip:{target_slot}:{replaced_item}")
+                    agent.armor_slots[target_slot] = item
+                    armor_slot = target_slot
                 agent.equipped.append(item)
                 reward += 0.08
                 events.append(f"equip:{item}")
+                if armor_slot is not None:
+                    events.append(f"equip_slot:{armor_slot}")
             else:
                 reward -= 0.01
 
@@ -850,15 +846,24 @@ class MultiAgentRLRLGym:
         raw_damage = self._rng.randint(damage_range[0], damage_range[1])
         raw_damage += self._damage_stat_bonus(attacker, damage_type)
         raw_damage += max(0, (skill_level - 1) // 2)
-        dr = self._roll_armor_dr(target, damage_type)
+        dr, hit_slot, armor_mitigation, armor_skill = self._roll_hit_location_dr(
+            target, damage_type
+        )
         final_damage = max(0, raw_damage - dr)
 
         events.append(
             f"agent_interact:attack:{target.agent_id}:{weapon}:{damage_type}"
         )
         events.append(
-            f"agent_interact:attack_roll:{raw_damage}:dr:{dr}:final:{final_damage}"
+            f"agent_interact:attack_roll:{raw_damage}:slot:{hit_slot}:dr:{dr}:final:{final_damage}"
         )
+        if armor_skill and armor_mitigation > 0 and final_damage < raw_damage:
+            self._gain_skill_xp(
+                target,
+                armor_skill,
+                max(1, armor_mitigation // 2),
+                events,
+            )
 
         reward = 0.0
         if final_damage > 0:
@@ -925,22 +930,44 @@ class MultiAgentRLRLGym:
 
     def _equipped_weapon(self, agent: AgentState) -> Tuple[str, str, Tuple[int, int], str]:
         for item in reversed(agent.equipped):
-            if item in WEAPON_DAMAGE_TYPE:
-                if item in ("bow", "crossbow"):
-                    skill_name = "archery"
-                elif item in ("thrown_rock", "thrown_knife"):
-                    skill_name = "thrown_weapons"
-                else:
-                    skill_name = "melee"
+            if item in self.weapon_damage_type:
+                skill_name = self.weapon_skill_by_item.get(item, "melee")
                 return (
                     item,
-                    WEAPON_DAMAGE_TYPE[item],
-                    WEAPON_DAMAGE_RANGE[item],
+                    self.weapon_damage_type[item],
+                    self.weapon_damage_range[item],
                     skill_name,
                 )
         return "unarmed", DAMAGE_TYPE_BLUNT, UNARMED_DAMAGE_RANGE, "melee"
 
-    def _roll_armor_dr(self, target: AgentState, damage_type: str) -> int:
+    def _roll_hit_slot(self) -> str:
+        slots = [slot for slot, _ in HIT_SLOT_WEIGHTS]
+        weights = [weight for _, weight in HIT_SLOT_WEIGHTS]
+        return str(self._rng.choices(slots, weights=weights, k=1)[0])
+
+    def _roll_hit_location_dr(
+        self,
+        target: AgentState,
+        damage_type: str,
+        forced_hit_slot: str | None = None,
+    ) -> Tuple[int, str, int, str]:
+        hit_slot = str(forced_hit_slot or self._roll_hit_slot())
+        armor_slots = HIT_SLOT_TO_ARMOR_SLOTS.get(hit_slot, ())
+        armor_mitigation = 0
+        has_armor_in_slot = False
+        for slot in armor_slots:
+            item = target.armor_slots.get(slot)
+            if item is None:
+                continue
+            has_armor_in_slot = True
+            armor_mitigation += int(self.item_dr_bonus_vs.get(item, {}).get(damage_type, 0))
+
+        armor_skill = ""
+        if has_armor_in_slot:
+            armor_skill = HIT_SLOT_TO_ARMOR_SKILL.get(hit_slot, "")
+            if armor_skill:
+                armor_mitigation += max(0, self._skill_level(target, armor_skill) // 3)
+
         race = self._race_by_name(target.race_name)
         base_min = int(race.base_dr_min)
         base_max = int(race.base_dr_max)
@@ -948,9 +975,12 @@ class MultiAgentRLRLGym:
             base_max = base_min
         dr = self._rng.randint(base_min, base_max)
         dr += int(race.dr_bonus_vs.get(damage_type, 0))
-        for item in target.equipped:
-            dr += int(ITEM_DR_BONUS_VS.get(item, {}).get(damage_type, 0))
-        return max(0, dr)
+        dr += armor_mitigation
+        return max(0, dr), hit_slot, max(0, armor_mitigation), armor_skill
+
+    def _roll_armor_dr(self, target: AgentState, damage_type: str) -> int:
+        dr, _, _, _ = self._roll_hit_location_dr(target, damage_type)
+        return dr
 
     def _pickup_from_tile(self, agent: AgentState, events: List[str]) -> float:
         assert self.state is not None
@@ -1289,6 +1319,7 @@ class MultiAgentRLRLGym:
                 "hunger": agent.hunger,
                 "position": agent.position,
                 "equipped_count": len(agent.equipped),
+                "armor_slots": dict(agent.armor_slots),
                 "strength": agent.strength,
                 "dexterity": agent.dexterity,
                 "intellect": agent.intellect,
@@ -1377,6 +1408,23 @@ class MultiAgentRLRLGym:
             raise ValueError(f"Unknown agent race: {name}")
         return self.races[name]
 
+    def _assert_item_known(self, item_id: str, source: str) -> None:
+        if item_id not in self.items.items:
+            raise ValueError(f"{source} references unknown item '{item_id}'")
+
+    def _validate_item_references(self) -> None:
+        for class_name, cls in sorted(self.classes.items()):
+            for idx, item in enumerate(cls.starting_items):
+                self._assert_item_known(item, f"class '{class_name}' starting_items[{idx}]")
+        for tile_id, tile in sorted(self.tiles.items()):
+            for idx, item in enumerate(tile.loot_table):
+                self._assert_item_known(item, f"tile '{tile_id}' loot_table[{idx}]")
+        for monster_id, monster in sorted(self.monsters.items()):
+            for idx, loot in enumerate(monster.loot):
+                self._assert_item_known(
+                    loot.item, f"monster '{monster_id}' loot[{idx}]"
+                )
+
     def _local_view_dims(
         self, center: Tuple[int, int], height: int, width: int
     ) -> List[List[str]]:
@@ -1450,14 +1498,14 @@ class MultiAgentRLRLGym:
         row, col = position
         best: int | None = None
         for (r, c), items in self.state.ground_items.items():
-            if any(item in EDIBLE_ITEMS for item in items):
+            if any(item in self.edible_items for item in items):
                 dist = abs(row - r) + abs(col - c)
                 if best is None or dist < best:
                     best = dist
         for (r, c), chest in self.state.chests.items():
             if chest.opened:
                 continue
-            if any(item in EDIBLE_ITEMS for item in chest.loot):
+            if any(item in self.edible_items for item in chest.loot):
                 dist = abs(row - r) + abs(col - c)
                 if best is None or dist < best:
                     best = dist
@@ -1467,7 +1515,7 @@ class MultiAgentRLRLGym:
                 tile = self.tiles[tile_id]
                 if not tile.loot_table:
                     continue
-                if not any(item in EDIBLE_ITEMS for item in tile.loot_table):
+                if not any(item in self.edible_items for item in tile.loot_table):
                     continue
                 used = self.state.tile_interactions.get((r, c), 0)
                 if used >= max(1, tile.max_interactions):
@@ -1493,7 +1541,7 @@ class MultiAgentRLRLGym:
         out: Dict[Tuple[int, int], ChestState] = {}
         for pos in walkable[:n]:
             loot_count = self._rng.randint(1, 3)
-            loot = [self._rng.choice(CHEST_LOOT_TABLE) for _ in range(loot_count)]
+            loot = [self._rng.choice(self.chest_loot_table) for _ in range(loot_count)]
             out[pos] = ChestState(position=pos, opened=False, locked=False, loot=loot)
         return out
 
@@ -1564,16 +1612,16 @@ class MultiAgentRLRLGym:
         if amount <= 0:
             return
         current = int(agent.skill_xp.get(skill, 0)) + int(amount)
-        leveled = False
         level = self._skill_level(agent, skill)
         while current >= self._skill_xp_to_next(level):
             current -= self._skill_xp_to_next(level)
             level += 1
-            leveled = True
+            heal_amount = max(1, int(agent.max_hp) // 2)
+            if heal_amount > 0:
+                agent.hp = min(int(agent.max_hp), int(agent.hp) + heal_amount)
+            events.append(f"skill_up:{skill}:{level}")
         agent.skill_xp[skill] = current
         agent.skills[skill] = level
-        if leveled:
-            events.append(f"skill_up:{skill}:{level}")
 
     def _skill_xp_to_next(self, level: int) -> int:
         return 20 + 15 * max(0, int(level))
@@ -1584,7 +1632,7 @@ class MultiAgentRLRLGym:
     def _carried_weight(self, agent: AgentState) -> float:
         weight = 0.0
         for item in agent.inventory + agent.equipped:
-            weight += float(ITEM_WEIGHT.get(item, 1.0))
+            weight += float(self.item_weight.get(item, 1.0))
         return weight
 
     def _carry_capacity(self, agent: AgentState, athletics_level: int | None = None) -> float:
@@ -1826,11 +1874,20 @@ class MultiAgentRLRLGym:
             return
 
         raw_damage = self._rng.randint(monster.dmg_min, max(monster.dmg_min, monster.dmg_max))
-        dr = self._roll_armor_dr(target, DAMAGE_TYPE_BLUNT)
+        dr, hit_slot, armor_mitigation, armor_skill = self._roll_hit_location_dr(
+            target, DAMAGE_TYPE_BLUNT
+        )
         final_damage = max(0, raw_damage - dr)
         target_events.append(
-            f"monster_hit_roll:{monster.monster_id}:raw:{raw_damage}:dr:{dr}:final:{final_damage}"
+            f"monster_hit_roll:{monster.monster_id}:raw:{raw_damage}:slot:{hit_slot}:dr:{dr}:final:{final_damage}"
         )
+        if armor_skill and armor_mitigation > 0 and final_damage < raw_damage:
+            self._gain_skill_xp(
+                target,
+                armor_skill,
+                max(1, armor_mitigation // 2),
+                target_events,
+            )
         if final_damage <= 0:
             target_events.append(f"monster_blocked:{monster.monster_id}")
             return

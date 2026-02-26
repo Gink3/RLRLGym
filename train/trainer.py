@@ -611,6 +611,7 @@ class MultiAgentTrainer:
                     "max_hunger": agent.max_hunger,
                     "inventory": list(agent.inventory),
                     "equipped": list(agent.equipped),
+                    "armor_slots": dict(agent.armor_slots),
                     "alive": agent.alive,
                     "visited": [
                         [r, c] for (r, c) in sorted(agent.visited)
