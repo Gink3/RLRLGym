@@ -85,8 +85,8 @@ Start with PPO/A2C on simplified rules.
 Add recurrent policies (LSTM/Transformer) for partial observability.
 Log rich metrics (survival time, dungeon depth, cause of death, resource efficiency).
 
-## Training Logger and Dashboard
-Training should include a dedicated logger/dashboard for aggregate metrics.
+## Training Metrics
+Training should stream aggregate metrics to Aim for interactive analysis.
 
 ### Metrics
 * Episode return curves (team return and per-agent return)
@@ -95,10 +95,8 @@ Training should include a dedicated logger/dashboard for aggregate metrics.
 * Cause-of-death histogram
 
 ### Outputs
-* `episodes.jsonl`: Episode-by-episode structured records
-* `episodes.csv`: Tabular metrics for quick analysis
-* `summary.json`: Aggregate metrics
-* `dashboard.html`: Human-readable dashboard report
+* Aim experiment traces (episode/iteration metrics)
+* Model checkpoints and replay artifacts
 
 ## Documentation
 All interfaces should be documented for easier usage in the `README.md` file

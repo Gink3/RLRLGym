@@ -10,7 +10,6 @@ from .monsters import load_monster_spawns, load_monsters
 from .profiles import AgentProfile, load_profiles
 from .races import AgentRace, load_races
 from .render import PlaybackController, RenderWindow
-from .training_logger import TrainingLogger
 from .vector_env import SyncVectorEnv
 
 __all__ = [
@@ -35,6 +34,5 @@ __all__ = [
     "load_mapgen_config",
     "PlaybackController",
     "RenderWindow",
-    "TrainingLogger",
     "SyncVectorEnv",
 ]

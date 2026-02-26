@@ -8,7 +8,6 @@ Run from repo root:
 ```bash
 python3 examples/minimal_run.py
 python3 examples/window_demo.py
-python3 examples/training_dashboard_demo.py
 python3 examples/train_demo.py
 ./scripts/train_default.sh
 ```
@@ -37,35 +36,13 @@ The window includes:
 Rendering is optional via `EnvConfig(render_enabled=False)`.
 There is no CLI render mode.
 
-## Training Logger Dashboard
+## Aim UI
 
-Generate aggregate training metrics and dashboard artifacts:
-
-```bash
-python3 examples/training_dashboard_demo.py
-```
-
-Outputs are written to `outputs/`:
-- `episodes.jsonl`
-- `episodes.csv`
-- `summary.json`
-- `dashboard.html`
-
-## Serve Dashboard Locally
-
-To avoid browser `file://` issues, serve dashboard files over localhost:
-
-```bash
-./scripts/serve_dashboard.sh outputs/train/quick 8000
-```
-
-Then open:
+When running Aim locally, the UI is available on localhost port `43800`:
 
 ```text
-http://127.0.0.1:8000/dashboard.html
+http://127.0.0.1:43800
 ```
-
-You can do the same for any run directory, for example `outputs/train/default`.
 
 ## Observation And Action Spaces
 
@@ -127,7 +104,7 @@ CLI:
 
 Outputs include:
 - RLlib metrics/checkpoints in the selected output directory
-- (custom backend only) `neural_policies.json` + dashboard artifacts via `TrainingLogger`
+- (custom backend only) `neural_policies.json` checkpoint
 
 Network architectures are defined in `data/agent_networks.json` by profile name
 (for example `human` and `orc`).
@@ -163,6 +140,9 @@ All scripts accept additional CLI overrides, for example:
 ./scripts/train_quick.sh --seed 3 --output-dir outputs/train/custom_run
 ```
 
+Training metrics are also logged to Aim (when `aim` is installed), including dashboard-equivalent episode/iteration metrics for both `custom` and `rllib` backends.
+Use `--aim-experiment <name>` to change the experiment and `--no-aim` to disable Aim logging.
+
 ## Run Tests
 
 ```bash
@@ -177,5 +157,5 @@ python3 -m unittest discover -s tests -q
 - JSON tile schema with required `schema_version` and required tile fields
 - Reward shaping with interaction caps and anti-exploit penalties
 - Window-only rendering with playback controls and focused zoom
-- Dedicated training logger/dashboard artifacts (`episodes.jsonl`, `episodes.csv`, `summary.json`, `dashboard.html`)
+- Aim-native training metrics logging for both backends
 - Snapshot save/load and synchronous vectorized environment wrapper

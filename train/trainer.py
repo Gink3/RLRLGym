@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
-from rlrlgym import EnvConfig, PettingZooParallelRLRLGym, TrainingLogger
+from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
+from rlrlgym.constants import ACTION_NAMES
 
+from .aim_logger import AimLogger
 from .network_config import NetworkConfig, load_network_configs
 from .policies import NeuralQPolicy
 
@@ -31,7 +33,21 @@ class TrainConfig:
     show_progress: bool = True
     replay_save_every: int = 5000
     env_config_path: str = "data/env_config.json"
-    dashboard_update_every: int = 10
+    aim_enabled: bool = True
+    aim_experiment: str = "rlrlgym_custom"
+
+
+@dataclass
+class EpisodeSummary:
+    episode: int
+    steps: int
+    team_return: float
+    per_agent_return: Dict[str, float]
+    win: bool
+    outcome: str
+    mean_survival_time: float
+    cause_of_death: Dict[str, str]
+    action_counts: Dict[str, int]
 
 
 class MultiAgentTrainer:
@@ -52,7 +68,6 @@ class MultiAgentTrainer:
         self.env = PettingZooParallelRLRLGym(
             env_cfg
         )
-        self.logger = TrainingLogger(output_dir=config.output_dir)
         self.network_cfgs: Dict[str, NetworkConfig] = load_network_configs(config.networks_path)
         self.agent_profile_map = profile_map
         self.policies: Dict[str, NeuralQPolicy] = {}
@@ -65,6 +80,26 @@ class MultiAgentTrainer:
                 seed=config.seed + i,
             )
         self._run_metrics_initialized = False
+        self.aim = AimLogger(
+            enabled=config.aim_enabled,
+            experiment=config.aim_experiment,
+            output_dir=config.output_dir,
+            run_name="custom_trainer",
+        )
+        self.aim.set_params(
+            {
+                "backend": "custom",
+                "episodes": int(config.episodes),
+                "seed": int(config.seed),
+                "output_dir": str(config.output_dir),
+                "width": None if config.width is None else int(config.width),
+                "height": None if config.height is None else int(config.height),
+                "n_agents": None if config.n_agents is None else int(config.n_agents),
+                "max_steps": None if config.max_steps is None else int(config.max_steps),
+                "networks_path": str(config.networks_path),
+                "env_config_path": str(config.env_config_path),
+            }
+        )
 
     def train(self) -> Dict[str, object]:
         window = max(1, int(self.config.progress_window))
@@ -76,7 +111,7 @@ class MultiAgentTrainer:
         recent_teammate_dist: deque[float] = deque(maxlen=window)
         recent_profile_metrics: Dict[str, Dict[str, deque[float]]] = {}
         replay_paths: list[str] = []
-        dashboard_update_every = max(1, int(self.config.dashboard_update_every))
+        episode_summaries: list[EpisodeSummary] = []
 
         for ep in range(self.config.episodes):
             observations, _ = self.env.reset(seed=self.config.seed + ep)
@@ -91,10 +126,6 @@ class MultiAgentTrainer:
             replay_step_logs = [] if capture_replay else None
             if not self._run_metrics_initialized:
                 self._initialize_run_metrics(observations)
-            self.logger.start_episode(
-                self.env.possible_agents,
-                agent_profiles={aid: self.env.state.agents[aid].profile_name for aid in self.env.possible_agents},
-            )
             episode_losses: list[float] = []
             episode_teammate_dist: list[float] = []
             episode_agent_returns = {aid: 0.0 for aid in self.env.possible_agents}
@@ -102,6 +133,10 @@ class MultiAgentTrainer:
             episode_agent_dist = {aid: [] for aid in self.env.possible_agents}
             episode_agent_survival = {aid: 0 for aid in self.env.possible_agents}
             episode_agent_done = {aid: False for aid in self.env.possible_agents}
+            episode_death_cause = {aid: "alive" for aid in self.env.possible_agents}
+            episode_action_counts = {
+                ACTION_NAMES[k]: 0 for k in sorted(ACTION_NAMES.keys())
+            }
 
             for _ in range(self.env.config.max_steps):
                 for aid in self.env.possible_agents:
@@ -139,18 +174,24 @@ class MultiAgentTrainer:
                             curr_state=curr_state,
                         )
                     )
-                self.logger.log_step(
-                    rewards,
-                    terminations,
-                    truncations,
-                    info,
-                    actions=actions,
-                )
                 for aid, reward in rewards.items():
                     episode_agent_returns[aid] += float(reward)
                 for aid in self.env.possible_agents:
                     if terminations.get(aid, False) or truncations.get(aid, False):
                         episode_agent_done[aid] = True
+                        if episode_death_cause[aid] == "alive":
+                            events = list(info.get(aid, {}).get("events", []))
+                            if "death" in events and "starve_tick" in events:
+                                episode_death_cause[aid] = "starvation"
+                            elif "death" in events:
+                                episode_death_cause[aid] = "damage_or_other"
+                            elif truncations.get(aid, False):
+                                episode_death_cause[aid] = "timeout_alive"
+                            else:
+                                episode_death_cause[aid] = "unknown"
+                for action in actions.values():
+                    name = ACTION_NAMES.get(int(action), f"unknown_{int(action)}")
+                    episode_action_counts[name] = episode_action_counts.get(name, 0) + 1
 
                 for aid, action in actions.items():
                     done = bool(terminations.get(aid, False) or truncations.get(aid, False))
@@ -169,7 +210,37 @@ class MultiAgentTrainer:
                     break
 
             alive = {aid: self.env.state.agents[aid].alive for aid in self.env.possible_agents}
-            summary = self.logger.end_episode(step_count=self.env.state.step_count, alive_agents=alive)
+            human_alive = any(
+                bool(alive.get(aid, False))
+                for aid in self.env.possible_agents
+                if self.env.state.agents[aid].profile_name == "human"
+            )
+            orc_alive = any(
+                bool(alive.get(aid, False))
+                for aid in self.env.possible_agents
+                if self.env.state.agents[aid].profile_name == "orc"
+            )
+            if human_alive and not orc_alive:
+                outcome = "human_win"
+            elif orc_alive and not human_alive:
+                outcome = "orc_win"
+            else:
+                outcome = "tie"
+            summary = EpisodeSummary(
+                episode=ep + 1,
+                steps=int(self.env.state.step_count),
+                team_return=float(sum(episode_agent_returns.values())),
+                per_agent_return=dict(episode_agent_returns),
+                win=any(alive.values()),
+                outcome=outcome,
+                mean_survival_time=(
+                    sum(float(v) for v in episode_agent_survival.values())
+                    / max(1, len(episode_agent_survival))
+                ),
+                cause_of_death=dict(episode_death_cause),
+                action_counts=dict(episode_action_counts),
+            )
+            episode_summaries.append(summary)
             if capture_replay:
                 replay_paths.append(
                     self._write_replay(
@@ -227,23 +298,192 @@ class MultiAgentTrainer:
                     mean_teammate_distance=sum(recent_teammate_dist) / len(recent_teammate_dist),
                     profile_metrics=recent_profile_metrics,
                 )
-            if ((ep + 1) % dashboard_update_every) == 0:
-                self.logger.write_outputs()
-
+            self._log_aim_episode_metrics(
+                episode=ep + 1,
+                summary=summary,
+                episode_mean_loss=episode_mean_loss,
+                episode_mean_teammate=episode_mean_teammate,
+                starvation_rate=episode_starved,
+                recent_returns=recent_returns,
+                recent_wins=recent_wins,
+                recent_survival=recent_survival,
+                recent_starvation=recent_starvation,
+                recent_loss=recent_loss,
+                recent_teammate_dist=recent_teammate_dist,
+                recent_profile_metrics=recent_profile_metrics,
+                episode_summaries=episode_summaries,
+                window=window,
+            )
         if self.config.show_progress:
             sys.stdout.write("\n")
             sys.stdout.flush()
 
-        artifact_paths = self.logger.write_outputs()
         checkpoint_path = self._write_checkpoint()
-        aggregate = self.logger.aggregate_metrics()
+        aggregate = self._aggregate_episode_summaries(episode_summaries)
+        self.aim.set_payload("aggregate/final", aggregate)
+        self.aim.close()
 
         return {
             "aggregate": aggregate,
-            "artifacts": artifact_paths,
+            "artifacts": {},
             "checkpoint": checkpoint_path,
             "replays": replay_paths,
         }
+
+    def _log_aim_episode_metrics(
+        self,
+        episode: int,
+        summary,
+        episode_mean_loss: float,
+        episode_mean_teammate: float,
+        starvation_rate: float,
+        recent_returns,
+        recent_wins,
+        recent_survival,
+        recent_starvation,
+        recent_loss,
+        recent_teammate_dist,
+        recent_profile_metrics,
+        episode_summaries,
+        window: int,
+    ) -> None:
+        self.aim.track_pairs(
+            [
+                ("steps", summary.steps),
+                ("team_return", summary.team_return),
+                ("win", summary.win),
+                ("outcome_human_win", summary.outcome == "human_win"),
+                ("outcome_orc_win", summary.outcome == "orc_win"),
+                ("outcome_tie", summary.outcome == "tie"),
+                ("mean_survival_time", summary.mean_survival_time),
+                ("episode_mean_loss", episode_mean_loss),
+                ("episode_mean_teammate_distance", episode_mean_teammate),
+                ("episode_starvation", starvation_rate),
+                ("rolling_return_window", sum(recent_returns) / max(1, len(recent_returns))),
+                ("rolling_win_window", sum(recent_wins) / max(1, len(recent_wins))),
+                ("rolling_survival_window", sum(recent_survival) / max(1, len(recent_survival))),
+                ("rolling_starvation_window", sum(recent_starvation) / max(1, len(recent_starvation))),
+                ("rolling_loss_window", sum(recent_loss) / max(1, len(recent_loss))),
+                (
+                    "rolling_teammate_distance_window",
+                    sum(recent_teammate_dist) / max(1, len(recent_teammate_dist)),
+                ),
+                ("rolling_window_size", window),
+            ],
+            step=episode,
+            prefix="custom/episode",
+        )
+        self.aim.track_many(
+            summary.per_agent_return,
+            step=episode,
+            prefix="custom/per_agent_return",
+        )
+        self.aim.track_many(
+            summary.action_counts,
+            step=episode,
+            prefix="custom/action_counts",
+        )
+        cod_counts: Dict[str, int] = {}
+        for cause in summary.cause_of_death.values():
+            cod_counts[cause] = cod_counts.get(cause, 0) + 1
+        self.aim.track_many(
+            cod_counts,
+            step=episode,
+            prefix="custom/cause_of_death",
+        )
+        for profile, metrics in recent_profile_metrics.items():
+            self.aim.track_pairs(
+                [
+                    ("return", self._mean(metrics["return"])),
+                    ("win", self._mean(metrics["win"])),
+                    ("survival", self._mean(metrics["survival"])),
+                    ("starvation", self._mean(metrics["starvation"])),
+                    ("loss", self._mean(metrics["loss"])),
+                    ("distance", self._mean(metrics["distance"])),
+                ],
+                step=episode,
+                prefix=f"custom/profile/{profile}",
+            )
+        aggregate = self._aggregate_episode_summaries(episode_summaries)
+        self.aim.track_pairs(
+            [
+                ("episodes", aggregate["episodes"]),
+                ("win_rate", aggregate["win_rate"]),
+                ("human_win_rate", aggregate["human_win_rate"]),
+                ("orc_win_rate", aggregate["orc_win_rate"]),
+                ("tie_rate", aggregate["tie_rate"]),
+                ("mean_team_return", aggregate["mean_team_return"]),
+                ("mean_survival_time", aggregate["mean_survival_time"]),
+            ],
+            step=episode,
+            prefix="custom/aggregate",
+        )
+        self.aim.track_many(
+            aggregate.get("cause_of_death_histogram", {}),
+            step=episode,
+            prefix="custom/aggregate/cause_of_death",
+        )
+        self.aim.track_many(
+            aggregate.get("action_histogram", {}),
+            step=episode,
+            prefix="custom/aggregate/action_histogram",
+        )
+
+    def _aggregate_episode_summaries(
+        self, episode_summaries: list[EpisodeSummary]
+    ) -> Dict[str, object]:
+        if not episode_summaries:
+            return {
+                "episodes": 0,
+                "win_rate": 0.0,
+                "human_win_rate": 0.0,
+                "orc_win_rate": 0.0,
+                "tie_rate": 0.0,
+                "mean_team_return": 0.0,
+                "mean_survival_time": 0.0,
+                "cause_of_death_histogram": {},
+                "action_histogram": {},
+                "run_metrics": {
+                    "network_parameter_counts": self._network_parameter_counts(),
+                },
+            }
+        wins = sum(1 for e in episode_summaries if e.win)
+        human_wins = sum(1 for e in episode_summaries if e.outcome == "human_win")
+        orc_wins = sum(1 for e in episode_summaries if e.outcome == "orc_win")
+        ties = sum(1 for e in episode_summaries if e.outcome == "tie")
+        cod: Dict[str, int] = {}
+        actions: Dict[str, int] = {}
+        for e in episode_summaries:
+            for cause in e.cause_of_death.values():
+                cod[cause] = cod.get(cause, 0) + 1
+            for action_name, count in e.action_counts.items():
+                actions[action_name] = actions.get(action_name, 0) + int(count)
+        n = len(episode_summaries)
+        return {
+            "episodes": n,
+            "win_rate": wins / n,
+            "human_win_rate": human_wins / n,
+            "orc_win_rate": orc_wins / n,
+            "tie_rate": ties / n,
+            "mean_team_return": sum(e.team_return for e in episode_summaries) / n,
+            "mean_survival_time": sum(e.mean_survival_time for e in episode_summaries) / n,
+            "cause_of_death_histogram": cod,
+            "action_histogram": actions,
+            "run_metrics": {
+                "network_parameter_counts": self._network_parameter_counts(),
+            },
+        }
+
+    def _network_parameter_counts(self) -> Dict[str, int]:
+        out: Dict[str, int] = {}
+        if self.env.state is None:
+            return out
+        for aid in self.env.possible_agents:
+            profile = self.env.state.agents[aid].profile_name
+            if profile in out:
+                continue
+            out[profile] = self.policies[aid].parameter_count()
+        return out
 
     def _initialize_run_metrics(self, observations: Dict[str, Dict[str, object]]) -> None:
         # Build policy networks once from first observations, then capture static size metadata.
@@ -257,10 +497,9 @@ class MultiAgentTrainer:
                 continue
             profile_param_counts[profile] = self.policies[aid].parameter_count()
 
-        self.logger.set_run_metrics(
-            {
-                "network_parameter_counts": profile_param_counts,
-            }
+        self.aim.set_payload(
+            "custom/run_metrics",
+            {"network_parameter_counts": profile_param_counts},
         )
         self._run_metrics_initialized = True
 

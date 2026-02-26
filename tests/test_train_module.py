@@ -33,7 +33,7 @@ class TestTrainModule(unittest.TestCase):
             self.assertGreater(counts["orc"], 0)
             self.assertTrue(Path(result["checkpoint"]).exists())
             self.assertTrue(result["checkpoint"].endswith("neural_policies.json"))
-            self.assertTrue(Path(result["artifacts"]["summary"]).exists())
+            self.assertEqual(result["artifacts"], {})
             self.assertEqual(result["replays"], [])
 
     def test_replay_auto_save_every_episode(self):

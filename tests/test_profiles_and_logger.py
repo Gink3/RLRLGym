@@ -1,8 +1,6 @@
-import tempfile
 import unittest
-from pathlib import Path
 
-from rlrlgym import EnvConfig, PettingZooParallelRLRLGym, TrainingLogger
+from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
 from rlrlgym.constants import ACTION_WAIT
 
 
@@ -33,51 +31,6 @@ class TestProfilesAndLogger(unittest.TestCase):
         _, rewards, _, _, info = env.step({"agent_0": ACTION_WAIT, "agent_1": ACTION_WAIT})
         self.assertLess(rewards["agent_1"], rewards["agent_0"])
         self.assertIn("wait", info["agent_0"]["events"])
-
-    def test_training_logger_outputs(self):
-        logger = TrainingLogger(output_dir="outputs_test")
-        logger.start_episode(["agent_0", "agent_1"], agent_profiles={"agent_0": "human", "agent_1": "orc"})
-        logger.log_step(
-            rewards={"agent_0": 0.2, "agent_1": -0.1},
-            terminations={"agent_0": False, "agent_1": False},
-            truncations={"agent_0": False, "agent_1": False},
-            info={"agent_0": {"events": []}, "agent_1": {"events": []}},
-            actions={"agent_0": 4, "agent_1": 7},
-        )
-        logger.log_step(
-            rewards={"agent_0": 0.1, "agent_1": -1.0},
-            terminations={"agent_0": False, "agent_1": True},
-            truncations={"agent_0": False, "agent_1": False},
-            info={"agent_0": {"events": []}, "agent_1": {"events": ["death", "starve_tick"]}},
-            actions={"agent_0": 5, "agent_1": 4},
-        )
-        logger.end_episode(step_count=2, alive_agents={"agent_0": True, "agent_1": False})
-
-        agg = logger.aggregate_metrics()
-        self.assertEqual(agg["episodes"], 1)
-        self.assertGreater(agg["mean_team_return"], -1.0)
-        self.assertIn("starvation", agg["cause_of_death_histogram"])
-        self.assertEqual(agg["action_histogram"]["wait"], 2)
-        self.assertEqual(agg["action_histogram"]["pickup"], 1)
-        self.assertEqual(agg["action_histogram"]["loot"], 1)
-        self.assertEqual(agg["human_win_rate"], 1.0)
-        self.assertEqual(agg["orc_win_rate"], 0.0)
-        self.assertEqual(agg["tie_rate"], 0.0)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            logger.output_dir = str(Path(tmp) / "out")
-            paths = logger.write_outputs()
-            self.assertTrue(Path(paths["csv"]).exists())
-            self.assertTrue(Path(paths["jsonl"]).exists())
-            self.assertTrue(Path(paths["summary"]).exists())
-            self.assertTrue(Path(paths["html"]).exists())
-            csv_text = Path(paths["csv"]).read_text(encoding="utf-8")
-            self.assertIn("outcome", csv_text)
-            self.assertIn("action_wait", csv_text)
-            self.assertIn("action_pickup", csv_text)
-            jsonl_text = Path(paths["jsonl"]).read_text(encoding="utf-8")
-            self.assertIn("\"action_counts\"", jsonl_text)
-
 
 if __name__ == "__main__":
     unittest.main()
