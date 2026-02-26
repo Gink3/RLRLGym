@@ -31,7 +31,7 @@ class RLlibTrainConfig:
     num_gpus: int = 0
     num_rollout_workers: int = 0
     train_batch_size: int = 4000
-    replay_save_every: int = 1000
+    replay_save_every: int = 5000
     env_config_path: str = "data/env_config.json"
     curriculum_path: str = "data/curriculum_phases.json"
     shared_policy: bool = False

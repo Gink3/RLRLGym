@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--num-gpus", type=float, default=0.0)
     p.add_argument("--num-rollout-workers", type=int, default=0)
     p.add_argument("--train-batch-size", type=int, default=4000)
-    p.add_argument("--replay-save-every", type=int, default=1000)
+    p.add_argument("--replay-save-every", type=int, default=5000)
     p.add_argument("--env-config-path", type=str, default="data/env_config.json")
     p.add_argument("--curriculum-path", type=str, default="data/curriculum_phases.json")
     p.add_argument(

@@ -44,7 +44,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         self.action_spaces = {aid: self._action_space for aid in self.possible_agents}
         self._done_agents: set[str] = set()
         self._episode_counter = 0
-        self._replay_save_every = int(cfg.get("replay_save_every", 1000))
+        self._replay_save_every = int(cfg.get("replay_save_every", 5000))
         out_dir = cfg.get("replay_output_dir", "")
         self._replay_output_dir = Path(out_dir) if out_dir else None
         self._save_latest_replay = bool(cfg.get("save_latest_replay", True))

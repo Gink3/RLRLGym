@@ -16,7 +16,7 @@ fi
   --train-batch-size 8000 \
   --num-rollout-workers 2 \
   --shared-policy \
-  --replay-save-every 100 \
+  --replay-save-every 5000 \
   --seed 0 \
   --output-dir outputs/train/quick \
   "$@"

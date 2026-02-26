@@ -29,7 +29,7 @@ class TrainConfig:
     agent_profile_map: Dict[str, str] | None = None
     progress_window: int = 50
     show_progress: bool = True
-    replay_save_every: int = 1000
+    replay_save_every: int = 5000
     env_config_path: str = "data/env_config.json"
     dashboard_update_every: int = 10
 
