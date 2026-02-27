@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "classes": [
+    {
+      "name": "fighter",
+      "starting_items": ["club", "bandage"],
+      "skill_modifiers": {
+        "melee": 2,
+        "athletics": 1
+      }
+    },
+    {
+      "name": "barbarian",
+      "starting_items": ["club", "ration"],
+      "skill_modifiers": {
+        "melee": 2,
+        "athletics": 2
+      }
+    },
+    {
+      "name": "monk",
+      "starting_items": ["ration", "bandage"],
+      "skill_modifiers": {
+        "athletics": 2,
+        "exploration": 1
+      }
+    },
+    {
+      "name": "rogue",
+      "starting_items": ["thrown_knife", "torch"],
+      "skill_modifiers": {
+        "thrown_weapons": 2,
+        "exploration": 1
+      }
+    }
+  ]
+}

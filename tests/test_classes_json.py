@@ -20,9 +20,9 @@ class TestClassesJson(unittest.TestCase):
             "schema_version": 1,
             "classes": [
                 {
-                    "name": "wanderer",
+                    "name": "fighter",
                     "starting_items": ["ration"],
-                    "skill_modifiers": {"exploration": 2},
+                    "skill_modifiers": {"melee": 2},
                 }
             ],
         }
@@ -30,9 +30,9 @@ class TestClassesJson(unittest.TestCase):
             p = Path(tmp) / "agent_classes.json"
             p.write_text(json.dumps(good), encoding="utf-8")
             classes = load_classes(p)
-            self.assertIn("wanderer", classes)
-            self.assertIn("ration", classes["wanderer"].starting_items)
-            self.assertEqual(classes["wanderer"].skill_modifiers["exploration"], 2)
+            self.assertIn("fighter", classes)
+            self.assertIn("ration", classes["fighter"].starting_items)
+            self.assertEqual(classes["fighter"].skill_modifiers["melee"], 2)
 
 
 if __name__ == "__main__":

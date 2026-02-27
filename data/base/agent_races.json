@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "races": [
+    {
+      "name": "human",
+      "strength": 5,
+      "dexterity": 5,
+      "intellect": 5,
+      "base_dr_min": 0,
+      "base_dr_max": 1,
+      "dr_bonus_vs": {"slash": 0, "pierce": 0, "blunt": 0}
+    },
+    {
+      "name": "dragonborn",
+      "strength": 7,
+      "dexterity": 4,
+      "intellect": 4,
+      "base_dr_min": 1,
+      "base_dr_max": 2,
+      "dr_bonus_vs": {"slash": 1, "pierce": 0, "blunt": 0}
+    },
+    {
+      "name": "dwarf",
+      "strength": 6,
+      "dexterity": 4,
+      "intellect": 5,
+      "base_dr_min": 1,
+      "base_dr_max": 2,
+      "dr_bonus_vs": {"slash": 0, "pierce": 0, "blunt": 1}
+    },
+    {
+      "name": "elf",
+      "strength": 4,
+      "dexterity": 7,
+      "intellect": 5,
+      "base_dr_min": 0,
+      "base_dr_max": 1,
+      "dr_bonus_vs": {"slash": 0, "pierce": 1, "blunt": 0}
+    },
+    {
+      "name": "gnome",
+      "strength": 3,
+      "dexterity": 6,
+      "intellect": 7,
+      "base_dr_min": 0,
+      "base_dr_max": 1,
+      "dr_bonus_vs": {"slash": 0, "pierce": 0, "blunt": 0}
+    },
+    {
+      "name": "half_elf",
+      "strength": 5,
+      "dexterity": 6,
+      "intellect": 5,
+      "base_dr_min": 0,
+      "base_dr_max": 1,
+      "dr_bonus_vs": {"slash": 0, "pierce": 0, "blunt": 0}
+    },
+    {
+      "name": "half_orc",
+      "strength": 7,
+      "dexterity": 5,
+      "intellect": 4,
+      "base_dr_min": 1,
+      "base_dr_max": 2,
+      "dr_bonus_vs": {"slash": 1, "pierce": 0, "blunt": -1}
+    },
+    {
+      "name": "halfling",
+      "strength": 3,
+      "dexterity": 7,
+      "intellect": 5,
+      "base_dr_min": 0,
+      "base_dr_max": 1,
+      "dr_bonus_vs": {"slash": 0, "pierce": 1, "blunt": 0}
+    },
+    {
+      "name": "orc",
+      "strength": 7,
+      "dexterity": 5,
+      "intellect": 4,
+      "base_dr_min": 1,
+      "base_dr_max": 2,
+      "dr_bonus_vs": {"slash": 1, "pierce": 0, "blunt": -1}
+    },
+    {
+      "name": "tiefling",
+      "strength": 4,
+      "dexterity": 5,
+      "intellect": 7,
+      "base_dr_min": 0,
+      "base_dr_max": 1,
+      "dr_bonus_vs": {"slash": 0, "pierce": 0, "blunt": 0}
+    }
+  ]
+}

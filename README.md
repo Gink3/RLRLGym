@@ -1,6 +1,13 @@
 # RLRLGym
 RougeLike Reinforcement Learning Gym
 
+## Terminology
+
+- `Agent`: a single controllable unit in the environment (for example `agent_0`), with inventory, skills, health, hunger, faction state, race, and class.
+- `Race`: the base stat template for an agent (strength/dexterity/intellect and damage-resistance traits) loaded from `data/base/agent_races.json`.
+- `Class`: the starting role package for an agent (starting items and initial skill modifiers) loaded from `data/base/agent_classes.json`.
+- `Scenario`: a runnable setup file containing `env_config` values plus an explicit list of agents (race/class/profile/network choices), typically stored in `data/scenarios/`.
+
 ## Minimal Running Example
 
 Run from repo root:
@@ -11,6 +18,31 @@ python3 examples/window_demo.py
 python3 examples/train_demo.py
 ./scripts/train_default.sh
 ```
+
+## Tools
+
+- `tools/view_replay.py`: replay viewer for `*.replay.json` files with playback controls, focus, zoom, and render mode switch (`ascii` default, optional `tileset`).
+- `tools/scenario_editor.py`: GUI editor for scenario files (snapshot `env_config` + agent list). Agent creation flow is race + class selection followed by editable combined JSON before save.
+- `python3 -m train`: training CLI (custom and RLlib backends) with scenario support.
+- Both GUI tools include a top-bar `Settings -> Theme` selector. Selected theme is shared and persisted in `data/user/tool_settings.json`.
+
+Replay viewer example:
+
+```bash
+python3 tools/view_replay.py outputs/train/<run>/replays/latest_episode.replay.json
+```
+
+Scenario Editor example:
+
+```bash
+python3 tools/scenario_editor.py --scenario data/scenarios/all_race_class_combinations.json
+```
+
+## Data Layout
+
+- `data/base/`: stable shared game data used across scenarios (tiles, items, races, classes, profiles, monsters, network defaults, curriculum defaults).
+- `data/scenarios/`: scenario-specific generated/edited agent rosters and overrides.
+- `data/env_config.json`: active environment config entrypoint; points to base data by default and may be overridden per scenario.
 
 ## Window Rendering
 
@@ -54,12 +86,12 @@ By default training logs Aim runs to `/proj/aimml`. Start the UI against that re
 
 The environment exposes per-agent spaces in PettingZoo Parallel style:
 
-- `env.action_space(agent_id)` returns a discrete integer range `(0, 10)`
+- `env.action_space(agent_id)` returns a discrete integer range `(0, 17)`
 - `env.observation_space(agent_id)` returns a dict-style shape descriptor based on the agent profile
 
 ### Action Space
 
-Each action is an integer in `0..10`:
+Each action is an integer in `0..17`:
 
 - `0`: move north
 - `1`: move south
@@ -72,6 +104,13 @@ Each action is an integer in `0..10`:
 - `8`: equip item
 - `9`: use item
 - `10`: interact with environment / nearby agent
+- `11`: attack
+- `12`: create faction / invite ally (contextual)
+- `13`: give item to adjacent ally
+- `14`: trade with adjacent ally
+- `15`: revive adjacent ally
+- `16`: guard adjacent ally
+- `17`: accept pending faction invite
 
 ### Observation Space
 
@@ -112,7 +151,7 @@ Outputs include:
 - RLlib metrics/checkpoints in the selected output directory
 - (custom backend only) `neural_policies.json` checkpoint
 
-Network architectures are defined in `data/agent_networks.json` by profile name
+Network architectures are defined in `data/base/agent_networks.json` by profile name
 (for example `human` and `orc`).
 
 Install RLlib:
@@ -130,8 +169,21 @@ python3 -m train --backend rllib --iterations 50 --max-steps 120 --output-dir ou
 Legacy custom backend example:
 
 ```bash
-python3 -m train --backend custom --episodes 100 --max-steps 120 --output-dir outputs/train/custom --networks-path data/agent_networks.json
+python3 -m train --backend custom --episodes 100 --max-steps 120 --output-dir outputs/train/custom --networks-path data/base/agent_networks.json
 ```
+
+Scenario-driven custom training (one NN per agent in scenario roster):
+
+```bash
+python3 -m train --backend custom --scenario-path data/scenarios/all_race_class_combinations.json --output-dir outputs/train/scenario_run
+```
+
+NN capacity guard options:
+
+- `--max-nn-policies <N>` hard cap.
+- `--resource-guard-ram-fraction <f>` RAM fraction used for estimated cap (default `0.45`).
+- `--resource-guard-bytes-per-param <b>` memory estimate per parameter (default `32`).
+- `--no-resource-guard` disables the guard.
 
 Version-controlled training scripts:
 
@@ -159,7 +211,7 @@ python3 -m unittest discover -s tests -q
 
 - PettingZoo Parallel-style multi-agent environment with `reset(seed, options)` / `step(actions)`
 - Configurable per-agent observations
-- Agent profile system loaded from `data/agent_profiles.json` with `human` and `orc` defaults (different observations and reward shaping)
+- Agent profile system loaded from `data/base/agent_profiles.json` with `human` and `orc` defaults (different observations and reward shaping)
 - JSON tile schema with required `schema_version` and required tile fields
 - Reward shaping with interaction caps and anti-exploit penalties
 - Window-only rendering with playback controls and focused zoom

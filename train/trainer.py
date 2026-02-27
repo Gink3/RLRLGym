@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections import deque
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from typing import Dict, Optional
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
 from rlrlgym.constants import ACTION_NAMES
+from rlrlgym.scenario import estimate_max_networks
 
 from .aim_logger import AimLogger
 from .network_config import NetworkConfig, load_network_configs
@@ -27,12 +29,17 @@ class TrainConfig:
     height: Optional[int] = None
     n_agents: Optional[int] = None
     render_enabled: bool = False
-    networks_path: str = "data/agent_networks.json"
+    networks_path: str = "data/base/agent_networks.json"
     agent_profile_map: Dict[str, str] | None = None
     progress_window: int = 50
     show_progress: bool = True
     replay_save_every: int = 5000
     env_config_path: str = "data/env_config.json"
+    scenario_path: str = ""
+    resource_guard_enabled: bool = True
+    resource_guard_ram_fraction: float = 0.45
+    resource_guard_bytes_per_param: int = 32
+    max_nn_policies: int = 0
     aim_enabled: bool = True
     aim_experiment: str = "rlrlgym_custom"
     aim_repo_path: str = "/proj/aimml"
@@ -54,7 +61,7 @@ class EpisodeSummary:
 class MultiAgentTrainer:
     def __init__(self, config: TrainConfig) -> None:
         self.config = config
-        profile_map = config.agent_profile_map or {"agent_0": "human", "agent_1": "orc"}
+        profile_map = config.agent_profile_map or {}
         env_cfg = EnvConfig.from_json(config.env_config_path)
         if config.width is not None:
             env_cfg.width = int(config.width)
@@ -65,19 +72,24 @@ class MultiAgentTrainer:
         if config.n_agents is not None:
             env_cfg.n_agents = int(config.n_agents)
         env_cfg.render_enabled = config.render_enabled
-        env_cfg.agent_profile_map = dict(profile_map)
+        if config.scenario_path:
+            env_cfg.scenario_path = str(config.scenario_path)
+        elif profile_map:
+            env_cfg.agent_profile_map = dict(profile_map)
         self.env = PettingZooParallelRLRLGym(
             env_cfg
         )
         self.network_cfgs: Dict[str, NetworkConfig] = load_network_configs(config.networks_path)
-        self.agent_profile_map = profile_map
+        self.agent_profile_map = dict(self.env.config.agent_profile_map)
+        self.agent_network_map: Dict[str, str] = {}
         self.policies: Dict[str, NeuralQPolicy] = {}
         for i, aid in enumerate(self.env.possible_agents):
-            profile = self.agent_profile_map.get(aid, "human")
-            if profile not in self.network_cfgs:
-                raise ValueError(f"No network architecture for profile '{profile}'")
+            network_name = self._resolve_network_name(aid)
+            if network_name not in self.network_cfgs:
+                raise ValueError(f"No network architecture for '{network_name}'")
+            self.agent_network_map[aid] = network_name
             self.policies[aid] = NeuralQPolicy(
-                net_cfg=self.network_cfgs[profile],
+                net_cfg=self.network_cfgs[network_name],
                 seed=config.seed + i,
             )
         self._run_metrics_initialized = False
@@ -99,9 +111,43 @@ class MultiAgentTrainer:
                 "max_steps": None if config.max_steps is None else int(config.max_steps),
                 "networks_path": str(config.networks_path),
                 "env_config_path": str(config.env_config_path),
+                "scenario_path": str(config.scenario_path or ""),
                 "aim_repo_path": str(config.aim_repo_path),
             }
         )
+
+    def _resolve_network_name(self, aid: str) -> str:
+        idx = self.env.possible_agents.index(aid)
+        scenario_row: Dict[str, object] = {}
+        scenario = getattr(self.env.config, "agent_scenario", [])
+        if isinstance(scenario, list) and 0 <= idx < len(scenario):
+            row = scenario[idx]
+            if isinstance(row, dict):
+                scenario_row = row
+        explicit = str(scenario_row.get("network", "")).strip()
+        if explicit and explicit in self.network_cfgs:
+            return explicit
+        race = str(self.env.config.agent_race_map.get(aid, "")).strip()
+        cls = str(self.env.config.agent_class_map.get(aid, "")).strip()
+        profile = str(self.env.config.agent_profile_map.get(aid, "")).strip()
+        candidates = [
+            f"{race}_{cls}" if race and cls else "",
+            profile,
+            race,
+            "default",
+        ]
+        for name in candidates:
+            if name and name in self.network_cfgs:
+                return name
+        return sorted(self.network_cfgs.keys())[0]
+
+    def _available_ram_bytes(self) -> int:
+        try:
+            page = int(os.sysconf("SC_PAGE_SIZE"))
+            avail = int(os.sysconf("SC_AVPHYS_PAGES"))
+            return max(0, page * avail)
+        except Exception:
+            return 0
 
     def train(self) -> Dict[str, object]:
         window = max(1, int(self.config.progress_window))
@@ -478,13 +524,8 @@ class MultiAgentTrainer:
 
     def _network_parameter_counts(self) -> Dict[str, int]:
         out: Dict[str, int] = {}
-        if self.env.state is None:
-            return out
         for aid in self.env.possible_agents:
-            profile = self.env.state.agents[aid].profile_name
-            if profile in out:
-                continue
-            out[profile] = self.policies[aid].parameter_count()
+            out[aid] = self.policies[aid].parameter_count()
         return out
 
     def _initialize_run_metrics(self, observations: Dict[str, Dict[str, object]]) -> None:
@@ -492,16 +533,44 @@ class MultiAgentTrainer:
         for aid in self.env.possible_agents:
             self.policies[aid].ensure_initialized(observations[aid])
 
-        profile_param_counts: Dict[str, int] = {}
+        per_agent_param_counts: Dict[str, int] = {}
         for aid in self.env.possible_agents:
-            profile = self.env.state.agents[aid].profile_name
-            if profile in profile_param_counts:
-                continue
-            profile_param_counts[profile] = self.policies[aid].parameter_count()
+            per_agent_param_counts[aid] = self.policies[aid].parameter_count()
+
+        ram_avail = self._available_ram_bytes()
+        peak_params = max(1, max(per_agent_param_counts.values(), default=1))
+        if ram_avail > 0:
+            est_max_networks, est_bytes_per_network = estimate_max_networks(
+                per_network_params=peak_params,
+                available_ram_bytes=ram_avail,
+                usable_fraction=float(self.config.resource_guard_ram_fraction),
+                bytes_per_param=int(self.config.resource_guard_bytes_per_param),
+            )
+        else:
+            est_max_networks = len(self.policies)
+            est_bytes_per_network = peak_params * int(
+                max(8, int(self.config.resource_guard_bytes_per_param))
+            )
+        configured_cap = int(self.config.max_nn_policies)
+        hard_cap = configured_cap if configured_cap > 0 else est_max_networks
+        if bool(self.config.resource_guard_enabled) and len(self.policies) > hard_cap:
+            raise RuntimeError(
+                "Scenario exceeds estimated NN capacity: "
+                f"{len(self.policies)} policies requested, cap={hard_cap}. "
+                "Reduce agents, shrink network hidden layers, or increase system memory."
+            )
 
         self.aim.set_payload(
             "custom/run_metrics",
-            {"network_parameter_counts": profile_param_counts},
+            {
+                "network_parameter_counts": per_agent_param_counts,
+                "network_arch_by_agent": dict(self.agent_network_map),
+                "estimated_bytes_per_network": int(est_bytes_per_network),
+                "estimated_max_networks_from_ram": int(est_max_networks),
+                "available_ram_bytes": int(ram_avail),
+                "active_network_count": int(len(self.policies)),
+                "resource_guard_hard_cap": int(hard_cap),
+            },
         )
         self._run_metrics_initialized = True
 

@@ -10,6 +10,13 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from .constants import ACTION_NAMES
 from .models import EnvState, TileDef
+from .themes import (
+    get_theme,
+    list_theme_names,
+    load_selected_theme,
+    save_selected_theme,
+    theme_label,
+)
 
 TK_COLORS = {
     "black": "#000000",
@@ -143,6 +150,8 @@ class RenderWindow:
         self._ttk = ttk
         self.renderer = AsciiRenderer(tiles)
         self.playback = PlaybackController()
+        self._theme_name = load_selected_theme()
+        self._theme = get_theme(self._theme_name)
 
         self._live_state: Optional[EnvState] = None
         self._playback_states: List[EnvState] = []
@@ -245,6 +254,20 @@ class RenderWindow:
         )
         self.render_mode_menu.pack(side="left")
         self.render_mode_menu.bind("<<ComboboxSelected>>", self._on_render_mode_change)
+        self.theme_var = tk.StringVar(value=self._theme_name)
+        self.settings_button = ttk.Menubutton(controls, text="Settings")
+        self.settings_menu = tk.Menu(self.settings_button, tearoff=0)
+        self.theme_menu = tk.Menu(self.settings_menu, tearoff=0)
+        for name in list_theme_names():
+            self.theme_menu.add_radiobutton(
+                label=theme_label(name),
+                value=name,
+                variable=self.theme_var,
+                command=self._on_theme_change,
+            )
+        self.settings_menu.add_cascade(label="Theme", menu=self.theme_menu)
+        self.settings_button["menu"] = self.settings_menu
+        self.settings_button.pack(side="left", padx=(10, 0))
 
         content = ttk.Frame(self.root)
         content.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -329,16 +352,20 @@ class RenderWindow:
         )
         self.action_log_text.pack(side="left", fill="both", expand=True)
         self.action_log_text.configure(state="disabled")
-        self.agent_stats_text = tk.Text(
+        self.agent_stats_canvas = tk.Canvas(
             stats_frame,
             width=48,
             height=14,
-            font=("Courier", 10),
             bg="#0e141c",
-            fg="#d4ffe5",
+            highlightthickness=0,
         )
-        self.agent_stats_text.pack(side="left", fill="both", expand=True)
-        self.agent_stats_text.configure(state="disabled")
+        self.agent_stats_vscroll = ttk.Scrollbar(
+            stats_frame, orient="vertical", command=self.agent_stats_canvas.yview
+        )
+        self.agent_stats_canvas.configure(yscrollcommand=self.agent_stats_vscroll.set)
+        self.agent_stats_canvas.pack(side="left", fill="both", expand=True)
+        self.agent_stats_vscroll.pack(side="left", fill="y")
+        self.agent_stats_canvas.bind("<Configure>", self._on_agent_stats_resize)
         self._base_map_font_size = 11
         self._base_log_font_size = 10
         self._base_stats_font_size = 10
@@ -346,8 +373,10 @@ class RenderWindow:
 
         self._configure_color_tags()
         self._tileset_available = self._load_tileset_assets()
+        self._apply_theme()
 
     def _configure_color_tags(self) -> None:
+        t = self._theme
         self.text.configure(state="normal")
         profile_colors = {style[1] for style in PROFILE_AGENT_STYLE.values()}
         for color in set(TK_COLORS.values()) | profile_colors | {
@@ -356,7 +385,7 @@ class RenderWindow:
             self.text.tag_configure(color, foreground=color)
             self.text.tag_configure(
                 self._agent_bg_tag(color),
-                background="#f8d64e",
+                background=t["accent"],
             )
         self.text.tag_configure("agent_outline", borderwidth=1, relief="solid")
         self.text.tag_configure("agent_bold")
@@ -382,6 +411,15 @@ class RenderWindow:
         self._set_map_mode()
         self._redraw()
 
+    def _on_theme_change(self) -> None:
+        name = save_selected_theme(self.theme_var.get())
+        self.theme_var.set(name)
+        self._theme_name = name
+        self._theme = get_theme(name)
+        self._configure_color_tags()
+        self._apply_theme()
+        self._redraw()
+
     def _on_highlight_toggle(self) -> None:
         self._redraw()
 
@@ -393,6 +431,64 @@ class RenderWindow:
     def _agent_bg_tag(self, color: str) -> str:
         return f"agent_bg_{color.strip('#')}"
 
+    def _apply_theme(self) -> None:
+        t = self._theme
+        self.root.configure(bg=t["bg"])
+        style = self._ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure(".", background=t["panel"], foreground=t["text"])
+        style.configure("TFrame", background=t["panel"])
+        style.configure("TLabel", background=t["panel"], foreground=t["text"])
+        style.configure(
+            "TButton",
+            background=t["panel_alt"],
+            foreground=t["text"],
+            bordercolor=t["border"],
+        )
+        style.map("TButton", background=[("active", t["primary_hover"])])
+        style.configure(
+            "TCombobox",
+            fieldbackground=t["panel_alt"],
+            background=t["panel_alt"],
+            foreground=t["text"],
+        )
+        style.configure(
+            "TCheckbutton",
+            background=t["panel"],
+            foreground=t["text"],
+        )
+        style.configure("TMenubutton", background=t["panel_alt"], foreground=t["text"])
+        style.configure(
+            "TScrollbar",
+            background=t["panel_alt"],
+            troughcolor=t["panel"],
+        )
+        self.text.configure(bg=t["bg"], fg=t["text"], insertbackground=t["text"])
+        self.canvas.configure(bg=t["bg"])
+        self.action_log_text.configure(
+            bg=t["panel"],
+            fg=t["text"],
+            insertbackground=t["text"],
+        )
+        self.agent_stats_canvas.configure(bg=t["panel"])
+        self.settings_menu.configure(
+            background=t["panel"],
+            foreground=t["text"],
+            activebackground=t["primary"],
+            activeforeground=t["text"],
+            tearoff=False,
+        )
+        self.theme_menu.configure(
+            background=t["panel"],
+            foreground=t["text"],
+            activebackground=t["primary"],
+            activeforeground=t["text"],
+            tearoff=False,
+        )
+
     def _apply_zoom_font(self) -> None:
         zoom = int(self.zoom_var.get())
         # Zoom scales map glyph size for clearer replay inspection.
@@ -401,7 +497,10 @@ class RenderWindow:
         self.text.tag_configure("agent_bold", font=("Courier", font_size, "bold"))
         # Keep side panes fixed-size for readability regardless of map zoom.
         self.action_log_text.configure(font=("Courier", self._base_log_font_size))
-        self.agent_stats_text.configure(font=("Courier", self._base_stats_font_size))
+        # Agent stat cards are canvas-rendered with a fixed readable size.
+
+    def _on_agent_stats_resize(self, _evt=None) -> None:
+        self._redraw_agent_stats()
 
     def _set_map_mode(self) -> None:
         mode = self.render_mode_var.get()
@@ -568,11 +667,35 @@ class RenderWindow:
                         font=("Courier", max(8, pixel_size // 2), "bold"),
                     )
 
+    def _capture_scroll_fraction(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        mode = self.render_mode_var.get()
+        if mode == "tileset" and self._tileset_available:
+            return self.canvas.xview(), self.canvas.yview()
+        return self.text.xview(), self.text.yview()
+
+    def _restore_scroll_fraction(
+        self,
+        xview: Tuple[float, float],
+        yview: Tuple[float, float],
+    ) -> None:
+        mode = self.render_mode_var.get()
+        x0 = float(xview[0]) if xview else 0.0
+        y0 = float(yview[0]) if yview else 0.0
+        x0 = max(0.0, min(1.0, x0))
+        y0 = max(0.0, min(1.0, y0))
+        if mode == "tileset" and self._tileset_available:
+            self.canvas.xview_moveto(x0)
+            self.canvas.yview_moveto(y0)
+        else:
+            self.text.xview_moveto(x0)
+            self.text.yview_moveto(y0)
+
     def _redraw(self) -> None:
         state = self._active_state()
         if state is None:
             self._hide_tooltip()
             return
+        prev_xview, prev_yview = self._capture_scroll_fraction()
         self._set_map_mode()
         self._last_view_bounds = self.renderer.view_bounds(
             state=state,
@@ -588,6 +711,7 @@ class RenderWindow:
                 zoom=int(self.zoom_var.get()),
             )
             self._draw_cells(cells)
+        self._restore_scroll_fraction(prev_xview, prev_yview)
         self._redraw_action_log()
         self._redraw_agent_stats()
 
@@ -660,6 +784,7 @@ class RenderWindow:
         )
 
     def _show_tooltip(self, x: int, y: int, text: str) -> None:
+        t = self._theme
         if self._tooltip_window is None:
             win = self._tk.Toplevel(self.root)
             win.overrideredirect(True)
@@ -667,8 +792,8 @@ class RenderWindow:
             label = self._tk.Label(
                 win,
                 justify="left",
-                bg="#111827",
-                fg="#e5e7eb",
+                bg=t["panel"],
+                fg=t["text"],
                 relief="solid",
                 borderwidth=1,
                 font=("Courier", 9),
@@ -680,6 +805,10 @@ class RenderWindow:
             self._tooltip_label = label
         assert self._tooltip_window is not None
         assert self._tooltip_label is not None
+        self._tooltip_label.configure(
+            bg=t["panel"],
+            fg=t["text"],
+        )
         self._tooltip_label.configure(text=text)
         self._tooltip_window.geometry(f"+{int(x)}+{int(y)}")
         self._tooltip_window.deiconify()
@@ -813,40 +942,153 @@ class RenderWindow:
 
     def _redraw_agent_stats(self) -> None:
         state = self._active_state()
-        self.agent_stats_text.configure(state="normal")
-        self.agent_stats_text.delete("1.0", self._tk.END)
-        self.agent_stats_text.insert(self._tk.END, "Agent Stats\n")
-        self.agent_stats_text.insert(self._tk.END, "----------\n")
+        t = self._theme
+        yview = self.agent_stats_canvas.yview()
+        self.agent_stats_canvas.delete("all")
+        canvas_w = max(280, int(self.agent_stats_canvas.winfo_width() or 360))
+        pad = 8
+        content_w = canvas_w - (2 * pad)
+        y = pad
+        self.agent_stats_canvas.create_text(
+            pad,
+            y,
+            anchor="nw",
+            text="Agent Stats",
+            fill=t["text"],
+            font=("Courier", self._base_stats_font_size + 1, "bold"),
+        )
+        y += 24
         if state is None:
-            self.agent_stats_text.insert(self._tk.END, "No state loaded.\n")
-            self.agent_stats_text.configure(state="disabled")
+            self.agent_stats_canvas.create_text(
+                pad,
+                y,
+                anchor="nw",
+                text="No state loaded.",
+                fill=t["text"],
+                font=("Courier", self._base_stats_font_size),
+            )
+            self.agent_stats_canvas.configure(scrollregion=(0, 0, canvas_w, y + 32))
+            self.agent_stats_canvas.yview_moveto(0.0)
             return
 
         alive_agents = sum(1 for a in state.agents.values() if a.alive)
         alive_monsters = sum(1 for m in state.monsters.values() if m.alive)
-        self.agent_stats_text.insert(
-            self._tk.END,
-            f"step={state.step_count} alive_agents={alive_agents} alive_monsters={alive_monsters}\n\n",
+        self.agent_stats_canvas.create_text(
+            pad,
+            y,
+            anchor="nw",
+            text=(
+                f"step={state.step_count}  "
+                f"alive_agents={alive_agents}  "
+                f"alive_monsters={alive_monsters}"
+            ),
+            fill=t["text_muted"],
+            font=("Courier", self._base_stats_font_size),
         )
+        y += 24
+
         for aid, agent in sorted(state.agents.items()):
             status = "alive" if agent.alive else "dead"
-            self.agent_stats_text.insert(
-                self._tk.END,
-                f"{aid} [{status}] {agent.profile_name}/{agent.race_name}/{agent.class_name}\n",
+            card_h = 126
+            self.agent_stats_canvas.create_rectangle(
+                pad,
+                y,
+                pad + content_w,
+                y + card_h,
+                fill=t["bg"],
+                outline=t["border"],
+                width=1,
             )
-            self.agent_stats_text.insert(
-                self._tk.END,
-                f"  hp={agent.hp}/{agent.max_hp} hunger={agent.hunger}/{agent.max_hunger} pos={agent.position}\n",
+            self.agent_stats_canvas.create_text(
+                pad + 10,
+                y + 8,
+                anchor="nw",
+                text=f"{aid} [{status}] {agent.profile_name}/{agent.race_name}/{agent.class_name}",
+                fill=t["text"] if agent.alive else t["text_muted"],
+                font=("Courier", self._base_stats_font_size, "bold"),
             )
-            self.agent_stats_text.insert(
-                self._tk.END,
-                f"  str={agent.strength} dex={agent.dexterity} int={agent.intellect} inv={len(agent.inventory)} eq={len(agent.equipped)}\n",
+
+            hp_ratio = 0.0
+            if int(agent.max_hp) > 0:
+                hp_ratio = max(0.0, min(1.0, float(agent.hp) / float(agent.max_hp)))
+            bar_x0 = pad + 10
+            bar_y0 = y + 30
+            bar_w = max(80, content_w - 20)
+            bar_h = 14
+            self.agent_stats_canvas.create_rectangle(
+                bar_x0,
+                bar_y0,
+                bar_x0 + bar_w,
+                bar_y0 + bar_h,
+                fill=t["danger"],
+                outline=t["danger"],
             )
-            self.agent_stats_text.insert(
-                self._tk.END,
-                f"  skills={agent.skills}\n\n",
+            self.agent_stats_canvas.create_rectangle(
+                bar_x0,
+                bar_y0,
+                bar_x0 + int(bar_w * hp_ratio),
+                bar_y0 + bar_h,
+                fill=t["success"],
+                outline=t["success"],
             )
-        self.agent_stats_text.configure(state="disabled")
+            self.agent_stats_canvas.create_text(
+                bar_x0 + 4,
+                bar_y0 - 1,
+                anchor="nw",
+                text=f"HP {agent.hp}/{agent.max_hp}",
+                fill=t["text"],
+                font=("Courier", self._base_stats_font_size - 1, "bold"),
+            )
+
+            line1 = f"hunger={agent.hunger}/{agent.max_hunger}  pos={agent.position}  faction={int(agent.faction_id)}"
+            line2 = (
+                f"str={agent.strength} dex={agent.dexterity} int={agent.intellect}  "
+                f"inv={len(agent.inventory)} eq={len(agent.equipped)}"
+            )
+            overall_level = int(
+                sum(max(0, int(v)) for v in dict(agent.skills).values())
+            )
+            line2b = f"overall_level={overall_level}"
+            top_skills = sorted(agent.skills.items(), key=lambda kv: (-int(kv[1]), kv[0]))[:4]
+            line3 = "skills: " + ", ".join(f"{k}={int(v)}" for k, v in top_skills)
+            self.agent_stats_canvas.create_text(
+                bar_x0,
+                y + 50,
+                anchor="nw",
+                text=line1,
+                fill=t["text_muted"],
+                font=("Courier", self._base_stats_font_size - 1),
+            )
+            self.agent_stats_canvas.create_text(
+                bar_x0,
+                y + 68,
+                anchor="nw",
+                text=line2,
+                fill=t["text_muted"],
+                font=("Courier", self._base_stats_font_size - 1),
+            )
+            self.agent_stats_canvas.create_text(
+                bar_x0,
+                y + 84,
+                anchor="nw",
+                text=line2b,
+                fill=t["text_muted"],
+                font=("Courier", self._base_stats_font_size - 1),
+            )
+            self.agent_stats_canvas.create_text(
+                bar_x0,
+                y + 100,
+                anchor="nw",
+                text=line3,
+                fill=t["accent"],
+                font=("Courier", self._base_stats_font_size - 1),
+            )
+            y += card_h + 8
+
+        total_h = max(y + pad, int(self.agent_stats_canvas.winfo_height() or 1))
+        self.agent_stats_canvas.configure(scrollregion=(0, 0, canvas_w, total_h))
+        y0 = float(yview[0]) if yview else 0.0
+        self.agent_stats_canvas.yview_moveto(max(0.0, min(1.0, y0)))
 
     def update_state(
         self, state: EnvState, focus_choices: Optional[List[str]] = None

@@ -20,14 +20,16 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
     def __init__(self, config: Dict[str, object] | None = None) -> None:
         super().__init__()
         cfg = config or {}
-        profile_map = cfg.get("agent_profile_map", {"agent_0": "human", "agent_1": "orc"})
+        profile_map = cfg.get("agent_profile_map", {})
         env_cfg = EnvConfig.from_json(str(cfg.get("env_config_path", "data/env_config.json")))
+        env_cfg.scenario_path = str(cfg.get("scenario_path", env_cfg.scenario_path or ""))
         env_cfg.width = int(cfg.get("width", env_cfg.width))
         env_cfg.height = int(cfg.get("height", env_cfg.height))
         env_cfg.max_steps = int(cfg.get("max_steps", env_cfg.max_steps))
         env_cfg.n_agents = int(cfg.get("n_agents", env_cfg.n_agents))
         env_cfg.render_enabled = bool(cfg.get("render_enabled", False))
-        env_cfg.agent_profile_map = dict(profile_map)
+        if isinstance(profile_map, dict) and profile_map:
+            env_cfg.agent_profile_map = dict(profile_map)
         self.base = PettingZooParallelRLRLGym(
             env_cfg
         )

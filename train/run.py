@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--agents", type=int, default=None)
-    p.add_argument("--networks-path", type=str, default="data/agent_networks.json")
+    p.add_argument("--networks-path", type=str, default="data/base/agent_networks.json")
     p.add_argument("--iterations", type=int, default=50)
     p.add_argument("--framework", type=str, default="torch")
     p.add_argument("--num-gpus", type=float, default=0.0)
@@ -28,7 +28,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--train-batch-size", type=int, default=4000)
     p.add_argument("--replay-save-every", type=int, default=5000)
     p.add_argument("--env-config-path", type=str, default="data/env_config.json")
-    p.add_argument("--curriculum-path", type=str, default="data/curriculum_phases.json")
+    p.add_argument("--scenario-path", type=str, default="")
+    p.add_argument("--max-nn-policies", type=int, default=0)
+    p.add_argument("--resource-guard-ram-fraction", type=float, default=0.45)
+    p.add_argument("--resource-guard-bytes-per-param", type=int, default=32)
+    p.add_argument(
+        "--no-resource-guard",
+        action="store_true",
+        help="Disable pre-training memory guard for per-agent policy count.",
+    )
+    p.add_argument("--curriculum-path", type=str, default="data/base/curriculum_phases.json")
     p.add_argument(
         "--shared-policy",
         action="store_true",
@@ -90,6 +99,11 @@ def main() -> None:
             networks_path=args.networks_path,
             replay_save_every=args.replay_save_every,
             env_config_path=args.env_config_path,
+            scenario_path=args.scenario_path,
+            resource_guard_enabled=not bool(args.no_resource_guard),
+            resource_guard_ram_fraction=args.resource_guard_ram_fraction,
+            resource_guard_bytes_per_param=args.resource_guard_bytes_per_param,
+            max_nn_policies=args.max_nn_policies,
             aim_enabled=not bool(args.no_aim),
             aim_experiment=args.aim_experiment,
             aim_repo_path=args.aim_repo,
@@ -116,6 +130,7 @@ def main() -> None:
         train_batch_size=args.train_batch_size,
         replay_save_every=args.replay_save_every,
         env_config_path=args.env_config_path,
+        scenario_path=args.scenario_path,
         curriculum_path=args.curriculum_path,
         shared_policy=bool(args.shared_policy),
         curriculum_enabled=not bool(args.no_curriculum),

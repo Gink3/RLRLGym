@@ -39,6 +39,7 @@ from .monsters import MonsterDef, MonsterSpawnEntry, load_monster_spawns, load_m
 from .profiles import AgentProfile, load_profiles
 from .races import AgentRace, load_races
 from .render import RenderWindow
+from .scenario import apply_scenario_to_env_config, load_scenario
 from .tiles import load_tileset
 
 MOVE_VALID_REWARD = 0.005
@@ -92,14 +93,16 @@ class EnvConfig:
     height: int = 50
     max_steps: int = 150
     n_agents: int = 2
-    tiles_path: str = str(Path("data") / "tiles.json")
-    profiles_path: str = str(Path("data") / "agent_profiles.json")
-    races_path: str = str(Path("data") / "agent_races.json")
-    classes_path: str = str(Path("data") / "agent_classes.json")
-    items_path: str = str(Path("data") / "items.json")
-    monsters_path: str = str(Path("data") / "monsters.json")
-    monster_spawns_path: str = str(Path("data") / "monster_spawns.json")
-    mapgen_config_path: str = str(Path("data") / "mapgen_config.json")
+    tiles_path: str = str(Path("data") / "base" / "tiles.json")
+    profiles_path: str = str(Path("data") / "base" / "agent_profiles.json")
+    races_path: str = str(Path("data") / "base" / "agent_races.json")
+    classes_path: str = str(Path("data") / "base" / "agent_classes.json")
+    items_path: str = str(Path("data") / "base" / "items.json")
+    monsters_path: str = str(Path("data") / "base" / "monsters.json")
+    monster_spawns_path: str = str(Path("data") / "base" / "monster_spawns.json")
+    mapgen_config_path: str = str(Path("data") / "base" / "mapgen_config.json")
+    scenario_path: str = ""
+    agent_scenario: List[Dict[str, object]] = field(default_factory=list)
     agent_observation_config: Dict[str, Dict[str, object]] = field(default_factory=dict)
     agent_profile_map: Dict[str, str] = field(default_factory=dict)
     agent_race_map: Dict[str, str] = field(default_factory=dict)
@@ -174,6 +177,7 @@ class EnvConfig:
         merged["agent_observation_config"] = dict(
             merged.get("agent_observation_config", {})
         )
+        merged["agent_scenario"] = list(merged.get("agent_scenario", []))
         merged["agent_profile_map"] = dict(merged.get("agent_profile_map", {}))
         merged["agent_race_map"] = dict(merged.get("agent_race_map", {}))
         merged["agent_class_map"] = dict(merged.get("agent_class_map", {}))
@@ -198,6 +202,10 @@ class MultiAgentRLRLGym:
                 self.config = EnvConfig.from_json(default_cfg_path)
             else:
                 self.config = EnvConfig()
+        self.scenario = None
+        if str(self.config.scenario_path).strip():
+            self.scenario = load_scenario(self.config.scenario_path)
+            self.config = apply_scenario_to_env_config(self.config, self.scenario)
         self.tiles = load_tileset(self.config.tiles_path)
         self.profiles: Dict[str, AgentProfile] = load_profiles(
             self.config.profiles_path
@@ -2177,17 +2185,21 @@ class MultiAgentRLRLGym:
     def _resolve_profile_name(self, agent_id: str, index: int) -> str:
         if agent_id in self.config.agent_profile_map:
             return self.config.agent_profile_map[agent_id]
-        if index == 0:
+        race = self.config.agent_race_map.get(agent_id, "")
+        if race and race in self.profiles:
+            return race
+        if "human" in self.profiles:
             return "human"
-        if index == 1:
-            return "orc"
-        return "human"
+        ordered = sorted(self.profiles.keys())
+        if not ordered:
+            raise ValueError("No agent profiles are loaded")
+        return ordered[index % len(ordered)]
 
     def _resolve_class_name(self, agent_id: str, index: int) -> str:
         if agent_id in self.config.agent_class_map:
             return self.config.agent_class_map[agent_id]
-        if "wanderer" in self.classes:
-            return "wanderer"
+        if "fighter" in self.classes:
+            return "fighter"
         ordered = sorted(self.classes.keys())
         if not ordered:
             raise ValueError("No agent classes are loaded")
@@ -2200,10 +2212,8 @@ class MultiAgentRLRLGym:
             mapped = self.config.agent_profile_map[agent_id]
             if mapped in self.races:
                 return mapped
-        if index == 0 and "human" in self.races:
+        if "human" in self.races:
             return "human"
-        if index == 1 and "orc" in self.races:
-            return "orc"
         ordered = sorted(self.races.keys())
         if not ordered:
             raise ValueError("No agent races are loaded")

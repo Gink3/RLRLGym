@@ -38,7 +38,7 @@ def _state_from_payload(frame: dict) -> EnvState:
             position=(int(row["position"][0]), int(row["position"][1])),
             profile_name=str(row.get("profile_name", "human")),
             race_name=str(row.get("race_name", row.get("profile_name", "human"))),
-            class_name=str(row.get("class_name", "wanderer")),
+            class_name=str(row.get("class_name", "fighter")),
             hp=int(row.get("hp", 0)),
             max_hp=int(row.get("max_hp", 0)),
             hunger=int(row.get("hunger", 0)),

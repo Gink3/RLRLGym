@@ -2,6 +2,16 @@
   "schema_version": 1,
   "architectures": [
     {
+      "name": "default",
+      "hidden_layers": [96, 96],
+      "activation": "relu",
+      "learning_rate": 0.003,
+      "gamma": 0.97,
+      "epsilon_start": 0.22,
+      "epsilon_end": 0.03,
+      "epsilon_decay": 0.995
+    },
+    {
       "name": "human",
       "hidden_layers": [128, 128],
       "activation": "relu",

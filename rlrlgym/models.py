@@ -52,7 +52,7 @@ class AgentState:
     position: Tuple[int, int]
     profile_name: str = "human"
     race_name: str = "human"
-    class_name: str = "wanderer"
+    class_name: str = "fighter"
     hp: int = 10
     max_hp: int = 10
     hunger: int = 20

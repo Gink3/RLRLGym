@@ -34,7 +34,8 @@ class RLlibTrainConfig:
     train_batch_size: int = 4000
     replay_save_every: int = 5000
     env_config_path: str = "data/env_config.json"
-    curriculum_path: str = "data/curriculum_phases.json"
+    scenario_path: str = ""
+    curriculum_path: str = "data/base/curriculum_phases.json"
     shared_policy: bool = False
     curriculum_enabled: bool = True
     aim_enabled: bool = True
@@ -94,6 +95,7 @@ class RLlibTrainer:
                 "train_batch_size": int(config.train_batch_size),
                 "replay_save_every": int(config.replay_save_every),
                 "env_config_path": str(config.env_config_path),
+                "scenario_path": str(config.scenario_path or ""),
                 "curriculum_path": str(config.curriculum_path),
                 "shared_policy": bool(config.shared_policy),
                 "curriculum_enabled": bool(config.curriculum_enabled),
@@ -141,11 +143,11 @@ class RLlibTrainer:
         monster_name_map = self._load_monster_name_map(self.config.env_config_path)
         env_config = {
             "render_enabled": False,
-            "agent_profile_map": {"agent_0": "human", "agent_1": "orc"},
             "replay_save_every": int(self.config.replay_save_every),
             "replay_output_dir": str(Path(self.config.output_dir).resolve()),
             "save_latest_replay": True,
             "env_config_path": self.config.env_config_path,
+            "scenario_path": str(self.config.scenario_path or ""),
             "curriculum_phases": curriculum_phases,
         }
         if self.config.width is not None:
@@ -1276,7 +1278,7 @@ class RLlibTrainer:
         try:
             raw = json.loads(Path(env_config_path).read_text(encoding="utf-8"))
             payload = raw.get("env_config", raw) if isinstance(raw, dict) else {}
-            monsters_path = str(payload.get("monsters_path", "data/monsters.json"))
+            monsters_path = str(payload.get("monsters_path", "data/base/monsters.json"))
             mon_raw = json.loads(Path(monsters_path).read_text(encoding="utf-8"))
             out: Dict[str, str] = {}
             if isinstance(mon_raw, dict):
