@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "env_config": {
+    "width": 80,
+    "height": 80,
+    "max_steps": 600
+  }
+}

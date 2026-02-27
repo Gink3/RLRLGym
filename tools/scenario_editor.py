@@ -22,6 +22,8 @@ from rlrlgym.env import EnvConfig
 from rlrlgym.profiles import load_profiles
 from rlrlgym.races import load_races
 from rlrlgym.scenario import (
+    SCENARIO_AGENTS_FILE,
+    SCENARIO_ENV_FILE,
     Scenario,
     ScenarioAgent,
     agent_combined_payload,
@@ -195,10 +197,10 @@ class ScenarioEditorApp:
         self._refresh_list()
 
     def _load_dialog(self) -> None:
-        chosen = filedialog.askopenfilename(
-            title="Load scenario",
-            filetypes=[("JSON", "*.json"), ("All Files", "*.*")],
-            initialdir="data",
+        chosen = filedialog.askdirectory(
+            title="Load scenario directory",
+            initialdir="data/scenarios",
+            mustexist=True,
         )
         if not chosen:
             return
@@ -221,15 +223,16 @@ class ScenarioEditorApp:
         self._refresh_list()
 
     def _save_as(self) -> None:
-        chosen = filedialog.asksaveasfilename(
-            title="Save scenario",
-            defaultextension=".json",
-            filetypes=[("JSON", "*.json")],
-            initialdir="data",
+        chosen = filedialog.askdirectory(
+            title="Select scenario save directory",
+            initialdir="data/scenarios",
+            mustexist=True,
         )
         if not chosen:
             return
-        self.scenario_path = Path(chosen)
+        name = self.name_var.get().strip() or "scenario"
+        safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in name)
+        self.scenario_path = Path(chosen) / safe
         self._save()
 
     def _save(self) -> None:
@@ -248,17 +251,32 @@ class ScenarioEditorApp:
                     clean_env[key] = self.default_env_config[key]
             self.scenario.name = self.name_var.get().strip() or "scenario"
             self.scenario.env_config = clean_env
-            save_scenario(self.scenario_path, self.scenario)
-            messagebox.showinfo("Saved", f"Saved to {self.scenario_path}")
+            out_dir = save_scenario(self.scenario_path, self.scenario)
+            self.scenario_path = out_dir
+            messagebox.showinfo(
+                "Saved",
+                (
+                    f"Saved scenario directory: {out_dir}\n"
+                    f"- {out_dir / SCENARIO_ENV_FILE}\n"
+                    f"- {out_dir / SCENARIO_AGENTS_FILE}"
+                ),
+            )
         except Exception as exc:
             messagebox.showerror("Save failed", str(exc))
 
     def _refresh_list(self) -> None:
         self.agent_list.delete(0, tk.END)
         for i, a in enumerate(self.scenario.agents):
+            display_name = (a.name or "").strip()
+            if not display_name:
+                display_name = f"{a.race}/{a.class_name}"
             self.agent_list.insert(
                 tk.END,
-                f"{i:02d}  {a.agent_id}  race={a.race} class={a.class_name} profile={a.profile or '-'} network={a.network or '-'}",
+                (
+                    f"{i:02d}  {a.agent_id}  name={display_name}  "
+                    f"race={a.race} class={a.class_name} profile={a.profile or '-'} "
+                    f"network={a.network or '-'}"
+                ),
             )
 
     def _generate_combos(self) -> None:
@@ -321,9 +339,13 @@ class ScenarioEditorApp:
         seed_class = existing.class_name if existing else (class_names[0] if class_names else "")
         seed_profile = existing.profile if existing and existing.profile else "<none>"
         seed_network = existing.network if existing and existing.network else "<none>"
+        seed_name = existing.name if existing and existing.name else ""
 
         row = ttk.Frame(dialog)
         row.pack(fill="x", padx=8, pady=8)
+        ttk.Label(row, text="Name").pack(side="left")
+        name_var = tk.StringVar(value=seed_name)
+        ttk.Entry(row, textvariable=name_var, width=16).pack(side="left", padx=(6, 12))
         ttk.Label(row, text="Race").pack(side="left")
         race_var = tk.StringVar(value=seed_race)
         race_box = ttk.Combobox(row, textvariable=race_var, values=race_names, width=16, state="readonly")
@@ -366,6 +388,7 @@ class ScenarioEditorApp:
                 agent_id=f"agent_{index}",
                 race=race,
                 class_name=class_name,
+                name=(name_var.get().strip() or None),
                 profile=None if profile_var.get() == "<none>" else profile_var.get(),
                 network=None if network_var.get() == "<none>" else network_var.get(),
                 observation_config=existing_obs,
@@ -402,6 +425,9 @@ class ScenarioEditorApp:
                 profile = payload.get("profile")
                 if profile in ("", None):
                     profile = None
+                name = payload.get("name")
+                if name in ("", None):
+                    name = None
                 network = payload.get("network")
                 if network in ("", None):
                     network = None
@@ -409,6 +435,7 @@ class ScenarioEditorApp:
                     agent_id=f"agent_{index}",
                     race=race,
                     class_name=class_name,
+                    name=(str(name) if name is not None else None),
                     profile=(str(profile) if profile is not None else None),
                     network=(str(network) if network is not None else None),
                     observation_config=dict(obs),
@@ -422,13 +449,18 @@ class ScenarioEditorApp:
         ttk.Button(btn_row, text="Save Agent", command=on_save).pack(side="left")
         ttk.Button(btn_row, text="Cancel", command=dialog.destroy).pack(side="left", padx=(4, 0))
 
+        # Apply global tool theme to dialog-local tk widgets for consistency.
+        t = self._theme
+        dialog.configure(bg=t["panel"])
+        editor.configure(bg=t["bg"], fg=t["text"], insertbackground=t["text"])
+
         self.root.wait_window(dialog)
         return out.get("agent")
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Open Scenario Editor")
-    p.add_argument("--scenario", type=str, default="", help="Optional scenario JSON path")
+    p.add_argument("--scenario", type=str, default="", help="Optional scenario directory path")
     return p
 
 

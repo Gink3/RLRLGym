@@ -86,6 +86,10 @@ HIT_SLOT_TO_ARMOR_SKILL: Dict[str, str] = {
     "neck": "armor_neck",
     "rings": "armor_rings",
 }
+PROFILE_ALIASES: Dict[str, str] = {
+    "human": "reward_explorer_policy_v1",
+    "orc": "reward_brawler_policy_v1",
+}
 
 @dataclass
 class EnvConfig:
@@ -2184,12 +2188,15 @@ class MultiAgentRLRLGym:
 
     def _resolve_profile_name(self, agent_id: str, index: int) -> str:
         if agent_id in self.config.agent_profile_map:
-            return self.config.agent_profile_map[agent_id]
+            raw = self.config.agent_profile_map[agent_id]
+            return PROFILE_ALIASES.get(raw, raw)
         race = self.config.agent_race_map.get(agent_id, "")
-        if race and race in self.profiles:
-            return race
-        if "human" in self.profiles:
-            return "human"
+        if race:
+            alias = PROFILE_ALIASES.get(race, race)
+            if alias in self.profiles:
+                return alias
+        if "reward_explorer_policy_v1" in self.profiles:
+            return "reward_explorer_policy_v1"
         ordered = sorted(self.profiles.keys())
         if not ordered:
             raise ValueError("No agent profiles are loaded")
@@ -2220,9 +2227,10 @@ class MultiAgentRLRLGym:
         return ordered[index % len(ordered)]
 
     def _profile_by_name(self, name: str) -> AgentProfile:
-        if name not in self.profiles:
+        resolved = PROFILE_ALIASES.get(name, name)
+        if resolved not in self.profiles:
             raise ValueError(f"Unknown agent profile: {name}")
-        return self.profiles[name]
+        return self.profiles[resolved]
 
     def _profile_for_agent(self, agent_id: str) -> AgentProfile:
         assert self.state is not None

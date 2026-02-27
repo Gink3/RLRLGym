@@ -23,6 +23,7 @@ python3 examples/train_demo.py
 
 - `tools/view_replay.py`: replay viewer for `*.replay.json` files with playback controls, focus, zoom, and render mode switch (`ascii` default, optional `tileset`).
 - `tools/scenario_editor.py`: GUI editor for scenario files (snapshot `env_config` + agent list). Agent creation flow is race + class selection followed by editable combined JSON before save.
+- `tools/train_launcher.py`: GUI launcher for training jobs with live log streaming and basic live metrics (`return`, `win`, `survival`, `starvation`, `loss`, `epsilon`).
 - `python3 -m train`: training CLI (custom and RLlib backends) with scenario support.
 - Both GUI tools include a top-bar `Settings -> Theme` selector. Selected theme is shared and persisted in `data/user/tool_settings.json`.
 
@@ -35,13 +36,21 @@ python3 tools/view_replay.py outputs/train/<run>/replays/latest_episode.replay.j
 Scenario Editor example:
 
 ```bash
-python3 tools/scenario_editor.py --scenario data/scenarios/all_race_class_combinations.json
+python3 tools/scenario_editor.py --scenario data/scenarios/all_race_class_combinations
+```
+
+Training Launcher example:
+
+```bash
+python3 tools/train_launcher.py
 ```
 
 ## Data Layout
 
 - `data/base/`: stable shared game data used across scenarios (tiles, items, races, classes, profiles, monsters, network defaults, curriculum defaults).
-- `data/scenarios/`: scenario-specific generated/edited agent rosters and overrides.
+- `data/scenarios/`: scenario-specific directories. Each scenario directory contains:
+- `env_config.json`: full environment config for that scenario.
+- `agents.json`: list of agents used in that scenario.
 - `data/env_config.json`: active environment config entrypoint; points to base data by default and may be overridden per scenario.
 
 ## Window Rendering
@@ -118,7 +127,7 @@ Observations are per-agent dictionaries and always include:
 
 - `step`: current environment step
 - `alive`: whether the agent is alive
-- `profile`: profile name (for example `human`, `orc`)
+- `profile`: profile name (for example `reward_explorer_policy_v1`, `reward_brawler_policy_v1`)
 
 Profile and config determine optional keys:
 
@@ -131,7 +140,7 @@ Example:
 ```python
 obs, info = env.reset(seed=7)
 agent_obs = obs["agent_0"]
-# agent_obs -> {"step": 0, "alive": True, "profile": "human", ...}
+# agent_obs -> {"step": 0, "alive": True, "profile": "reward_explorer_policy_v1", ...}
 ```
 
 ## Train Module
@@ -152,7 +161,7 @@ Outputs include:
 - (custom backend only) `neural_policies.json` checkpoint
 
 Network architectures are defined in `data/base/agent_networks.json` by profile name
-(for example `human` and `orc`).
+(for example `default`, and optionally per-profile variants).
 
 Install RLlib:
 
@@ -175,7 +184,7 @@ python3 -m train --backend custom --episodes 100 --max-steps 120 --output-dir ou
 Scenario-driven custom training (one NN per agent in scenario roster):
 
 ```bash
-python3 -m train --backend custom --scenario-path data/scenarios/all_race_class_combinations.json --output-dir outputs/train/scenario_run
+python3 -m train --backend custom --scenario-path data/scenarios/all_race_class_combinations --output-dir outputs/train/scenario_run
 ```
 
 NN capacity guard options:
@@ -211,7 +220,7 @@ python3 -m unittest discover -s tests -q
 
 - PettingZoo Parallel-style multi-agent environment with `reset(seed, options)` / `step(actions)`
 - Configurable per-agent observations
-- Agent profile system loaded from `data/base/agent_profiles.json` with `human` and `orc` defaults (different observations and reward shaping)
+- Agent profile system loaded from `data/base/agent_profiles.json` with descriptive reward/network profile names
 - JSON tile schema with required `schema_version` and required tile fields
 - Reward shaping with interaction caps and anti-exploit penalties
 - Window-only rendering with playback controls and focused zoom

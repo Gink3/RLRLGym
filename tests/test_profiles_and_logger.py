@@ -13,13 +13,16 @@ class TestProfilesAndLogger(unittest.TestCase):
                 n_agents=2,
                 max_steps=5,
                 render_enabled=False,
-                agent_profile_map={"agent_0": "human", "agent_1": "orc"},
+                agent_profile_map={
+                    "agent_0": "reward_explorer_policy_v1",
+                    "agent_1": "reward_brawler_policy_v1",
+                },
             )
         )
         obs, info = env.reset(seed=1)
 
-        self.assertEqual(obs["agent_0"]["profile"], "human")
-        self.assertEqual(obs["agent_1"]["profile"], "orc")
+        self.assertEqual(obs["agent_0"]["profile"], "reward_explorer_policy_v1")
+        self.assertEqual(obs["agent_1"]["profile"], "reward_brawler_policy_v1")
         self.assertEqual(len(obs["agent_0"]["local_tiles"]), 12)
         self.assertEqual(len(obs["agent_0"]["local_tiles"][0]), 12)
         self.assertEqual(len(obs["agent_1"]["local_tiles"]), 10)

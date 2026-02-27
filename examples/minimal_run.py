@@ -41,7 +41,10 @@ def main() -> None:
         max_steps=20,
         n_agents=2,
         render_enabled=False,
-        agent_profile_map={"agent_0": "human", "agent_1": "orc"},
+        agent_profile_map={
+            "agent_0": "reward_explorer_policy_v1",
+            "agent_1": "reward_brawler_policy_v1",
+        },
         agent_observation_config={
             "agent_0": {"view_radius": 2, "include_inventory": True},
             "agent_1": {"view_radius": 1, "include_inventory": False},

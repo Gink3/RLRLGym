@@ -13,7 +13,7 @@ TILE_VOCAB = [
     "shrine",
     "void",
 ]
-PROFILE_VOCAB = ["human", "orc"]
+PROFILE_VOCAB = ["reward_explorer_policy_v1", "reward_brawler_policy_v1"]
 ITEM_VOCAB = [
     "ration",
     "fruit",
@@ -120,7 +120,7 @@ def vectorize_observation(obs: Dict[str, object]) -> List[float]:
         skills = {}
     skill_features = [float(skills.get(k, 0.0)) / 20.0 for k in SKILL_VOCAB]
 
-    profile = str(obs.get("profile", "human"))
+    profile = str(obs.get("profile", "reward_explorer_policy_v1"))
     profile_features = [1.0 if profile == p else 0.0 for p in PROFILE_VOCAB]
 
     tile_hist = {k: 0.0 for k in TILE_VOCAB}

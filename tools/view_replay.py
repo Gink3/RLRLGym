@@ -36,8 +36,13 @@ def _state_from_payload(frame: dict) -> EnvState:
         agent = AgentState(
             agent_id=str(row["agent_id"]),
             position=(int(row["position"][0]), int(row["position"][1])),
-            profile_name=str(row.get("profile_name", "human")),
-            race_name=str(row.get("race_name", row.get("profile_name", "human"))),
+            profile_name=str(row.get("profile_name", "reward_explorer_policy_v1")),
+            race_name=str(
+                row.get(
+                    "race_name",
+                    row.get("profile_name", "reward_explorer_policy_v1"),
+                )
+            ),
             class_name=str(row.get("class_name", "fighter")),
             hp=int(row.get("hp", 0)),
             max_hp=int(row.get("max_hp", 0)),

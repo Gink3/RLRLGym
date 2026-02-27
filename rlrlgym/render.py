@@ -31,6 +31,9 @@ TK_COLORS = {
 }
 
 PROFILE_AGENT_STYLE = {
+    "reward_explorer_policy_v1": ("E", "#3498db"),
+    "reward_brawler_policy_v1": ("B", "#2ecc71"),
+    # Legacy aliases preserved for older replays/configs.
     "human": ("H", "#3498db"),
     "orc": ("O", "#2ecc71"),
 }

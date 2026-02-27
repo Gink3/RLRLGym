@@ -50,7 +50,7 @@ class TileDef:
 class AgentState:
     agent_id: str
     position: Tuple[int, int]
-    profile_name: str = "human"
+    profile_name: str = "reward_explorer_policy_v1"
     race_name: str = "human"
     class_name: str = "fighter"
     hp: int = 10

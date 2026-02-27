@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "name": "all_race_class_combinations",
+  "agents": [
+    {
+      "agent_id": "agent_0",
+      "race": "dragonborn",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_1",
+      "race": "dragonborn",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_2",
+      "race": "dragonborn",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_3",
+      "race": "dragonborn",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_4",
+      "race": "dwarf",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_5",
+      "race": "dwarf",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_6",
+      "race": "dwarf",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_7",
+      "race": "dwarf",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_8",
+      "race": "elf",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_9",
+      "race": "elf",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_10",
+      "race": "elf",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_11",
+      "race": "elf",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_12",
+      "race": "gnome",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_13",
+      "race": "gnome",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_14",
+      "race": "gnome",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_15",
+      "race": "gnome",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_16",
+      "race": "half_elf",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_17",
+      "race": "half_elf",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_18",
+      "race": "half_elf",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_19",
+      "race": "half_elf",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_20",
+      "race": "half_orc",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_21",
+      "race": "half_orc",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_22",
+      "race": "half_orc",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_23",
+      "race": "half_orc",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_24",
+      "race": "halfling",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_25",
+      "race": "halfling",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_26",
+      "race": "halfling",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_27",
+      "race": "halfling",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_28",
+      "race": "human",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_29",
+      "race": "human",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_30",
+      "race": "human",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_31",
+      "race": "human",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_32",
+      "race": "orc",
+      "class": "barbarian",
+      "profile": "orc",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_33",
+      "race": "orc",
+      "class": "fighter",
+      "profile": "orc",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_34",
+      "race": "orc",
+      "class": "monk",
+      "profile": "orc",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_35",
+      "race": "orc",
+      "class": "rogue",
+      "profile": "orc",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_36",
+      "race": "tiefling",
+      "class": "barbarian",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_37",
+      "race": "tiefling",
+      "class": "fighter",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_38",
+      "race": "tiefling",
+      "class": "monk",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    },
+    {
+      "agent_id": "agent_39",
+      "race": "tiefling",
+      "class": "rogue",
+      "profile": "human",
+      "network": "default",
+      "observation_config": {}
+    }
+  ]
+}

@@ -18,6 +18,9 @@ from .aim_logger import AimLogger
 from .network_config import NetworkConfig, load_network_configs
 from .policies import NeuralQPolicy
 
+EXPLORER_PROFILES = {"reward_explorer_policy_v1", "human"}
+BRAWLER_PROFILES = {"reward_brawler_policy_v1", "orc"}
+
 
 @dataclass
 class TrainConfig:
@@ -258,20 +261,20 @@ class MultiAgentTrainer:
                     break
 
             alive = {aid: self.env.state.agents[aid].alive for aid in self.env.possible_agents}
-            human_alive = any(
+            explorer_alive = any(
                 bool(alive.get(aid, False))
                 for aid in self.env.possible_agents
-                if self.env.state.agents[aid].profile_name == "human"
+                if self.env.state.agents[aid].profile_name in EXPLORER_PROFILES
             )
-            orc_alive = any(
+            brawler_alive = any(
                 bool(alive.get(aid, False))
                 for aid in self.env.possible_agents
-                if self.env.state.agents[aid].profile_name == "orc"
+                if self.env.state.agents[aid].profile_name in BRAWLER_PROFILES
             )
-            if human_alive and not orc_alive:
-                outcome = "human_win"
-            elif orc_alive and not human_alive:
-                outcome = "orc_win"
+            if explorer_alive and not brawler_alive:
+                outcome = "explorer_win"
+            elif brawler_alive and not explorer_alive:
+                outcome = "brawler_win"
             else:
                 outcome = "tie"
             summary = EpisodeSummary(
@@ -400,8 +403,8 @@ class MultiAgentTrainer:
                 ("steps", summary.steps),
                 ("team_return", summary.team_return),
                 ("win", summary.win),
-                ("outcome_human_win", summary.outcome == "human_win"),
-                ("outcome_orc_win", summary.outcome == "orc_win"),
+                ("outcome_explorer_win", summary.outcome == "explorer_win"),
+                ("outcome_brawler_win", summary.outcome == "brawler_win"),
                 ("outcome_tie", summary.outcome == "tie"),
                 ("mean_survival_time", summary.mean_survival_time),
                 ("episode_mean_loss", episode_mean_loss),
@@ -484,6 +487,8 @@ class MultiAgentTrainer:
             return {
                 "episodes": 0,
                 "win_rate": 0.0,
+                "explorer_win_rate": 0.0,
+                "brawler_win_rate": 0.0,
                 "human_win_rate": 0.0,
                 "orc_win_rate": 0.0,
                 "tie_rate": 0.0,
@@ -496,8 +501,8 @@ class MultiAgentTrainer:
                 },
             }
         wins = sum(1 for e in episode_summaries if e.win)
-        human_wins = sum(1 for e in episode_summaries if e.outcome == "human_win")
-        orc_wins = sum(1 for e in episode_summaries if e.outcome == "orc_win")
+        explorer_wins = sum(1 for e in episode_summaries if e.outcome == "explorer_win")
+        brawler_wins = sum(1 for e in episode_summaries if e.outcome == "brawler_win")
         ties = sum(1 for e in episode_summaries if e.outcome == "tie")
         cod: Dict[str, int] = {}
         actions: Dict[str, int] = {}
@@ -510,8 +515,11 @@ class MultiAgentTrainer:
         return {
             "episodes": n,
             "win_rate": wins / n,
-            "human_win_rate": human_wins / n,
-            "orc_win_rate": orc_wins / n,
+            "explorer_win_rate": explorer_wins / n,
+            "brawler_win_rate": brawler_wins / n,
+            # Legacy keys retained for backward-compatible dashboards.
+            "human_win_rate": explorer_wins / n,
+            "orc_win_rate": brawler_wins / n,
             "tie_rate": ties / n,
             "mean_team_return": sum(e.team_return for e in episode_summaries) / n,
             "mean_survival_time": sum(e.mean_survival_time for e in episode_summaries) / n,

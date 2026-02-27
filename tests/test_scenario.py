@@ -6,9 +6,14 @@ from pathlib import Path
 from rlrlgym import EnvConfig
 from rlrlgym.env import PettingZooParallelRLRLGym
 from rlrlgym.scenario import (
+    SCENARIO_AGENTS_FILE,
+    SCENARIO_ENV_FILE,
     apply_scenario_to_env_config,
     load_scenario,
     make_all_race_class_combinations,
+    save_scenario,
+    Scenario,
+    ScenarioAgent,
 )
 
 
@@ -68,6 +73,31 @@ class TestScenario(unittest.TestCase):
             self.assertEqual(env.config.width, 16)
             self.assertEqual(env.config.height, 12)
             self.assertEqual(len(env.possible_agents), 2)
+
+    def test_save_and_load_split_scenario_dir(self):
+        scenario = Scenario(
+            name="split_case",
+            env_config={"width": 20, "height": 14, "max_steps": 50},
+            agents=[
+                ScenarioAgent(
+                    agent_id="agent_0",
+                    race="human",
+                    class_name="fighter",
+                    name="Atlas",
+                    profile="reward_explorer_policy_v1",
+                ),
+                ScenarioAgent(agent_id="agent_1", race="orc", class_name="rogue", profile="orc"),
+            ],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = save_scenario(Path(tmp) / "split_case", scenario)
+            self.assertTrue((out_dir / SCENARIO_ENV_FILE).exists())
+            self.assertTrue((out_dir / SCENARIO_AGENTS_FILE).exists())
+            loaded = load_scenario(out_dir)
+            self.assertEqual(loaded.name, "split_case")
+            self.assertEqual(len(loaded.agents), 2)
+            self.assertEqual(loaded.agents[0].name, "Atlas")
+            self.assertEqual(loaded.env_config.get("width"), 20)
 
 
 if __name__ == "__main__":

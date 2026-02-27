@@ -2,7 +2,7 @@
   "schema_version": 1,
   "profiles": [
     {
-      "name": "human",
+      "name": "reward_explorer_policy_v1",
       "max_hp": 10,
       "max_hunger": 45,
       "view_width": 12,
@@ -21,7 +21,7 @@
       }
     },
     {
-      "name": "orc",
+      "name": "reward_brawler_policy_v1",
       "max_hp": 12,
       "max_hunger": 40,
       "view_width": 10,
