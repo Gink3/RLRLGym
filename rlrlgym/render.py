@@ -68,7 +68,7 @@ class AsciiRenderer:
         state: EnvState,
         focus_agent: Optional[str] = None,
         zoom: int = 0,
-    ) -> List[List[Tuple[str, str, bool]]]:
+    ) -> List[List[Tuple[str, str, bool, bool]]]:
         min_r, max_r, min_c, max_c = self.view_bounds(
             state=state, focus_agent=focus_agent, zoom=zoom
         )
@@ -86,9 +86,9 @@ class AsciiRenderer:
             for monster in state.monsters.values()
             if monster.alive
         }
-        cells: List[List[Tuple[str, str, bool]]] = []
+        cells: List[List[Tuple[str, str, bool, bool]]] = []
         for r in range(min_r, max_r + 1):
-            row_cells: List[Tuple[str, str, bool]] = []
+            row_cells: List[Tuple[str, str, bool, bool]] = []
             for c in range(min_c, max_c + 1):
                 pos = (r, c)
                 if pos in agent_positions:
@@ -97,20 +97,20 @@ class AsciiRenderer:
                     symbol, color = PROFILE_AGENT_STYLE.get(
                         agent.profile_name, DEFAULT_AGENT_STYLE
                     )
-                    row_cells.append((symbol, color, True))
+                    row_cells.append((symbol, color, True, False))
                     continue
                 if pos in monster_positions:
                     monster = monster_positions[pos]
                     row_cells.append(
-                        (monster.symbol, TK_COLORS.get(monster.color, "#ff7675"), False)
+                        (monster.symbol, TK_COLORS.get(monster.color, "#ff7675"), False, True)
                     )
                     continue
                 if pos in chest_positions:
-                    row_cells.append(("C", TK_COLORS["yellow"], False))
+                    row_cells.append(("C", TK_COLORS["yellow"], False, False))
                     continue
                 tile = self.tiles[state.grid[r][c]]
                 row_cells.append(
-                    (tile.glyph, TK_COLORS.get(tile.color, TK_COLORS["white"]), False)
+                    (tile.glyph, TK_COLORS.get(tile.color, TK_COLORS["white"]), False, False)
                 )
             cells.append(row_cells)
         return cells
@@ -181,10 +181,11 @@ class RenderWindow:
 
         controls = ttk.Frame(self.root)
         controls.pack(fill="x", padx=6, pady=6)
-        ttk.Button(controls, text="Play", command=self.play).pack(side="left")
-        ttk.Button(controls, text="Pause", command=self.pause).pack(
-            side="left", padx=(4, 0)
+        self.play_pause_var = tk.StringVar(value="Play")
+        self.play_pause_btn = ttk.Button(
+            controls, textvariable=self.play_pause_var, command=self.toggle_play_pause
         )
+        self.play_pause_btn.pack(side="left")
         ttk.Button(controls, text="Restart", command=self.restart).pack(
             side="left", padx=(4, 0)
         )
@@ -246,6 +247,25 @@ class RenderWindow:
         )
         self.highlight_mode_menu.pack(side="left")
         self.highlight_mode_menu.bind("<<ComboboxSelected>>", self._on_highlight_mode_change)
+        self.highlight_monsters_var = tk.BooleanVar(value=False)
+        self.monster_highlight_color_var = tk.StringVar(value="yellow")
+        ttk.Checkbutton(
+            controls,
+            text="Highlight Monsters",
+            variable=self.highlight_monsters_var,
+            command=self._on_monster_highlight_change,
+        ).pack(side="left", padx=(10, 2))
+        self.monster_highlight_menu = ttk.Combobox(
+            controls,
+            textvariable=self.monster_highlight_color_var,
+            values=["yellow", "magenta", "cyan", "red", "green"],
+            width=9,
+            state="readonly",
+        )
+        self.monster_highlight_menu.pack(side="left")
+        self.monster_highlight_menu.bind(
+            "<<ComboboxSelected>>", self._on_monster_highlight_change
+        )
         ttk.Label(controls, text="Render").pack(side="left", padx=(10, 2))
         self.render_mode_var = tk.StringVar(value="ascii")
         self.render_mode_menu = ttk.Combobox(
@@ -431,6 +451,20 @@ class RenderWindow:
             self.highlight_mode_var.set("background")
         self._redraw()
 
+    def _on_monster_highlight_change(self, _evt=None) -> None:
+        if self.monster_highlight_color_var.get() not in {
+            "yellow",
+            "magenta",
+            "cyan",
+            "red",
+            "green",
+        }:
+            self.monster_highlight_color_var.set("yellow")
+        self._redraw()
+
+    def _monster_highlight_color(self) -> str:
+        return TK_COLORS.get(self.monster_highlight_color_var.get(), TK_COLORS["yellow"])
+
     def _agent_bg_tag(self, color: str) -> str:
         return f"agent_bg_{color.strip('#')}"
 
@@ -457,6 +491,13 @@ class RenderWindow:
             fieldbackground=t["panel_alt"],
             background=t["panel_alt"],
             foreground=t["text"],
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", t["panel_alt"])],
+            foreground=[("readonly", t["text"])],
+            selectforeground=[("readonly", t["text"])],
+            selectbackground=[("readonly", t["primary"])],
         )
         style.configure(
             "TCheckbutton",
@@ -491,6 +532,10 @@ class RenderWindow:
             activeforeground=t["text"],
             tearoff=False,
         )
+        self.root.option_add("*TCombobox*Listbox.background", t["panel_alt"])
+        self.root.option_add("*TCombobox*Listbox.foreground", t["text"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", t["primary"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", t["text"])
 
     def _apply_zoom_font(self) -> None:
         zoom = int(self.zoom_var.get())
@@ -524,19 +569,22 @@ class RenderWindow:
             if self.focus_var.get() not in self._focus_choices:
                 self.focus_var.set("all")
 
-    def _draw_cells(self, cells: List[List[Tuple[str, str, bool]]]) -> None:
+    def _draw_cells(self, cells: List[List[Tuple[str, str, bool, bool]]]) -> None:
         self.text.configure(state="normal")
         self.text.delete("1.0", self._tk.END)
         for row in cells:
-            for glyph, color, is_agent in row:
+            for glyph, color, is_agent, is_monster in row:
                 tags: Tuple[str, ...]
+                draw_color = color
+                if is_monster and bool(self.highlight_monsters_var.get()):
+                    draw_color = self._monster_highlight_color()
                 if is_agent and bool(self.highlight_agents_var.get()):
                     if self.highlight_mode_var.get() == "outline":
-                        tags = (color, "agent_outline", "agent_bold")
+                        tags = (draw_color, "agent_outline", "agent_bold")
                     else:
-                        tags = (color, self._agent_bg_tag(color), "agent_bold")
+                        tags = (draw_color, self._agent_bg_tag(draw_color), "agent_bold")
                 else:
-                    tags = (color,)
+                    tags = (draw_color,)
                 self.text.insert(self._tk.END, glyph, tags)
             self.text.insert(self._tk.END, "\n")
         self.text.configure(state="disabled")
@@ -640,11 +688,14 @@ class RenderWindow:
                         self._canvas_images.append(chest_photo)
                 if pos in monster_positions:
                     mon = monster_positions[pos]
+                    mon_color = TK_COLORS.get(mon.color, "#ff7675")
+                    if bool(self.highlight_monsters_var.get()):
+                        mon_color = self._monster_highlight_color()
                     self.canvas.create_text(
                         x + (pixel_size // 2),
                         y + (pixel_size // 2),
                         text=str(mon.symbol),
-                        fill=TK_COLORS.get(mon.color, "#ff7675"),
+                        fill=mon_color,
                         font=("Courier", max(8, pixel_size // 2), "bold"),
                     )
                 if pos in agent_positions:
@@ -893,6 +944,13 @@ class RenderWindow:
                 self.action_log_text.insert(
                     self._tk.END, f"  {aid}: {action_name}({action}) r={reward:+.3f}\n"
                 )
+                events = list(row.get("events", []))
+                explained = self._explain_events(events)
+                if explained:
+                    for line in explained:
+                        self.action_log_text.insert(self._tk.END, f"    - {line}\n")
+                else:
+                    self.action_log_text.insert(self._tk.END, "    - no effect events\n")
                 death_reason = row.get("death_reason")
                 if death_reason:
                     self.action_log_text.insert(
@@ -942,6 +1000,112 @@ class RenderWindow:
             for aid, a in sorted(acts.items())
         )
         self.action_log_text.insert(self._tk.END, f"step {step_num}: {rendered}\n")
+
+    def _explain_events(self, events: List[object]) -> List[str]:
+        out: List[str] = []
+        for raw in events:
+            evt = str(raw)
+            out.append(self._explain_event(evt))
+        return out
+
+    def _explain_event(self, evt: str) -> str:
+        if evt.startswith("move:"):
+            return f"moved {evt.split(':', 1)[1]}"
+        if evt.startswith("interact:"):
+            return f"interacted with {evt.split(':', 1)[1]}"
+        if evt.startswith("pickup:"):
+            return f"picked up {evt.split(':', 1)[1]}"
+        if evt.startswith("loot:"):
+            parts = evt.split(":")
+            if len(parts) >= 3:
+                return f"looted {parts[2]} from {parts[1]}"
+            return f"loot event: {evt}"
+        if evt.startswith("chest_open:"):
+            return f"opened chest and found {evt.split(':', 1)[1]}"
+        if evt.startswith("equip:"):
+            return f"equipped item {evt.split(':', 1)[1]}"
+        if evt.startswith("equip_slot:"):
+            return f"equipped into slot {evt.split(':', 1)[1]}"
+        if evt.startswith("unequip:"):
+            parts = evt.split(":")
+            if len(parts) >= 3:
+                return f"unequipped {parts[2]} from {parts[1]}"
+            return f"unequip event: {evt}"
+        if evt.startswith("use:"):
+            return f"used {evt.split(':', 1)[1]}"
+        if evt.startswith("agent_interact:attack:"):
+            parts = evt.split(":")
+            if len(parts) >= 5:
+                return f"attacked agent {parts[2]} with {parts[3]} ({parts[4]})"
+        if evt.startswith("agent_interact:attack_roll:"):
+            return f"attack roll details {evt.split(':', 2)[2]}"
+        if evt.startswith("agent_interact:hit:"):
+            return f"hit agent {evt.split(':', 2)[2]}"
+        if evt.startswith("agent_interact:kill:"):
+            return f"killed agent {evt.split(':', 2)[2]}"
+        if evt.startswith("agent_interact:blocked:"):
+            return f"attack was blocked by agent {evt.split(':', 2)[2]}"
+        if evt.startswith("agent_interact:miss:"):
+            return f"missed agent {evt.split(':', 2)[2]}"
+        if evt.startswith("agent_interact:attack_monster:"):
+            parts = evt.split(":")
+            if len(parts) >= 5:
+                return f"attacked monster {parts[2]} with {parts[3]} ({parts[4]})"
+        if evt.startswith("agent_interact:attack_roll_monster:"):
+            return f"monster attack roll details {evt.split(':', 2)[2]}"
+        if evt.startswith("agent_interact:hit_monster:"):
+            return f"hit monster entity {evt.split(':', 2)[2]}"
+        if evt.startswith("agent_interact:kill_monster:"):
+            return f"killed monster {evt.split(':', 2)[2]}"
+        if evt.startswith("agent_interact:blocked_monster:"):
+            return f"monster blocked attack ({evt.split(':', 2)[2]})"
+        if evt.startswith("agent_interact:miss_monster:"):
+            return f"missed monster entity {evt.split(':', 2)[2]}"
+        if evt.startswith("faction_create:"):
+            return f"created faction {evt.split(':', 1)[1]}"
+        if evt.startswith("faction_join:"):
+            parts = evt.split(":")
+            if len(parts) >= 3:
+                return f"joined faction {parts[1]} (inviter {parts[2]})"
+        if evt.startswith("faction_invite_sent:"):
+            parts = evt.split(":")
+            if len(parts) >= 3:
+                return f"sent faction invite to {parts[1]} for faction {parts[2]}"
+        if evt.startswith("faction_leave:"):
+            return f"left faction {evt.split(':', 1)[1]}"
+        if evt.startswith("faction_accept_fail:"):
+            return f"failed invite accept ({evt.split(':', 1)[1]})"
+        if evt.startswith("team_give:"):
+            parts = evt.split(":")
+            if len(parts) >= 3:
+                return f"gave {parts[2]} to ally {parts[1]}"
+        if evt.startswith("team_trade:"):
+            return f"traded items {evt.split(':', 2)[2]}"
+        if evt.startswith("team_revive:"):
+            parts = evt.split(":")
+            if len(parts) >= 3:
+                return f"revived ally {parts[1]} using {parts[2]}"
+        if evt.startswith("team_guard:"):
+            return f"guarding ally {evt.split(':', 1)[1]}"
+        if evt.startswith("team_guard_block:"):
+            return f"guard block applied ({evt.split(':', 1)[1]})"
+        if evt.startswith("treasure_hold:"):
+            return f"holding treasure count {evt.split(':', 1)[1]}"
+        if evt.startswith("treasure_end_bonus:"):
+            return f"end bonus treasure count {evt.split(':', 1)[1]}"
+        if evt.startswith("skill_up:"):
+            parts = evt.split(":")
+            if len(parts) >= 3:
+                return f"skill up: {parts[1]} -> {parts[2]}"
+        if evt.startswith("monster_hit:"):
+            return f"took monster damage ({evt.split(':', 1)[1]})"
+        if evt.startswith("death_by_monster:"):
+            return f"died to monster {evt.split(':', 1)[1]}"
+        if evt.startswith("monster_loot_drop:"):
+            return f"monster dropped loot ({evt.split(':', 1)[1]})"
+        if evt.startswith("winner:"):
+            return f"winner marker {evt.split(':', 1)[1]}"
+        return evt
 
     def _redraw_agent_stats(self) -> None:
         state = self._active_state()
@@ -1119,16 +1283,25 @@ class RenderWindow:
         self._playback_actions = []
         self._cursor = 0
         self._playing = False
+        self.play_pause_var.set("Play")
         self._redraw()
+
+    def toggle_play_pause(self) -> None:
+        if self.playback.paused:
+            self.play()
+        else:
+            self.pause()
 
     def play(self) -> None:
         self.playback.play()
+        self.play_pause_var.set("Pause")
         if self._playback_states and not self._playing:
             self._playing = True
             self._tick()
 
     def pause(self) -> None:
         self.playback.pause()
+        self.play_pause_var.set("Play")
 
     def step(self) -> None:
         if not self._playback_states:
@@ -1142,6 +1315,7 @@ class RenderWindow:
             return
         self._cursor = 0
         self.playback.pause()
+        self.play_pause_var.set("Play")
         self._redraw()
         self.pump()
 
@@ -1178,6 +1352,7 @@ class RenderWindow:
             self.root.after(max(1, delay_ms), self._tick)
         else:
             self._playing = False
+            self.play_pause_var.set("Play")
 
     def pump(self) -> None:
         self.root.update_idletasks()
