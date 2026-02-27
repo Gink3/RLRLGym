@@ -44,6 +44,12 @@ When running Aim locally, the UI is available on localhost port `43800`:
 http://127.0.0.1:43800
 ```
 
+By default training logs Aim runs to `/proj/aimml`. Start the UI against that repo:
+
+```bash
+.venv/bin/aim up --repo /proj/aimml --host 127.0.0.1 --port 43800
+```
+
 ## Observation And Action Spaces
 
 The environment exposes per-agent spaces in PettingZoo Parallel style:
@@ -141,7 +147,7 @@ All scripts accept additional CLI overrides, for example:
 ```
 
 Training metrics are also logged to Aim (when `aim` is installed), including dashboard-equivalent episode/iteration metrics for both `custom` and `rllib` backends.
-Use `--aim-experiment <name>` to change the experiment and `--no-aim` to disable Aim logging.
+Use `--aim-experiment <name>` to change the experiment, `--aim-repo <path>` to change repo location, and `--no-aim` to disable Aim logging.
 
 ## Run Tests
 

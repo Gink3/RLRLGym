@@ -3,29 +3,67 @@
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 from typing import Dict, Iterable
 
 
 class AimLogger:
+    @staticmethod
+    def _try_load_aim_run(repo_path: str):
+        try:
+            from aim import Run
+            return Run
+        except Exception:
+            pass
+        pyver = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        fallback_site = (
+            Path(repo_path).resolve()
+            / ".venv"
+            / "lib"
+            / pyver
+            / "site-packages"
+        )
+        if fallback_site.exists():
+            sys.path.append(str(fallback_site))
+            try:
+                from aim import Run
+                return Run
+            except Exception:
+                return None
+        return None
+
     def __init__(
         self,
         enabled: bool,
         experiment: str,
-        output_dir: str,
+        repo_path: str,
         run_name: str | None = None,
     ) -> None:
         self.enabled = bool(enabled)
         self._run = None
         if not self.enabled:
             return
-        try:
-            from aim import Run
-        except Exception:
+        Run = self._try_load_aim_run(repo_path)
+        if Run is None:
+            print(
+                "[aim] disabled: Python package 'aim' is not available in the training runtime",
+                file=sys.stderr,
+            )
             self.enabled = False
             return
-        repo = str(Path(output_dir).resolve())
-        self._run = Run(repo=repo, experiment=str(experiment))
+        repo = str(Path(repo_path).resolve())
+        Path(repo).mkdir(parents=True, exist_ok=True)
+        try:
+            self._run = Run(repo=repo, experiment=str(experiment))
+        except Exception as exc:
+            print(
+                f"[aim] disabled: failed to initialize run at repo '{repo}': {exc}",
+                file=sys.stderr,
+            )
+            self.enabled = False
+            self._run = None
+            return
         if run_name:
             self._run.name = str(run_name)
 

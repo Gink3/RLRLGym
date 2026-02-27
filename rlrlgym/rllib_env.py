@@ -37,7 +37,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             shape=(observation_vector_size(),),
             dtype=np.float32,
         )
-        self._action_space = spaces.Discrete(12)
+        self._action_space = spaces.Discrete(18)
         self.possible_agents = list(self.base.possible_agents)
         self.agents = []
         self.observation_spaces = {aid: self._obs_space for aid in self.possible_agents}
@@ -438,6 +438,20 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                 }
                 for (r, c), chest in sorted(state.chests.items())
             ],
+            "factions": {
+                "leaders": {
+                    str(fid): str(leader)
+                    for fid, leader in sorted(state.faction_leaders.items())
+                },
+                "pending_invites": {
+                    str(aid): {
+                        "faction_id": int(invite.get("faction_id", -1)),
+                        "inviter_id": str(invite.get("inviter_id", "")),
+                        "created_step": int(invite.get("created_step", -1)),
+                    }
+                    for aid, invite in sorted(state.pending_faction_invites.items())
+                },
+            },
             "monsters": [
                 {
                     "entity_id": monster.entity_id,
@@ -472,6 +486,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                     "inventory": list(agent.inventory),
                     "equipped": list(agent.equipped),
                     "armor_slots": dict(agent.armor_slots),
+                    "faction_id": int(agent.faction_id),
                     "alive": agent.alive,
                     "visited": [[r, c] for (r, c) in sorted(agent.visited)],
                     "wait_streak": agent.wait_streak,

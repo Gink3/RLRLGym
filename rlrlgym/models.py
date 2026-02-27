@@ -62,6 +62,7 @@ class AgentState:
     armor_slots: Dict[str, str | None] = field(
         default_factory=lambda: dict(DEFAULT_ARMOR_SLOTS)
     )
+    faction_id: int = -1
     alive: bool = True
     visited: Set[Tuple[int, int]] = field(default_factory=set)
     wait_streak: int = 0
@@ -108,4 +109,6 @@ class EnvState:
     agents: Dict[str, AgentState]
     chests: Dict[Tuple[int, int], ChestState] = field(default_factory=dict)
     monsters: Dict[str, MonsterState] = field(default_factory=dict)
+    faction_leaders: Dict[int, str] = field(default_factory=dict)
+    pending_faction_invites: Dict[str, Dict[str, int | str]] = field(default_factory=dict)
     step_count: int = 0

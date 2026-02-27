@@ -35,8 +35,9 @@ class TestItemsJson(unittest.TestCase):
                     "armor_slot": "head",
                     "dr_bonus_vs": {"slash": 0, "pierce": 0, "blunt": 0},
                 },
+                {"id": "coin", "weight": 0.02, "is_treasure": True},
             ],
-            "chest_loot_table": ["dagger", "leather_cap"],
+            "chest_loot_table": ["dagger", "leather_cap", "coin"],
         }
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "items.json"
@@ -46,6 +47,7 @@ class TestItemsJson(unittest.TestCase):
             self.assertEqual(items.weapon_damage_type["dagger"], "pierce")
             self.assertIn("leather_cap", items.armor_slot_by_item)
             self.assertEqual(items.armor_slot_by_item["leather_cap"], "head")
+            self.assertIn("coin", items.treasure_items)
 
     def test_chest_loot_references_known_items(self):
         bad = {

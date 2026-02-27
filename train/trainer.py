@@ -35,6 +35,7 @@ class TrainConfig:
     env_config_path: str = "data/env_config.json"
     aim_enabled: bool = True
     aim_experiment: str = "rlrlgym_custom"
+    aim_repo_path: str = "/proj/aimml"
 
 
 @dataclass
@@ -83,7 +84,7 @@ class MultiAgentTrainer:
         self.aim = AimLogger(
             enabled=config.aim_enabled,
             experiment=config.aim_experiment,
-            output_dir=config.output_dir,
+            repo_path=config.aim_repo_path,
             run_name="custom_trainer",
         )
         self.aim.set_params(
@@ -98,6 +99,7 @@ class MultiAgentTrainer:
                 "max_steps": None if config.max_steps is None else int(config.max_steps),
                 "networks_path": str(config.networks_path),
                 "env_config_path": str(config.env_config_path),
+                "aim_repo_path": str(config.aim_repo_path),
             }
         )
 
@@ -817,6 +819,20 @@ class MultiAgentTrainer:
                 }
                 for (r, c), chest in sorted(state.chests.items())
             ],
+            "factions": {
+                "leaders": {
+                    str(fid): str(leader)
+                    for fid, leader in sorted(state.faction_leaders.items())
+                },
+                "pending_invites": {
+                    str(aid): {
+                        "faction_id": int(invite.get("faction_id", -1)),
+                        "inviter_id": str(invite.get("inviter_id", "")),
+                        "created_step": int(invite.get("created_step", -1)),
+                    }
+                    for aid, invite in sorted(state.pending_faction_invites.items())
+                },
+            },
             "monsters": [
                 {
                     "entity_id": monster.entity_id,
@@ -851,6 +867,7 @@ class MultiAgentTrainer:
                     "inventory": list(agent.inventory),
                     "equipped": list(agent.equipped),
                     "armor_slots": dict(agent.armor_slots),
+                    "faction_id": int(agent.faction_id),
                     "alive": agent.alive,
                     "visited": [
                         [r, c] for (r, c) in sorted(agent.visited)

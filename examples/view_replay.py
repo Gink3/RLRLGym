@@ -49,6 +49,7 @@ def _state_from_payload(frame: dict) -> EnvState:
                 str(k): (None if v is None else str(v))
                 for k, v in dict(row.get("armor_slots", {})).items()
             },
+            faction_id=int(row.get("faction_id", -1)),
             alive=bool(row.get("alive", True)),
             visited={
                 (int(pos[0]), int(pos[1]))
@@ -94,6 +95,20 @@ def _state_from_payload(frame: dict) -> EnvState:
         agents=agents,
         chests=chests,
         monsters=monsters,
+        faction_leaders={
+            int(fid): str(leader)
+            for fid, leader in dict(frame.get("factions", {}).get("leaders", {})).items()
+        },
+        pending_faction_invites={
+            str(aid): {
+                "faction_id": int(invite.get("faction_id", -1)),
+                "inviter_id": str(invite.get("inviter_id", "")),
+                "created_step": int(invite.get("created_step", -1)),
+            }
+            for aid, invite in dict(
+                frame.get("factions", {}).get("pending_invites", {})
+            ).items()
+        },
         step_count=int(frame.get("step_count", 0)),
     )
 

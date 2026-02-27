@@ -50,6 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="rlrlgym",
         help="Aim experiment name.",
     )
+    p.add_argument(
+        "--aim-repo",
+        type=str,
+        default="/proj/aimml",
+        help="Aim repository path used by `aim up`.",
+    )
     return p
 
 
@@ -70,6 +76,7 @@ def main() -> None:
     args = build_parser().parse_args()
     resolved_output_dir = _timestamped_output_dir(args.output_dir)
     print(f"Output path: {Path(resolved_output_dir).resolve()}")
+    print(f"Aim repo path: {Path(args.aim_repo).resolve()}")
     if args.backend == "custom":
         config = TrainConfig(
             episodes=args.episodes,
@@ -85,6 +92,7 @@ def main() -> None:
             env_config_path=args.env_config_path,
             aim_enabled=not bool(args.no_aim),
             aim_experiment=args.aim_experiment,
+            aim_repo_path=args.aim_repo,
         )
         trainer = MultiAgentTrainer(config)
         result = trainer.train()
@@ -113,6 +121,7 @@ def main() -> None:
         curriculum_enabled=not bool(args.no_curriculum),
         aim_enabled=not bool(args.no_aim),
         aim_experiment=args.aim_experiment,
+        aim_repo_path=args.aim_repo,
     )
     trainer = RLlibTrainer(rllib_cfg)
     summary = trainer.train()

@@ -3,7 +3,7 @@
   "env_config": {
     "width": 50,
     "height": 50,
-    "max_steps": 150,
+    "max_steps": 600,
     "n_agents": 2,
     "tiles_path": "data/tiles.json",
     "profiles_path": "data/agent_profiles.json",

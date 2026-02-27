@@ -39,6 +39,7 @@ class RLlibTrainConfig:
     curriculum_enabled: bool = True
     aim_enabled: bool = True
     aim_experiment: str = "rlrlgym_rllib"
+    aim_repo_path: str = "/proj/aimml"
 
 
 class RLlibTrainer:
@@ -74,7 +75,7 @@ class RLlibTrainer:
         self.aim = AimLogger(
             enabled=config.aim_enabled,
             experiment=config.aim_experiment,
-            output_dir=config.output_dir,
+            repo_path=config.aim_repo_path,
             run_name="rllib_trainer",
         )
         self.aim.set_params(
@@ -96,6 +97,7 @@ class RLlibTrainer:
                 "curriculum_path": str(config.curriculum_path),
                 "shared_policy": bool(config.shared_policy),
                 "curriculum_enabled": bool(config.curriculum_enabled),
+                "aim_repo_path": str(config.aim_repo_path),
             }
         )
         self._configure_ray_storage_defaults()
@@ -155,7 +157,11 @@ class RLlibTrainer:
         if self.config.n_agents is not None:
             env_config["n_agents"] = int(self.config.n_agents)
 
-        self._register_env(env_name, lambda cfg: self._RLRLGymRLlibEnv(cfg))
+        env_cls = self._RLRLGymRLlibEnv
+        self._register_env(
+            env_name,
+            lambda cfg, _env_cls=env_cls: _env_cls(cfg),
+        )
         probe_env = self._RLRLGymRLlibEnv(env_config)
         sample_obs_space = probe_env.observation_spaces["agent_0"]
         sample_action_space = probe_env.action_spaces["agent_0"]
@@ -1415,4 +1421,3 @@ class RLlibTrainer:
             f"episodes_total={episodes_total}"
         )
         print(line, end="", flush=True)
-

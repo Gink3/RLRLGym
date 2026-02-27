@@ -10,16 +10,22 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .constants import (
+    ACTION_ACCEPT_INVITE,
     ACTION_ATTACK,
     ACTION_EAT,
     ACTION_EQUIP,
+    ACTION_GIVE,
+    ACTION_GUARD,
     ACTION_INTERACT,
+    ACTION_LEAVE_FACTION,
     ACTION_LOOT,
     ACTION_MOVE_EAST,
     ACTION_MOVE_NORTH,
     ACTION_MOVE_SOUTH,
     ACTION_MOVE_WEST,
+    ACTION_TRADE,
     ACTION_PICKUP,
+    ACTION_REVIVE,
     ACTION_USE,
     ACTION_WAIT,
     MOVE_DELTAS,
@@ -119,6 +125,34 @@ class EnvConfig:
     lost_enemy_penalty: float = 0.01
     timeout_tie_penalty: float = 0.2
     engagement_bonus: float = 0.15
+    team_create_reward: float = 0.06
+    team_invite_reward: float = 0.03
+    team_join_reward: float = 0.14
+    team_join_inviter_reward: float = 0.04
+    team_join_invitee_reward: float = 0.04
+    team_proximity_reward: float = 0.01
+    team_action_bonus: float = 0.015
+    team_give_reward: float = 0.04
+    team_trade_reward: float = 0.05
+    team_revive_reward: float = 0.2
+    team_guard_reward: float = 0.03
+    team_leave_reward: float = 0.01
+    faction_invite_ttl_steps: int = 5
+    faction_action_cooldown_steps: int = 1
+    team_pair_reward_cap_per_episode: int = 8
+    team_pair_reward_repeat_guard_steps: int = 2
+    team_proximity_pair_cap_per_episode: int = 25
+    team_proximity_repeat_guard_steps: int = 1
+    guard_damage_reduction_ratio: float = 0.5
+    formation_dr_bonus: int = 1
+    formation_hit_bonus: float = 0.04
+    leader_team_share: float = 0.15
+    ally_damage_penalty_per_hp: float = 0.08
+    ally_kill_penalty: float = 1.2
+    treasure_hold_reward_per_turn: float = 0.01
+    treasure_hold_reward_cap_items: int = 6
+    treasure_end_bonus_per_item: float = 0.15
+    invalid_faction_action_penalty: float = 0.03
     render_enabled: bool = True
 
     @classmethod
@@ -182,6 +216,7 @@ class MultiAgentRLRLGym:
         self.armor_slot_by_item = dict(self.items.armor_slot_by_item)
         self.item_weight = dict(self.items.item_weight)
         self.edible_items = set(self.items.edible_items)
+        self.treasure_items = set(self.items.treasure_items)
         self.chest_loot_table = list(self.items.chest_loot_table)
         self._validate_item_references()
         self.mapgen_cfg: MapGenConfig = load_mapgen_config(
@@ -200,11 +235,20 @@ class MultiAgentRLRLGym:
         self._episode_any_enemy_seen: bool = False
         self._episode_timeout_no_contact: bool = False
         self._episode_terminal_rewards_applied: bool = False
+        self._next_faction_id: int = 1
+        self._guard_assignments: Dict[str, str] = {}
+        self._revived_this_step: set[str] = set()
+        self._deferred_agent_rewards: Dict[str, float] = {}
+        self._deferred_agent_events: Dict[str, List[str]] = {}
+        self._join_bonus_awarded_invitees: set[str] = set()
+        self._faction_action_next_step: Dict[str, Dict[str, int]] = {}
+        self._team_pair_reward_counts: Dict[str, int] = {}
+        self._team_pair_last_reward_step: Dict[str, int] = {}
 
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
             raise KeyError(f"Unknown agent: {agent_id}")
-        return (0, 11)
+        return (0, 17)
 
     def observation_space(self, agent_id: str) -> Dict[str, object]:
         if agent_id not in self.possible_agents:
@@ -213,7 +257,7 @@ class MultiAgentRLRLGym:
             agent_id, self.possible_agents.index(agent_id)
         )
         profile = self._profile_by_name(profile_name)
-        keys = ["step", "alive", "profile", "race", "class"]
+        keys = ["step", "alive", "profile", "race", "class", "faction"]
         if profile.include_grid:
             keys.append("local_tiles")
         if profile.include_stats:
@@ -279,8 +323,17 @@ class MultiAgentRLRLGym:
             ground_items={},
             agents=agents,
             chests={},
+            faction_leaders={},
+            pending_faction_invites={},
             step_count=0,
         )
+        self._next_faction_id = 1
+        self._join_bonus_awarded_invitees = set()
+        self._deferred_agent_rewards = {}
+        self._deferred_agent_events = {}
+        self._faction_action_next_step = {}
+        self._team_pair_reward_counts = {}
+        self._team_pair_last_reward_step = {}
         self.state.chests = self._spawn_chests(starts)
         self.state.monsters = self._spawn_monsters(
             occupied=starts + list(self.state.chests.keys())
@@ -319,11 +372,12 @@ class MultiAgentRLRLGym:
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
         info = {
             aid: {
-                "action_mask": [1] * 12,
+                "action_mask": [1] * 18,
                 "alive": True,
                 "profile": self.state.agents[aid].profile_name,
                 "race": self.state.agents[aid].race_name,
                 "class": self.state.agents[aid].class_name,
+                "faction_id": int(self.state.agents[aid].faction_id),
             }
             for aid in self.possible_agents
         }
@@ -337,6 +391,11 @@ class MultiAgentRLRLGym:
     def step(self, actions: Dict[str, int]):
         if self.state is None:
             raise RuntimeError("Environment must be reset before step")
+        self._guard_assignments = {}
+        self._revived_this_step = set()
+        self._deferred_agent_rewards = {}
+        self._deferred_agent_events = {}
+        self._prune_expired_invites()
 
         rewards = {aid: 0.0 for aid in self.possible_agents}
         terminations = {aid: False for aid in self.possible_agents}
@@ -348,6 +407,9 @@ class MultiAgentRLRLGym:
                 "survival": 0.0,
                 "search_explore": 0.0,
                 "profile_shape": 0.0,
+                "teamwork": 0.0,
+                "treasure": 0.0,
+                "focus": 0.0,
                 "terminal": 0.0,
             }
             for aid in self.possible_agents
@@ -393,6 +455,24 @@ class MultiAgentRLRLGym:
                 reward_components[aid]["terminal"] -= 1.0
                 info[aid]["events"].append("death")
 
+        for revived_aid in sorted(self._revived_this_step):
+            if revived_aid not in self.state.agents:
+                continue
+            revived = self.state.agents[revived_aid]
+            if revived.alive and revived.hp > 0:
+                terminations[revived_aid] = False
+                info[revived_aid]["events"].append("revived")
+
+        for aid, delta in self._deferred_agent_rewards.items():
+            if aid not in rewards:
+                continue
+            rewards[aid] += float(delta)
+            reward_components[aid]["teamwork"] += float(delta)
+        for aid, events in self._deferred_agent_events.items():
+            if aid not in info:
+                continue
+            info[aid]["events"].extend(list(events))
+
         self._apply_monster_turn(rewards, terminations, info)
         self.state.step_count += 1
 
@@ -413,6 +493,9 @@ class MultiAgentRLRLGym:
             info[aid]["profile"] = agent.profile_name
             info[aid]["race"] = agent.race_name
             info[aid]["class"] = agent.class_name
+            info[aid]["faction_id"] = int(agent.faction_id)
+            info[aid]["is_faction_leader"] = bool(self._is_faction_leader(aid))
+            info[aid]["pending_invite_from_faction"] = self._pending_invite_faction_id(aid)
             info[aid]["teammate_distance"] = self._nearest_teammate_distance(aid)
             metrics = self._episode_metrics.get(aid, {})
             seen_tiles = int(len(metrics.get("seen_tiles", set())))
@@ -428,6 +511,22 @@ class MultiAgentRLRLGym:
             info[aid]["combat_exchanges"] = int(metrics.get("combat_exchanges", 0))
             info[aid]["ever_enemy_seen"] = bool(metrics.get("ever_enemy_seen", False))
             info[aid]["timeout_no_contact"] = bool(self._episode_timeout_no_contact)
+
+        self._apply_team_rewards(
+            rewards=rewards,
+            reward_components=reward_components,
+            info=info,
+        )
+        self._apply_treasure_rewards(
+            rewards=rewards,
+            reward_components=reward_components,
+            info=info,
+        )
+        self._apply_focus_rewards(
+            rewards=rewards,
+            reward_components=reward_components,
+            info=info,
+        )
 
         alive_now = [
             aid
@@ -474,6 +573,11 @@ class MultiAgentRLRLGym:
             for aid in self.possible_agents
         )
         if episode_done and not self._episode_terminal_rewards_applied:
+            self._apply_treasure_end_bonus(
+                rewards=rewards,
+                reward_components=reward_components,
+                info=info,
+            )
             if self._episode_combat_exchanges > 0:
                 for aid in self.possible_agents:
                     term_delta = float(self.config.engagement_bonus)
@@ -756,6 +860,26 @@ class MultiAgentRLRLGym:
             else:
                 reward -= 0.01
 
+        elif action == ACTION_GIVE:
+            reward += self._give_to_ally(actor=agent, actor_id=aid, events=events)
+
+        elif action == ACTION_TRADE:
+            reward += self._trade_with_ally(actor=agent, actor_id=aid, events=events)
+
+        elif action == ACTION_REVIVE:
+            reward += self._revive_ally(actor=agent, actor_id=aid, events=events)
+
+        elif action == ACTION_GUARD:
+            reward += self._guard_ally(actor=agent, actor_id=aid, events=events)
+
+        elif action == ACTION_LEAVE_FACTION:
+            reward += self._leave_faction(actor=agent, actor_id=aid, events=events)
+
+        elif action == ACTION_ACCEPT_INVITE:
+            reward += self._accept_faction_invite(
+                actor=agent, actor_id=aid, events=events
+            )
+
         elif action == ACTION_INTERACT:
             reward += self._interact(agent, aid, events)
 
@@ -770,6 +894,11 @@ class MultiAgentRLRLGym:
     def _interact(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
         assert self.state is not None
         reward = 0.0
+        faction_reward, faction_handled = self._handle_faction_interact(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if faction_handled:
+            return reward + faction_reward
 
         r, c = actor.position
         chest = self.state.chests.get((r, c))
@@ -799,6 +928,476 @@ class MultiAgentRLRLGym:
             events.append("interact_exhausted")
             reward -= 0.02
         return reward
+
+    def _handle_faction_interact(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        reward = 0.0
+        pending = self.state.pending_faction_invites.get(actor_id)
+        if pending and actor.faction_id < 0:
+            if self._invite_is_expired(pending):
+                self.state.pending_faction_invites.pop(actor_id, None)
+                events.append("faction_invite_expired")
+                return (
+                    -float(self.config.invalid_faction_action_penalty),
+                    True,
+                )
+            if self._action_cooldown_blocked(actor_id, "join_faction", events):
+                return -float(self.config.invalid_faction_action_penalty), True
+            inviter_id = str(pending.get("inviter_id", ""))
+            faction_id = int(pending.get("faction_id", -1))
+            inviter = self.state.agents.get(inviter_id)
+            if inviter is None or not inviter.alive or inviter.faction_id != faction_id:
+                self.state.pending_faction_invites.pop(actor_id, None)
+                events.append("faction_invite_expired")
+                return -float(self.config.invalid_faction_action_penalty), True
+            if self._manhattan(actor.position, inviter.position) == 1:
+                actor.faction_id = faction_id
+                self.state.pending_faction_invites.pop(actor_id, None)
+                events.append(f"faction_join:{faction_id}:{inviter_id}")
+                reward += float(self.config.team_join_reward)
+                reward += self._award_join_side_bonuses(
+                    inviter_id=inviter_id, invitee_id=actor_id, faction_id=faction_id
+                )
+                self._set_action_cooldown(actor_id, "join_faction")
+                return reward, True
+
+        if actor.faction_id < 0:
+            if self._action_cooldown_blocked(actor_id, "create_faction", events):
+                return -float(self.config.invalid_faction_action_penalty), True
+            new_faction = int(self._next_faction_id)
+            self._next_faction_id += 1
+            actor.faction_id = new_faction
+            self.state.faction_leaders[new_faction] = actor_id
+            events.append(f"faction_create:{new_faction}")
+            reward += float(self.config.team_create_reward)
+            self._set_action_cooldown(actor_id, "create_faction")
+            return reward, True
+
+        if not self._is_faction_leader(actor_id):
+            return 0.0, False
+        if self._action_cooldown_blocked(actor_id, "invite_faction", events):
+            return -float(self.config.invalid_faction_action_penalty), True
+        target_id = self._adjacent_invite_candidate(actor_id)
+        if target_id is None:
+            return 0.0, False
+        target = self.state.agents[target_id]
+        if target.faction_id == actor.faction_id:
+            return 0.0, False
+
+        self.state.pending_faction_invites[target_id] = {
+            "faction_id": int(actor.faction_id),
+            "inviter_id": actor_id,
+            "created_step": int(self.state.step_count),
+        }
+        events.append(f"faction_invite_sent:{target_id}:{actor.faction_id}")
+        reward += float(self.config.team_invite_reward)
+        self._set_action_cooldown(actor_id, "invite_faction")
+        return reward, True
+
+    def _adjacent_ally_ids(self, actor_id: str) -> List[str]:
+        assert self.state is not None
+        actor = self.state.agents[actor_id]
+        out: List[str] = []
+        for other_id in self.possible_agents:
+            if other_id == actor_id:
+                continue
+            other = self.state.agents[other_id]
+            if not other.alive:
+                continue
+            if not self._is_allied(actor, other):
+                continue
+            if self._manhattan(actor.position, other.position) != 1:
+                continue
+            out.append(other_id)
+        return out
+
+    def _give_to_ally(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
+        assert self.state is not None
+        if self._action_cooldown_blocked(actor_id, "team_give", events):
+            return -float(self.config.invalid_faction_action_penalty)
+        candidates = self._adjacent_ally_ids(actor_id)
+        if not candidates:
+            events.append("team_give_fail:no_ally")
+            return -0.01
+        if not actor.inventory:
+            events.append("team_give_fail:no_item")
+            return -0.01
+        target_id = sorted(candidates)[0]
+        target = self.state.agents[target_id]
+        item = actor.inventory.pop(0)
+        target.inventory.append(item)
+        events.append(f"team_give:{target_id}:{item}")
+        self._set_action_cooldown(actor_id, "team_give")
+        allowed = self._team_pair_reward_allowed(
+            action="team_give",
+            a=actor_id,
+            b=target_id,
+            cap=max(0, int(self.config.team_pair_reward_cap_per_episode)),
+            repeat_guard=max(0, int(self.config.team_pair_reward_repeat_guard_steps)),
+            events=events,
+        )
+        if not allowed:
+            return 0.0
+        return float(self.config.team_give_reward)
+
+    def _trade_with_ally(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
+        assert self.state is not None
+        if self._action_cooldown_blocked(actor_id, "team_trade", events):
+            return -float(self.config.invalid_faction_action_penalty)
+        candidates = self._adjacent_ally_ids(actor_id)
+        if not candidates:
+            events.append("team_trade_fail:no_ally")
+            return -0.01
+        target_id = sorted(candidates)[0]
+        target = self.state.agents[target_id]
+        if not actor.inventory or not target.inventory:
+            events.append("team_trade_fail:missing_item")
+            return -0.01
+        actor_item = actor.inventory.pop(0)
+        target_item = target.inventory.pop(0)
+        actor.inventory.append(target_item)
+        target.inventory.append(actor_item)
+        events.append(f"team_trade:{target_id}:{actor_item}<->{target_item}")
+        self._set_action_cooldown(actor_id, "team_trade")
+        allowed = self._team_pair_reward_allowed(
+            action="team_trade",
+            a=actor_id,
+            b=target_id,
+            cap=max(0, int(self.config.team_pair_reward_cap_per_episode)),
+            repeat_guard=max(0, int(self.config.team_pair_reward_repeat_guard_steps)),
+            events=events,
+        )
+        if not allowed:
+            return 0.0
+        return float(self.config.team_trade_reward)
+
+    def _adjacent_dead_ally_ids(self, actor_id: str) -> List[str]:
+        assert self.state is not None
+        actor = self.state.agents[actor_id]
+        out: List[str] = []
+        for other_id in self.possible_agents:
+            if other_id == actor_id:
+                continue
+            other = self.state.agents[other_id]
+            if other.alive:
+                continue
+            if not self._is_allied(actor, other):
+                continue
+            if self._manhattan(actor.position, other.position) != 1:
+                continue
+            out.append(other_id)
+        return out
+
+    def _revive_ally(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
+        assert self.state is not None
+        if self._action_cooldown_blocked(actor_id, "team_revive", events):
+            return -float(self.config.invalid_faction_action_penalty)
+        candidates = self._adjacent_dead_ally_ids(actor_id)
+        if not candidates:
+            events.append("team_revive_fail:no_dead_ally")
+            return -0.02
+        if "bandage" in actor.inventory:
+            actor.inventory.remove("bandage")
+            revive_item = "bandage"
+        elif "healing_potion" in actor.inventory:
+            actor.inventory.remove("healing_potion")
+            revive_item = "healing_potion"
+        else:
+            events.append("team_revive_fail:no_supplies")
+            return -0.02
+
+        target_id = sorted(candidates)[0]
+        target = self.state.agents[target_id]
+        target.alive = True
+        target.hp = max(1, int(target.max_hp) // 2)
+        target.hunger = max(0, min(target.max_hunger, int(target.max_hunger) // 4))
+        self._revived_this_step.add(target_id)
+        events.append(f"team_revive:{target_id}:{revive_item}")
+        self._set_action_cooldown(actor_id, "team_revive")
+        allowed = self._team_pair_reward_allowed(
+            action="team_revive",
+            a=actor_id,
+            b=target_id,
+            cap=max(0, int(self.config.team_pair_reward_cap_per_episode)),
+            repeat_guard=max(0, int(self.config.team_pair_reward_repeat_guard_steps)),
+            events=events,
+        )
+        if not allowed:
+            return 0.0
+        return float(self.config.team_revive_reward)
+
+    def _guard_ally(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
+        assert self.state is not None
+        if self._action_cooldown_blocked(actor_id, "team_guard", events):
+            return -float(self.config.invalid_faction_action_penalty)
+        candidates = self._adjacent_ally_ids(actor_id)
+        if not candidates:
+            events.append("team_guard_fail:no_ally")
+            return -0.01
+        target_id = sorted(candidates)[0]
+        self._guard_assignments[target_id] = actor_id
+        events.append(f"team_guard:{target_id}")
+        self._set_action_cooldown(actor_id, "team_guard")
+        allowed = self._team_pair_reward_allowed(
+            action="team_guard",
+            a=actor_id,
+            b=target_id,
+            cap=max(0, int(self.config.team_pair_reward_cap_per_episode)),
+            repeat_guard=max(0, int(self.config.team_pair_reward_repeat_guard_steps)),
+            events=events,
+        )
+        if not allowed:
+            return 0.0
+        return float(self.config.team_guard_reward)
+
+    def _leave_faction(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
+        assert self.state is not None
+        if self._action_cooldown_blocked(actor_id, "leave_faction", events):
+            return -float(self.config.invalid_faction_action_penalty)
+        old_faction = int(actor.faction_id)
+        if old_faction < 0:
+            events.append("faction_leave_fail:solo")
+            return -float(self.config.invalid_faction_action_penalty)
+
+        was_leader = self.state.faction_leaders.get(old_faction) == actor_id
+        actor.faction_id = -1
+        self.state.pending_faction_invites.pop(actor_id, None)
+        for aid, invite in list(self.state.pending_faction_invites.items()):
+            if int(invite.get("faction_id", -1)) == old_faction:
+                self.state.pending_faction_invites.pop(aid, None)
+        events.append(f"faction_leave:{old_faction}")
+
+        if was_leader:
+            candidates = sorted(
+                aid
+                for aid, a in self.state.agents.items()
+                if aid != actor_id and a.alive and int(a.faction_id) == old_faction
+            )
+            if candidates:
+                self.state.faction_leaders[old_faction] = candidates[0]
+                events.append(f"faction_new_leader:{old_faction}:{candidates[0]}")
+            else:
+                self.state.faction_leaders.pop(old_faction, None)
+                events.append(f"faction_disband:{old_faction}")
+        self._set_action_cooldown(actor_id, "leave_faction")
+        return float(self.config.team_leave_reward)
+
+    def _accept_faction_invite(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> float:
+        assert self.state is not None
+        if self._action_cooldown_blocked(actor_id, "join_faction", events):
+            return -float(self.config.invalid_faction_action_penalty)
+        if int(actor.faction_id) >= 0:
+            events.append("faction_accept_fail:already_in_faction")
+            return -float(self.config.invalid_faction_action_penalty)
+
+        pending = self.state.pending_faction_invites.get(actor_id)
+        if not pending:
+            events.append("faction_accept_fail:no_invite")
+            return -float(self.config.invalid_faction_action_penalty)
+        if self._invite_is_expired(pending):
+            self.state.pending_faction_invites.pop(actor_id, None)
+            events.append("faction_accept_fail:invite_expired")
+            return -float(self.config.invalid_faction_action_penalty)
+
+        inviter_id = str(pending.get("inviter_id", ""))
+        faction_id = int(pending.get("faction_id", -1))
+        inviter = self.state.agents.get(inviter_id)
+        if inviter is None or not inviter.alive or inviter.faction_id != faction_id:
+            self.state.pending_faction_invites.pop(actor_id, None)
+            events.append("faction_accept_fail:invite_expired")
+            return -float(self.config.invalid_faction_action_penalty)
+        if self._manhattan(actor.position, inviter.position) != 1:
+            events.append("faction_accept_fail:not_adjacent")
+            return -float(self.config.invalid_faction_action_penalty)
+
+        actor.faction_id = faction_id
+        self.state.pending_faction_invites.pop(actor_id, None)
+        events.append(f"faction_join:{faction_id}:{inviter_id}")
+        out = float(self.config.team_join_reward)
+        out += self._award_join_side_bonuses(
+            inviter_id=inviter_id, invitee_id=actor_id, faction_id=faction_id
+        )
+        self._set_action_cooldown(actor_id, "join_faction")
+        return out
+
+    def _adjacent_invite_candidate(self, actor_id: str) -> str | None:
+        assert self.state is not None
+        actor = self.state.agents[actor_id]
+        for other_id in self.possible_agents:
+            if other_id == actor_id:
+                continue
+            other = self.state.agents[other_id]
+            if not other.alive:
+                continue
+            if self._manhattan(actor.position, other.position) != 1:
+                continue
+            return other_id
+        return None
+
+    def _pending_invite_faction_id(self, aid: str) -> int | None:
+        assert self.state is not None
+        pending = self.state.pending_faction_invites.get(aid)
+        if not pending:
+            return None
+        if self._invite_is_expired(pending):
+            self.state.pending_faction_invites.pop(aid, None)
+            return None
+        return int(pending.get("faction_id", -1))
+
+    def _is_faction_leader(self, aid: str) -> bool:
+        assert self.state is not None
+        agent = self.state.agents.get(aid)
+        if agent is None or agent.faction_id < 0:
+            return False
+        return self.state.faction_leaders.get(int(agent.faction_id)) == aid
+
+    def _faction_member_count(self, faction_id: int) -> int:
+        assert self.state is not None
+        if int(faction_id) < 0:
+            return 1
+        return sum(
+            1
+            for agent in self.state.agents.values()
+            if agent.alive and int(agent.faction_id) == int(faction_id)
+        )
+
+    def _is_allied(self, a: AgentState, b: AgentState) -> bool:
+        if int(a.faction_id) < 0 or int(b.faction_id) < 0:
+            return False
+        return int(a.faction_id) == int(b.faction_id)
+
+    def _faction_relation(self, a: AgentState, b: AgentState) -> str:
+        if self._is_allied(a, b):
+            return "ally"
+        if int(a.faction_id) < 0 or int(b.faction_id) < 0:
+            return "neutral"
+        return "enemy"
+
+    def _queue_deferred_reward(self, aid: str, delta: float, event: str) -> None:
+        if delta == 0.0:
+            return
+        self._deferred_agent_rewards[aid] = self._deferred_agent_rewards.get(aid, 0.0) + float(
+            delta
+        )
+        evts = self._deferred_agent_events.setdefault(aid, [])
+        evts.append(str(event))
+
+    def _action_cooldown_blocked(
+        self, aid: str, key: str, events: List[str]
+    ) -> bool:
+        now = int(self.state.step_count) if self.state is not None else 0
+        next_allowed = int(self._faction_action_next_step.get(aid, {}).get(key, 0))
+        if now < next_allowed:
+            events.append(f"{key}_cooldown:{next_allowed - now}")
+            return True
+        return False
+
+    def _set_action_cooldown(self, aid: str, key: str) -> None:
+        now = int(self.state.step_count) if self.state is not None else 0
+        cooldown = max(0, int(self.config.faction_action_cooldown_steps))
+        if cooldown <= 0:
+            return
+        bag = self._faction_action_next_step.setdefault(aid, {})
+        bag[key] = now + cooldown
+
+    def _pair_token(self, action: str, a: str, b: str) -> str:
+        lo, hi = sorted((str(a), str(b)))
+        return f"{action}:{lo}|{hi}"
+
+    def _team_pair_reward_allowed(
+        self,
+        action: str,
+        a: str,
+        b: str,
+        cap: int,
+        repeat_guard: int,
+        events: List[str],
+    ) -> bool:
+        token = self._pair_token(action, a, b)
+        now = int(self.state.step_count) if self.state is not None else 0
+        count = int(self._team_pair_reward_counts.get(token, 0))
+        if cap > 0 and count >= cap:
+            events.append(f"{action}_reward_guard:cap")
+            return False
+        if repeat_guard > 0:
+            last = self._team_pair_last_reward_step.get(token)
+            if last is not None and now - int(last) < int(repeat_guard):
+                events.append(f"{action}_reward_guard:repeat")
+                return False
+        self._team_pair_reward_counts[token] = count + 1
+        self._team_pair_last_reward_step[token] = now
+        return True
+
+    def _invite_is_expired(self, invite: Dict[str, int | str]) -> bool:
+        ttl = int(self.config.faction_invite_ttl_steps)
+        if ttl <= 0:
+            return True
+        created = int(invite.get("created_step", -10**9))
+        now = int(self.state.step_count) if self.state is not None else 0
+        return (now - created) > ttl
+
+    def _prune_expired_invites(self) -> None:
+        if self.state is None:
+            return
+        for aid, invite in list(self.state.pending_faction_invites.items()):
+            if self._invite_is_expired(invite):
+                self.state.pending_faction_invites.pop(aid, None)
+
+    def _award_join_side_bonuses(
+        self, inviter_id: str, invitee_id: str, faction_id: int
+    ) -> float:
+        # Anti-exploit rule: invitee can only trigger join-side bonuses once per episode.
+        if invitee_id in self._join_bonus_awarded_invitees:
+            return 0.0
+        self._join_bonus_awarded_invitees.add(invitee_id)
+        inviter_bonus = float(self.config.team_join_inviter_reward)
+        invitee_bonus = float(self.config.team_join_invitee_reward)
+        self._queue_deferred_reward(
+            inviter_id,
+            inviter_bonus,
+            f"faction_join_inviter_bonus:{invitee_id}:{faction_id}:{round(inviter_bonus, 4)}",
+        )
+        return invitee_bonus
+
+    def _has_adjacent_ally(self, actor: AgentState) -> bool:
+        assert self.state is not None
+        if int(actor.faction_id) < 0:
+            return False
+        for other in self.state.agents.values():
+            if other.agent_id == actor.agent_id or not other.alive:
+                continue
+            if not self._is_allied(actor, other):
+                continue
+            if self._manhattan(actor.position, other.position) == 1:
+                return True
+        return False
+
+    def _apply_guard_reduction(
+        self, target: AgentState, damage: int, events: List[str]
+    ) -> int:
+        if damage <= 0:
+            return damage
+        guardian_id = self._guard_assignments.get(target.agent_id)
+        if not guardian_id or self.state is None:
+            return damage
+        guardian = self.state.agents.get(guardian_id)
+        if guardian is None or not guardian.alive:
+            return damage
+        if self._manhattan(guardian.position, target.position) != 1:
+            return damage
+        reduction = max(
+            1,
+            int(round(float(damage) * float(self.config.guard_damage_reduction_ratio))),
+        )
+        reduced = max(0, damage - reduction)
+        events.append(
+            f"team_guard_block:{guardian_id}:{target.agent_id}:{reduction}:{damage}->{reduced}"
+        )
+        return reduced
 
     def _attack(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
         assert self.state is not None
@@ -831,6 +1430,7 @@ class MultiAgentRLRLGym:
     def _attack_agent(
         self, attacker: AgentState, target: AgentState, events: List[str]
     ) -> float:
+        allied_target = self._is_allied(attacker, target)
         weapon, damage_type, damage_range, skill_name = self._equipped_weapon(attacker)
         skill_level = self._skill_level(attacker, skill_name)
         hit_chance = self._hit_chance(
@@ -850,6 +1450,7 @@ class MultiAgentRLRLGym:
             target, damage_type
         )
         final_damage = max(0, raw_damage - dr)
+        final_damage = self._apply_guard_reduction(target, final_damage, events)
 
         events.append(
             f"agent_interact:attack:{target.agent_id}:{weapon}:{damage_type}"
@@ -869,13 +1470,26 @@ class MultiAgentRLRLGym:
         if final_damage > 0:
             target.hp = max(0, target.hp - final_damage)
             events.append(f"agent_interact:hit:{target.agent_id}")
-            reward += 0.05 + 0.02 * final_damage
-            self._gain_skill_xp(attacker, skill_name, 2, events)
+            if allied_target:
+                ff_penalty = float(self.config.ally_damage_penalty_per_hp) * float(
+                    final_damage
+                )
+                reward -= ff_penalty
+                events.append(
+                    f"ally_damage_penalty:{target.agent_id}:{final_damage}:{round(ff_penalty, 4)}"
+                )
+            else:
+                reward += 0.05 + 0.02 * final_damage
+                self._gain_skill_xp(attacker, skill_name, 2, events)
             if target.hp <= 0 and target.alive:
                 target.alive = False
                 events.append(f"agent_interact:kill:{target.agent_id}")
-                reward += 0.5
-                self._gain_skill_xp(attacker, skill_name, 4, events)
+                if allied_target:
+                    reward -= float(self.config.ally_kill_penalty)
+                    events.append(f"ally_kill_penalty:{target.agent_id}")
+                else:
+                    reward += 0.5
+                    self._gain_skill_xp(attacker, skill_name, 4, events)
         else:
             events.append(f"agent_interact:blocked:{target.agent_id}")
             reward -= 0.01
@@ -976,6 +1590,8 @@ class MultiAgentRLRLGym:
         dr = self._rng.randint(base_min, base_max)
         dr += int(race.dr_bonus_vs.get(damage_type, 0))
         dr += armor_mitigation
+        if self._has_adjacent_ally(target):
+            dr += int(self.config.formation_dr_bonus)
         return max(0, dr), hit_slot, max(0, armor_mitigation), armor_skill
 
     def _roll_armor_dr(self, target: AgentState, damage_type: str) -> int:
@@ -1168,6 +1784,198 @@ class MultiAgentRLRLGym:
             self._episode_combat_exchanges += 1
         return delta_total
 
+    def _apply_team_rewards(
+        self,
+        rewards: Dict[str, float],
+        reward_components: Dict[str, Dict[str, float]],
+        info: Dict[str, Dict[str, object]],
+    ) -> None:
+        assert self.state is not None
+        faction_generated: Dict[int, float] = {}
+        for aid in self.possible_agents:
+            agent = self.state.agents[aid]
+            if not agent.alive:
+                continue
+            generated = 0.0
+            for evt in info[aid].get("events", []):
+                if not isinstance(evt, str):
+                    continue
+                if evt.startswith("faction_create:"):
+                    generated += float(self.config.team_create_reward)
+                elif evt.startswith("faction_invite_sent:"):
+                    generated += float(self.config.team_invite_reward)
+                elif evt.startswith("faction_join:"):
+                    generated += float(self.config.team_join_reward)
+                elif evt.startswith("team_give:"):
+                    generated += float(self.config.team_give_reward)
+                elif evt.startswith("team_trade:"):
+                    generated += float(self.config.team_trade_reward)
+                elif evt.startswith("team_revive:"):
+                    generated += float(self.config.team_revive_reward)
+                elif evt.startswith("team_guard:"):
+                    generated += float(self.config.team_guard_reward)
+                elif evt.startswith("faction_leave:"):
+                    generated += float(self.config.team_leave_reward)
+
+            if int(agent.faction_id) >= 0:
+                has_adjacent_ally = False
+                proximity_partner: str | None = None
+                for other_id, other in self.state.agents.items():
+                    if other_id == aid or not other.alive:
+                        continue
+                    if not self._is_allied(agent, other):
+                        continue
+                    if self._manhattan(agent.position, other.position) == 1:
+                        has_adjacent_ally = True
+                        proximity_partner = other_id
+                        break
+                if has_adjacent_ally:
+                    allowed = True
+                    if proximity_partner is not None:
+                        allowed = self._team_pair_reward_allowed(
+                            action="team_proximity",
+                            a=aid,
+                            b=proximity_partner,
+                            cap=max(
+                                0, int(self.config.team_proximity_pair_cap_per_episode)
+                            ),
+                            repeat_guard=max(
+                                0,
+                                int(self.config.team_proximity_repeat_guard_steps),
+                            ),
+                            events=info[aid]["events"],
+                        )
+                    if allowed:
+                        prox = float(self.config.team_proximity_reward)
+                        rewards[aid] += prox
+                        reward_components[aid]["teamwork"] += prox
+                        generated += prox
+                        info[aid]["events"].append("team_proximity")
+
+            if int(agent.faction_id) >= 0 and generated > 0.0:
+                faction_generated[int(agent.faction_id)] = faction_generated.get(
+                    int(agent.faction_id), 0.0
+                ) + generated
+
+        for faction_id, generated in faction_generated.items():
+            leader_id = self.state.faction_leaders.get(int(faction_id))
+            if not leader_id:
+                continue
+            leader = self.state.agents.get(leader_id)
+            if leader is None or not leader.alive:
+                continue
+            share = float(self.config.leader_team_share) * float(generated)
+            if share <= 0.0:
+                continue
+            rewards[leader_id] += share
+            reward_components[leader_id]["teamwork"] += share
+            info[leader_id]["events"].append(
+                f"leader_team_share:{faction_id}:{round(share, 4)}"
+            )
+
+    def _count_held_treasures(self, agent: AgentState) -> int:
+        count = 0
+        for item in agent.inventory + agent.equipped:
+            if item in self.treasure_items:
+                count += 1
+        return count
+
+    def _apply_treasure_rewards(
+        self,
+        rewards: Dict[str, float],
+        reward_components: Dict[str, Dict[str, float]],
+        info: Dict[str, Dict[str, object]],
+    ) -> None:
+        if not self.treasure_items:
+            return
+        cap = max(0, int(self.config.treasure_hold_reward_cap_items))
+        per_turn = float(self.config.treasure_hold_reward_per_turn)
+        if per_turn == 0.0:
+            return
+        for aid in self.possible_agents:
+            if self.state is None:
+                break
+            agent = self.state.agents[aid]
+            if not agent.alive:
+                continue
+            held = self._count_held_treasures(agent)
+            if held <= 0:
+                continue
+            rewarded_count = held if cap <= 0 else min(held, cap)
+            delta = float(rewarded_count) * per_turn
+            rewards[aid] += delta
+            reward_components[aid]["treasure"] += delta
+            info[aid]["events"].append(f"treasure_hold:{held}")
+
+    def _apply_treasure_end_bonus(
+        self,
+        rewards: Dict[str, float],
+        reward_components: Dict[str, Dict[str, float]],
+        info: Dict[str, Dict[str, object]],
+    ) -> None:
+        if not self.treasure_items:
+            return
+        per_item = float(self.config.treasure_end_bonus_per_item)
+        if per_item <= 0.0:
+            return
+        for aid in self.possible_agents:
+            if self.state is None:
+                break
+            agent = self.state.agents[aid]
+            if not agent.alive:
+                continue
+            held = self._count_held_treasures(agent)
+            if held <= 0:
+                continue
+            delta = per_item * float(held)
+            rewards[aid] += delta
+            reward_components[aid]["treasure"] += delta
+            info[aid]["events"].append(f"treasure_end_bonus:{held}")
+
+    def _apply_focus_rewards(
+        self,
+        rewards: Dict[str, float],
+        reward_components: Dict[str, Dict[str, float]],
+        info: Dict[str, Dict[str, object]],
+    ) -> None:
+        for aid in self.possible_agents:
+            treasure_events = 0
+            combat_events = 0
+            skill_events = 0
+            team_events = 0
+            for evt in info[aid].get("events", []):
+                if not isinstance(evt, str):
+                    continue
+                if (
+                    evt.startswith("pickup:")
+                    or evt.startswith("loot:")
+                    or evt.startswith("chest_open:")
+                    or evt.startswith("monster_loot_drop:")
+                ):
+                    treasure_events += 1
+                if (
+                    evt.startswith("agent_interact:hit:")
+                    or evt.startswith("agent_interact:kill:")
+                    or evt.startswith("agent_interact:hit_monster:")
+                    or evt.startswith("agent_interact:kill_monster:")
+                    or evt.startswith("monster_hit:")
+                ):
+                    combat_events += 1
+                if evt.startswith("skill_up:"):
+                    skill_events += 1
+                if evt.startswith("faction_") or evt.startswith("team_"):
+                    team_events += 1
+
+            focus_delta = 0.0
+            focus_delta += 0.02 * float(treasure_events)
+            focus_delta += 0.02 * float(combat_events)
+            focus_delta += 0.03 * float(skill_events)
+            focus_delta += float(self.config.team_action_bonus) * float(team_events)
+            if focus_delta == 0.0:
+                continue
+            rewards[aid] += focus_delta
+            reward_components[aid]["focus"] += focus_delta
+
     def _observation_window_dims(self, aid: str) -> Tuple[int, int]:
         assert self.state is not None
         cfg = self.config.agent_observation_config.get(aid, {})
@@ -1226,6 +2034,8 @@ class MultiAgentRLRLGym:
         for other_id, other in self.state.agents.items():
             if other_id == aid or not other.alive:
                 continue
+            if self._is_allied(actor, other):
+                continue
             d = self._manhattan(actor.position, other.position)
             if best is None or d < best:
                 best = d
@@ -1242,6 +2052,8 @@ class MultiAgentRLRLGym:
         ar, ac = actor.position
         for other_id, other in self.state.agents.items():
             if other_id == aid or not other.alive:
+                continue
+            if self._is_allied(actor, other):
                 continue
             dr = abs(other.position[0] - ar)
             dc = abs(other.position[1] - ac)
@@ -1301,6 +2113,11 @@ class MultiAgentRLRLGym:
         obs["profile"] = profile.name
         obs["race"] = agent.race_name
         obs["class"] = agent.class_name
+        obs["faction"] = {
+            "faction_id": int(agent.faction_id),
+            "is_leader": bool(self._is_faction_leader(aid)),
+            "pending_invite_from_faction": self._pending_invite_faction_id(aid),
+        }
 
         if include_grid:
             obs["local_tiles"] = self._local_view_dims(
@@ -1327,6 +2144,9 @@ class MultiAgentRLRLGym:
                 "skill_xp": dict(agent.skill_xp),
                 "overall_level": self._overall_level(agent),
                 "encumbrance_ratio": self._encumbrance_ratio(agent),
+                "faction_id": int(agent.faction_id),
+                "is_faction_leader": bool(self._is_faction_leader(aid)),
+                "faction_member_count": int(self._faction_member_count(agent.faction_id)),
                 "nearby_item_counts": nearby_item_counts,
                 "tile_interaction_counts": self._tile_interaction_counts(
                     agent.position
@@ -1481,9 +2301,13 @@ class MultiAgentRLRLGym:
     def _nearest_teammate_distance(self, aid: str) -> int | None:
         assert self.state is not None
         actor = self.state.agents[aid]
+        if int(actor.faction_id) < 0:
+            return None
         distances: List[int] = []
         for other_id, other in self.state.agents.items():
             if other_id == aid or not other.alive:
+                continue
+            if not self._is_allied(actor, other):
                 continue
             d = abs(actor.position[0] - other.position[0]) + abs(
                 actor.position[1] - other.position[1]
@@ -1657,6 +2481,10 @@ class MultiAgentRLRLGym:
         chance += 0.016 * float(attacker.dexterity - 5)
         chance += 0.02 * float(skill_level - 1)
         chance -= 0.014 * float(target.dexterity - 5)
+        if self._has_adjacent_ally(attacker):
+            chance += float(self.config.formation_hit_bonus)
+        if self._has_adjacent_ally(target):
+            chance -= 0.5 * float(self.config.formation_hit_bonus)
         return max(0.2, min(0.95, chance))
 
     def _damage_stat_bonus(self, attacker: AgentState, damage_type: str) -> int:
@@ -1695,6 +2523,8 @@ class MultiAgentRLRLGym:
         total_visible = 0
         adjacent = 0
         nearest: int | None = None
+        relation_counts = {"ally": 0, "neutral": 0, "enemy": 0}
+        actor = self.state.agents[aid]
         for other_id, other in self.state.agents.items():
             if other_id == aid or not other.alive:
                 continue
@@ -1702,6 +2532,8 @@ class MultiAgentRLRLGym:
             if r < start_r or r > end_r or c < start_c or c > end_c:
                 continue
             total_visible += 1
+            rel = self._faction_relation(actor, other)
+            relation_counts[rel] = relation_counts.get(rel, 0) + 1
             dist = self._manhattan(center, other.position)
             if dist == 1:
                 adjacent += 1
@@ -1711,6 +2543,7 @@ class MultiAgentRLRLGym:
             "visible": total_visible,
             "adjacent": adjacent,
             "nearest_distance": nearest,
+            "relation_counts": relation_counts,
         }
 
     def _nearby_monster_counts(
@@ -1756,6 +2589,8 @@ class MultiAgentRLRLGym:
                 return True
         for other_id, other in self.state.agents.items():
             if other_id == actor_id or not other.alive:
+                continue
+            if self._is_allied(agent, other):
                 continue
             if abs(other.position[0] - ar) + abs(other.position[1] - ac) == 1:
                 return True
@@ -1878,6 +2713,7 @@ class MultiAgentRLRLGym:
             target, DAMAGE_TYPE_BLUNT
         )
         final_damage = max(0, raw_damage - dr)
+        final_damage = self._apply_guard_reduction(target, final_damage, target_events)
         target_events.append(
             f"monster_hit_roll:{monster.monster_id}:raw:{raw_damage}:slot:{hit_slot}:dr:{dr}:final:{final_damage}"
         )

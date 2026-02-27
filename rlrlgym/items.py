@@ -41,6 +41,7 @@ class ItemDef:
     item_id: str
     weight: float
     edible_hunger: int = 0
+    is_treasure: bool = False
     armor_slot: Optional[str] = None
     dr_bonus_vs: Dict[str, int] = field(default_factory=dict)
     weapon: Optional[WeaponDef] = None
@@ -58,6 +59,12 @@ class ItemCatalog:
     @property
     def item_weight(self) -> Dict[str, float]:
         return {item_id: float(item.weight) for item_id, item in self.items.items()}
+
+    @property
+    def treasure_items(self) -> set[str]:
+        return {
+            item_id for item_id, item in self.items.items() if bool(item.is_treasure)
+        }
 
     @property
     def armor_slot_by_item(self) -> Dict[str, str]:
@@ -132,6 +139,7 @@ def load_items(path: str | Path) -> ItemCatalog:
 
         weight = float(row["weight"])
         edible_hunger = int(row.get("edible_hunger", 0))
+        is_treasure = bool(row.get("is_treasure", False))
 
         armor_slot = row.get("armor_slot")
         if armor_slot is not None:
@@ -186,6 +194,7 @@ def load_items(path: str | Path) -> ItemCatalog:
             item_id=item_id,
             weight=weight,
             edible_hunger=edible_hunger,
+            is_treasure=is_treasure,
             armor_slot=armor_slot,
             dr_bonus_vs=dr_bonus_vs,
             weapon=weapon,
