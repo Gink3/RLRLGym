@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .constants import ACTION_NAMES
@@ -154,6 +156,13 @@ class RenderWindow:
         self._tooltip_cell: Optional[Tuple[int, int]] = None
         self._on_prev_episode: Optional[Callable[[], None]] = None
         self._on_next_episode: Optional[Callable[[], None]] = None
+        self._tileset_config: Dict[str, object] = {}
+        self._tileset_image = None
+        self._tileset_tile_size = 16
+        self._tileset_photo_cache: Dict[Tuple[str, int], object] = {}
+        self._canvas_images: List[object] = []
+        self._last_tile_pixel_size = 16
+        self._tileset_available = False
 
         self.root = tk.Tk()
         self.root.title(title)
@@ -225,6 +234,17 @@ class RenderWindow:
         )
         self.highlight_mode_menu.pack(side="left")
         self.highlight_mode_menu.bind("<<ComboboxSelected>>", self._on_highlight_mode_change)
+        ttk.Label(controls, text="Render").pack(side="left", padx=(10, 2))
+        self.render_mode_var = tk.StringVar(value="ascii")
+        self.render_mode_menu = ttk.Combobox(
+            controls,
+            textvariable=self.render_mode_var,
+            values=["ascii", "tileset"],
+            width=9,
+            state="readonly",
+        )
+        self.render_mode_menu.pack(side="left")
+        self.render_mode_menu.bind("<<ComboboxSelected>>", self._on_render_mode_change)
 
         content = ttk.Frame(self.root)
         content.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -240,19 +260,65 @@ class RenderWindow:
         stats_frame = ttk.Frame(self.right_panes)
         self.right_panes.add(action_frame, weight=3)
         self.right_panes.add(stats_frame, weight=2)
+        self.ascii_map_frame = ttk.Frame(map_frame)
+        self.tileset_map_frame = ttk.Frame(map_frame)
+        self.ascii_map_frame.grid(row=0, column=0, sticky="nsew")
+        self.tileset_map_frame.grid(row=0, column=0, sticky="nsew")
 
         self.text = tk.Text(
-            map_frame,
+            self.ascii_map_frame,
             width=100,
             height=35,
             font=("Courier", 11),
             bg="#1e1e1e",
             fg="#ecf0f1",
+            wrap="none",
         )
-        self.text.pack(side="left", fill="both", expand=True)
+        self.text_vscroll = ttk.Scrollbar(
+            self.ascii_map_frame, orient="vertical", command=self.text.yview
+        )
+        self.text_hscroll = ttk.Scrollbar(
+            self.ascii_map_frame, orient="horizontal", command=self.text.xview
+        )
+        self.text.configure(
+            yscrollcommand=self.text_vscroll.set, xscrollcommand=self.text_hscroll.set
+        )
+        self.text.grid(row=0, column=0, sticky="nsew")
+        self.text_vscroll.grid(row=0, column=1, sticky="ns")
+        self.text_hscroll.grid(row=1, column=0, sticky="ew")
+        self.ascii_map_frame.rowconfigure(0, weight=1)
+        self.ascii_map_frame.columnconfigure(0, weight=1)
+
+        self.canvas = tk.Canvas(
+            self.tileset_map_frame,
+            width=1000,
+            height=700,
+            bg="#0f1318",
+            highlightthickness=0,
+        )
+        self.canvas_vscroll = ttk.Scrollbar(
+            self.tileset_map_frame, orient="vertical", command=self.canvas.yview
+        )
+        self.canvas_hscroll = ttk.Scrollbar(
+            self.tileset_map_frame, orient="horizontal", command=self.canvas.xview
+        )
+        self.canvas.configure(
+            yscrollcommand=self.canvas_vscroll.set,
+            xscrollcommand=self.canvas_hscroll.set,
+        )
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.canvas_vscroll.grid(row=0, column=1, sticky="ns")
+        self.canvas_hscroll.grid(row=1, column=0, sticky="ew")
+        self.tileset_map_frame.rowconfigure(0, weight=1)
+        self.tileset_map_frame.columnconfigure(0, weight=1)
+        self.tileset_map_frame.lower()
+        map_frame.rowconfigure(0, weight=1)
+        map_frame.columnconfigure(0, weight=1)
         self.text.configure(state="disabled")
         self.text.bind("<Motion>", self._on_text_motion)
         self.text.bind("<Leave>", self._on_text_leave)
+        self.canvas.bind("<Motion>", self._on_canvas_motion)
+        self.canvas.bind("<Leave>", self._on_canvas_leave)
         self.action_log_text = tk.Text(
             action_frame,
             width=48,
@@ -279,6 +345,7 @@ class RenderWindow:
         self._apply_zoom_font()
 
         self._configure_color_tags()
+        self._tileset_available = self._load_tileset_assets()
 
     def _configure_color_tags(self) -> None:
         self.text.configure(state="normal")
@@ -308,6 +375,13 @@ class RenderWindow:
         self._apply_zoom_font()
         self._redraw()
 
+    def _on_render_mode_change(self, _evt=None) -> None:
+        mode = self.render_mode_var.get()
+        if mode == "tileset" and not self._tileset_available:
+            self.render_mode_var.set("ascii")
+        self._set_map_mode()
+        self._redraw()
+
     def _on_highlight_toggle(self) -> None:
         self._redraw()
 
@@ -328,6 +402,13 @@ class RenderWindow:
         # Keep side panes fixed-size for readability regardless of map zoom.
         self.action_log_text.configure(font=("Courier", self._base_log_font_size))
         self.agent_stats_text.configure(font=("Courier", self._base_stats_font_size))
+
+    def _set_map_mode(self) -> None:
+        mode = self.render_mode_var.get()
+        if mode == "tileset" and self._tileset_available:
+            self.tileset_map_frame.lift()
+        else:
+            self.ascii_map_frame.lift()
 
     def _active_state(self) -> Optional[EnvState]:
         if self._playback_states:
@@ -358,26 +439,162 @@ class RenderWindow:
             self.text.insert(self._tk.END, "\n")
         self.text.configure(state="disabled")
 
+    def _load_tileset_assets(self) -> bool:
+        cfg_path = Path("assets") / "tileset_basic.json"
+        if not cfg_path.exists():
+            return False
+        try:
+            from PIL import Image
+        except Exception:
+            return False
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            if not isinstance(cfg, dict):
+                return False
+            image_name = str(cfg.get("image", ""))
+            if not image_name:
+                return False
+            image_path = cfg_path.parent / image_name
+            if not image_path.exists():
+                return False
+            self._tileset_config = cfg
+            self._tileset_image = Image.open(image_path).convert("RGBA")
+            self._tileset_tile_size = int(cfg.get("tile_size", 16))
+            return True
+        except Exception:
+            return False
+
+    def _tileset_photo(self, tile_id: str, pixel_size: int):
+        if not self._tileset_available:
+            return None
+        key = (tile_id, pixel_size)
+        if key in self._tileset_photo_cache:
+            return self._tileset_photo_cache[key]
+        try:
+            from PIL import ImageTk
+        except Exception:
+            return None
+        assert isinstance(self._tileset_config, dict)
+        tiles = self._tileset_config.get("tiles", {})
+        if not isinstance(tiles, dict):
+            return None
+        spec = tiles.get(tile_id) or tiles.get("void")
+        if not isinstance(spec, dict):
+            return None
+        col = int(spec.get("col", 0))
+        row = int(spec.get("row", 0))
+        s = int(self._tileset_tile_size)
+        x0 = col * s
+        y0 = row * s
+        x1 = x0 + s
+        y1 = y0 + s
+        sub = self._tileset_image.crop((x0, y0, x1, y1))
+        if pixel_size != s:
+            sub = sub.resize((pixel_size, pixel_size), resample=0)
+        photo = ImageTk.PhotoImage(sub)
+        self._tileset_photo_cache[key] = photo
+        return photo
+
+    def _draw_tileset(self, state: EnvState) -> None:
+        bounds = self._last_view_bounds
+        if bounds is None:
+            return
+        min_r, max_r, min_c, max_c = bounds
+        zoom = int(self.zoom_var.get())
+        pixel_size = max(8, min(48, 16 + 2 * zoom))
+        self._last_tile_pixel_size = pixel_size
+        self.canvas.delete("all")
+        self._canvas_images = []
+
+        width_cells = max_c - min_c + 1
+        height_cells = max_r - min_r + 1
+        self.canvas.configure(
+            scrollregion=(0, 0, width_cells * pixel_size, height_cells * pixel_size)
+        )
+
+        agent_positions = {a.position: aid for aid, a in state.agents.items() if a.alive}
+        chest_positions = {
+            pos for pos, chest in state.chests.items() if not chest.opened
+        }
+        monster_positions = {
+            monster.position: monster for monster in state.monsters.values() if monster.alive
+        }
+
+        for r in range(min_r, max_r + 1):
+            for c in range(min_c, max_c + 1):
+                x = (c - min_c) * pixel_size
+                y = (r - min_r) * pixel_size
+                base_tile_id = state.grid[r][c]
+                base_photo = self._tileset_photo(base_tile_id, pixel_size)
+                if base_photo is not None:
+                    self.canvas.create_image(x, y, anchor="nw", image=base_photo)
+                    self._canvas_images.append(base_photo)
+
+                pos = (r, c)
+                if pos in chest_positions:
+                    chest_photo = self._tileset_photo("chest", pixel_size)
+                    if chest_photo is not None:
+                        self.canvas.create_image(x, y, anchor="nw", image=chest_photo)
+                        self._canvas_images.append(chest_photo)
+                if pos in monster_positions:
+                    mon = monster_positions[pos]
+                    self.canvas.create_text(
+                        x + (pixel_size // 2),
+                        y + (pixel_size // 2),
+                        text=str(mon.symbol),
+                        fill=TK_COLORS.get(mon.color, "#ff7675"),
+                        font=("Courier", max(8, pixel_size // 2), "bold"),
+                    )
+                if pos in agent_positions:
+                    aid = agent_positions[pos]
+                    agent = state.agents[aid]
+                    symbol, color = PROFILE_AGENT_STYLE.get(
+                        agent.profile_name, DEFAULT_AGENT_STYLE
+                    )
+                    self.canvas.create_oval(
+                        x + 2,
+                        y + 2,
+                        x + pixel_size - 2,
+                        y + pixel_size - 2,
+                        fill="#111827",
+                        outline=color,
+                        width=2,
+                    )
+                    self.canvas.create_text(
+                        x + (pixel_size // 2),
+                        y + (pixel_size // 2),
+                        text=symbol,
+                        fill=color,
+                        font=("Courier", max(8, pixel_size // 2), "bold"),
+                    )
+
     def _redraw(self) -> None:
         state = self._active_state()
         if state is None:
             self._hide_tooltip()
             return
+        self._set_map_mode()
         self._last_view_bounds = self.renderer.view_bounds(
             state=state,
             focus_agent=self._current_focus(),
             zoom=int(self.zoom_var.get()),
         )
-        cells = self.renderer.render_cells(
-            state,
-            focus_agent=self._current_focus(),
-            zoom=int(self.zoom_var.get()),
-        )
-        self._draw_cells(cells)
+        if self.render_mode_var.get() == "tileset" and self._tileset_available:
+            self._draw_tileset(state)
+        else:
+            cells = self.renderer.render_cells(
+                state,
+                focus_agent=self._current_focus(),
+                zoom=int(self.zoom_var.get()),
+            )
+            self._draw_cells(cells)
         self._redraw_action_log()
         self._redraw_agent_stats()
 
     def _on_text_leave(self, _evt=None) -> None:
+        self._hide_tooltip()
+
+    def _on_canvas_leave(self, _evt=None) -> None:
         self._hide_tooltip()
 
     def _on_text_motion(self, evt) -> None:
@@ -404,6 +621,34 @@ class RenderWindow:
             return
 
         grid_r = min_r + (line - 1)
+        grid_c = min_c + col
+        if self._tooltip_cell == (grid_r, grid_c):
+            return
+        self._tooltip_cell = (grid_r, grid_c)
+        self._show_tooltip(
+            x=evt.x_root + 14,
+            y=evt.y_root + 14,
+            text=self._tile_tooltip_text(state, grid_r, grid_c),
+        )
+
+    def _on_canvas_motion(self, evt) -> None:
+        state = self._active_state()
+        bounds = self._last_view_bounds
+        if state is None or bounds is None:
+            self._hide_tooltip()
+            return
+        min_r, max_r, min_c, max_c = bounds
+        width = max_c - min_c + 1
+        height = max_r - min_r + 1
+        s = max(1, int(self._last_tile_pixel_size))
+        x = self.canvas.canvasx(evt.x)
+        y = self.canvas.canvasy(evt.y)
+        col = int(x // s)
+        row = int(y // s)
+        if row < 0 or col < 0 or row >= height or col >= width:
+            self._hide_tooltip()
+            return
+        grid_r = min_r + row
         grid_c = min_c + col
         if self._tooltip_cell == (grid_r, grid_c):
             return

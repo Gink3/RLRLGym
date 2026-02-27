@@ -1,0 +1,37 @@
+{
+  "name": "basic_16x16",
+  "image": "tileset_basic.png",
+  "tile_size": 16,
+  "columns": 4,
+  "rows": 2,
+  "tiles": {
+    "floor": {
+      "col": 0,
+      "row": 0
+    },
+    "wall": {
+      "col": 1,
+      "row": 0
+    },
+    "water": {
+      "col": 2,
+      "row": 0
+    },
+    "food_cache": {
+      "col": 3,
+      "row": 0
+    },
+    "chest": {
+      "col": 0,
+      "row": 1
+    },
+    "shrine": {
+      "col": 1,
+      "row": 1
+    },
+    "void": {
+      "col": 2,
+      "row": 1
+    }
+  }
+}
