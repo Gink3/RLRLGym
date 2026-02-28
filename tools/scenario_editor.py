@@ -155,11 +155,29 @@ class ScenarioEditorApp:
         style.map("TButton", background=[("active", t["primary_hover"])])
         style.configure("TMenubutton", background=t["panel_alt"], foreground=t["text"])
         style.configure(
+            "TEntry",
+            fieldbackground=t["panel_alt"],
+            background=t["panel_alt"],
+            foreground=t["text"],
+            insertcolor=t["text"],
+        )
+        style.configure(
             "TCombobox",
             fieldbackground=t["panel_alt"],
             background=t["panel_alt"],
             foreground=t["text"],
         )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", t["panel_alt"])],
+            foreground=[("readonly", t["text"])],
+            selectforeground=[("readonly", t["text"])],
+            selectbackground=[("readonly", t["primary"])],
+        )
+        self.root.option_add("*TCombobox*Listbox.background", t["panel_alt"])
+        self.root.option_add("*TCombobox*Listbox.foreground", t["text"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", t["primary"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", t["text"])
         self.settings_menu.configure(
             background=t["panel"],
             foreground=t["text"],
@@ -175,14 +193,20 @@ class ScenarioEditorApp:
             tearoff=False,
         )
         self.agent_list.configure(
-            bg=t["bg"],
+            bg=t["panel_alt"],
             fg=t["text"],
             selectbackground=t["primary"],
             selectforeground=t["text"],
             highlightbackground=t["border"],
             highlightcolor=t["primary"],
         )
-        self.env_text.configure(bg=t["bg"], fg=t["text"], insertbackground=t["text"])
+        self.env_text.configure(
+            bg=t["panel_alt"],
+            fg=t["text"],
+            insertbackground=t["text"],
+            highlightbackground=t["border"],
+            highlightcolor=t["primary"],
+        )
 
     def _new(self) -> None:
         self.scenario_path = None
@@ -266,18 +290,11 @@ class ScenarioEditorApp:
 
     def _refresh_list(self) -> None:
         self.agent_list.delete(0, tk.END)
-        for i, a in enumerate(self.scenario.agents):
+        for a in self.scenario.agents:
             display_name = (a.name or "").strip()
             if not display_name:
                 display_name = f"{a.race}/{a.class_name}"
-            self.agent_list.insert(
-                tk.END,
-                (
-                    f"{i:02d}  {a.agent_id}  name={display_name}  "
-                    f"race={a.race} class={a.class_name} profile={a.profile or '-'} "
-                    f"network={a.network or '-'}"
-                ),
-            )
+            self.agent_list.insert(tk.END, display_name)
 
     def _generate_combos(self) -> None:
         default_profile_by_race = {name: name for name in self.races.keys() if name in self.profiles}
@@ -452,7 +469,13 @@ class ScenarioEditorApp:
         # Apply global tool theme to dialog-local tk widgets for consistency.
         t = self._theme
         dialog.configure(bg=t["panel"])
-        editor.configure(bg=t["bg"], fg=t["text"], insertbackground=t["text"])
+        editor.configure(
+            bg=t["panel_alt"],
+            fg=t["text"],
+            insertbackground=t["text"],
+            highlightbackground=t["border"],
+            highlightcolor=t["primary"],
+        )
 
         self.root.wait_window(dialog)
         return out.get("agent")
