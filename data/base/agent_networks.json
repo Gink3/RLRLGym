@@ -12,8 +12,8 @@
       "epsilon_decay": 0.995
     },
     {
-      "name": "human",
-      "hidden_layers": [128, 128],
+      "name": "large",
+      "hidden_layers": [256, 256],
       "activation": "relu",
       "learning_rate": 0.003,
       "gamma": 0.97,
@@ -22,8 +22,18 @@
       "epsilon_decay": 0.995
     },
     {
-      "name": "orc",
-      "hidden_layers": [128, 128],
+      "name": "pyramid",
+      "hidden_layers": [512, 256, 128],
+      "activation": "relu",
+      "learning_rate": 0.003,
+      "gamma": 0.97,
+      "epsilon_start": 0.25,
+      "epsilon_end": 0.04,
+      "epsilon_decay": 0.995
+    },
+        {
+      "name": "deep",
+      "hidden_layers": [256, 128, 128],
       "activation": "relu",
       "learning_rate": 0.003,
       "gamma": 0.97,
