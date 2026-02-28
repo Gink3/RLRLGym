@@ -6,6 +6,7 @@ from pathlib import Path
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
 from rlrlgym.constants import (
     ACTION_ATTACK,
+    ACTION_DEFEND,
     ACTION_EQUIP,
     ACTION_GIVE,
     ACTION_GUARD,
@@ -740,6 +741,40 @@ class TestEnv(unittest.TestCase):
         a1.position = (8, 8)
         spread_dr, _, _, _ = env._roll_hit_location_dr(a0, DAMAGE_TYPE_SLASH, forced_hit_slot="chest")
         self.assertGreaterEqual(solo_dr, spread_dr + 1)
+
+    def test_defend_action_applies_weapon_dr_bonus(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=81)
+        a0 = env.state.agents["agent_0"]
+        a0.equipped = ["dagger"]
+
+        env._rng.seed(991)
+        base_dr, _, _, _ = env._roll_hit_location_dr(
+            a0, DAMAGE_TYPE_SLASH, forced_hit_slot="chest"
+        )
+        env._defending_agents = {"agent_0"}
+        env._rng.seed(991)
+        defend_dr, _, _, _ = env._roll_hit_location_dr(
+            a0, DAMAGE_TYPE_SLASH, forced_hit_slot="chest"
+        )
+        self.assertGreaterEqual(defend_dr, base_dr + 4)
+
+    def test_shield_increases_defend_bonus_more(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=83)
+        a0 = env.state.agents["agent_0"]
+        a0.equipped = ["dagger"]
+        no_shield_bonus, _, shield_bonus = env._defend_dr_bonus_for("agent_0")
+        self.assertEqual(shield_bonus, 0)
+
+        a0.equipped = ["dagger", "shield"]
+        with_shield_bonus, _, shield_bonus = env._defend_dr_bonus_for("agent_0")
+        self.assertGreater(shield_bonus, 0)
+        self.assertGreater(with_shield_bonus, no_shield_bonus)
 
     def test_ring_items_fill_ring_slots_in_order(self):
         env = PettingZooParallelRLRLGym(

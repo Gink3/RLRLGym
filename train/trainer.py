@@ -745,6 +745,7 @@ class MultiAgentTrainer:
         for aid in self.env.possible_agents:
             agent_info = info.get(aid, {})
             events = list(agent_info.get("events", [])) if isinstance(agent_info, dict) else []
+            events = self._filter_agent_log_events(events)
             reason = self._death_reason_from_events(events)
             if reason is None:
                 reason = derived_death_reasons.get(aid)
@@ -784,6 +785,15 @@ class MultiAgentTrainer:
                 return "starvation"
             return "combat/unknown"
         return None
+
+    def _filter_agent_log_events(self, events: list[object]) -> list[str]:
+        out: list[str] = []
+        for raw in events:
+            evt = str(raw)
+            if evt.startswith("monster_move:") or evt.startswith("monster_wander:"):
+                continue
+            out.append(evt)
+        return out
 
     def _agent_damage_events(self, prev_state, curr_state, info) -> list[dict]:
         out = []
@@ -833,7 +843,9 @@ class MultiAgentTrainer:
                 continue
             if bool(prev_mon.alive) and not bool(curr_mon.alive):
                 killer = killer_by_monster_id.get(curr_mon.monster_id)
-                reason = f"killed by agent ({killer})" if killer else "died/unknown"
+                if killer is None:
+                    continue
+                reason = f"killed by agent ({killer})"
                 out.append(
                     {
                         "entity_id": entity_id,
@@ -852,7 +864,7 @@ class MultiAgentTrainer:
             dmg = int(prev_mon.hp) - int(curr_mon.hp)
             if dmg <= 0:
                 continue
-            source = "unknown"
+            source = None
             for src_aid, src_info in info.items():
                 for evt in list(src_info.get("events", [])):
                     if (
@@ -861,8 +873,10 @@ class MultiAgentTrainer:
                     ):
                         source = f"agent:{src_aid}"
                         break
-                if source != "unknown":
+                if source is not None:
                     break
+            if source is None:
+                continue
             out.append(
                 {
                     "entity_id": entity_id,

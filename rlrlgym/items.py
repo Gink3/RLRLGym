@@ -34,6 +34,8 @@ class WeaponDef:
     damage_min: int
     damage_max: int
     skill: str
+    defense_dr_bonus: int
+    two_handed: bool = False
 
 
 @dataclass
@@ -44,6 +46,7 @@ class ItemDef:
     is_treasure: bool = False
     armor_slot: Optional[str] = None
     dr_bonus_vs: Dict[str, int] = field(default_factory=dict)
+    defense_dr_bonus: int = 0
     weapon: Optional[WeaponDef] = None
 
 
@@ -109,6 +112,32 @@ class ItemCatalog:
             out[item_id] = str(item.weapon.skill)
         return out
 
+    @property
+    def weapon_defense_dr_bonus(self) -> Dict[str, int]:
+        out: Dict[str, int] = {}
+        for item_id, item in self.items.items():
+            if item.weapon is None:
+                continue
+            out[item_id] = int(item.weapon.defense_dr_bonus)
+        return out
+
+    @property
+    def weapon_two_handed(self) -> Dict[str, bool]:
+        out: Dict[str, bool] = {}
+        for item_id, item in self.items.items():
+            if item.weapon is None:
+                continue
+            out[item_id] = bool(item.weapon.two_handed)
+        return out
+
+    @property
+    def item_defense_dr_bonus(self) -> Dict[str, int]:
+        return {
+            item_id: int(item.defense_dr_bonus)
+            for item_id, item in self.items.items()
+            if int(item.defense_dr_bonus) > 0
+        }
+
 
 REQUIRED_ITEM_FIELDS = {"id", "weight"}
 
@@ -159,12 +188,22 @@ def load_items(path: str | Path) -> ItemCatalog:
                 )
             dr_bonus_vs[key] = int(bonus)
 
+        defense_dr_bonus = int(row.get("defense_dr_bonus", 0))
+        if defense_dr_bonus < 0:
+            raise ValueError(f"item[{idx}].defense_dr_bonus must be >= 0")
+
         weapon_raw = row.get("weapon")
         weapon: Optional[WeaponDef] = None
         if weapon_raw is not None:
             if not isinstance(weapon_raw, dict):
                 raise ValueError(f"item[{idx}].weapon must be an object")
-            required_weapon_fields = {"damage_type", "damage_min", "damage_max", "skill"}
+            required_weapon_fields = {
+                "damage_type",
+                "damage_min",
+                "damage_max",
+                "skill",
+                "defense_dr_bonus",
+            }
             wmissing = required_weapon_fields - set(weapon_raw.keys())
             if wmissing:
                 miss = ", ".join(sorted(wmissing))
@@ -183,11 +222,19 @@ def load_items(path: str | Path) -> ItemCatalog:
                 raise ValueError(
                     f"item[{idx}].weapon.skill '{skill}' must be one of {sorted(WEAPON_SKILLS)}"
                 )
+            weapon_defense_dr_bonus = int(weapon_raw["defense_dr_bonus"])
+            if weapon_defense_dr_bonus < 0:
+                raise ValueError(
+                    f"item[{idx}].weapon.defense_dr_bonus must be >= 0"
+                )
+            two_handed = bool(weapon_raw.get("two_handed", False))
             weapon = WeaponDef(
                 damage_type=damage_type,
                 damage_min=damage_min,
                 damage_max=damage_max,
                 skill=skill,
+                defense_dr_bonus=weapon_defense_dr_bonus,
+                two_handed=two_handed,
             )
 
         items[item_id] = ItemDef(
@@ -197,6 +244,7 @@ def load_items(path: str | Path) -> ItemCatalog:
             is_treasure=is_treasure,
             armor_slot=armor_slot,
             dr_bonus_vs=dr_bonus_vs,
+            defense_dr_bonus=defense_dr_bonus,
             weapon=weapon,
         )
 

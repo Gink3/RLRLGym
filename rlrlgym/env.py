@@ -12,6 +12,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from .constants import (
     ACTION_ACCEPT_INVITE,
     ACTION_ATTACK,
+    ACTION_DEFEND,
     ACTION_EAT,
     ACTION_EQUIP,
     ACTION_GIVE,
@@ -160,6 +161,7 @@ class EnvConfig:
     treasure_hold_reward_cap_items: int = 6
     treasure_end_bonus_per_item: float = 0.15
     invalid_faction_action_penalty: float = 0.03
+    defend_unarmed_dr_bonus: int = 2
     render_enabled: bool = True
 
     @classmethod
@@ -224,7 +226,10 @@ class MultiAgentRLRLGym:
         self.weapon_damage_type = dict(self.items.weapon_damage_type)
         self.weapon_damage_range = dict(self.items.weapon_damage_range)
         self.weapon_skill_by_item = dict(self.items.weapon_skill)
+        self.weapon_defense_dr_bonus = dict(self.items.weapon_defense_dr_bonus)
+        self.weapon_two_handed = dict(self.items.weapon_two_handed)
         self.item_dr_bonus_vs = dict(self.items.item_dr_bonus_vs)
+        self.item_defense_dr_bonus = dict(self.items.item_defense_dr_bonus)
         self.armor_slot_by_item = dict(self.items.armor_slot_by_item)
         self.item_weight = dict(self.items.item_weight)
         self.edible_items = set(self.items.edible_items)
@@ -256,11 +261,12 @@ class MultiAgentRLRLGym:
         self._faction_action_next_step: Dict[str, Dict[str, int]] = {}
         self._team_pair_reward_counts: Dict[str, int] = {}
         self._team_pair_last_reward_step: Dict[str, int] = {}
+        self._defending_agents: set[str] = set()
 
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
             raise KeyError(f"Unknown agent: {agent_id}")
-        return (0, 17)
+        return (0, 18)
 
     def observation_space(self, agent_id: str) -> Dict[str, object]:
         if agent_id not in self.possible_agents:
@@ -384,7 +390,7 @@ class MultiAgentRLRLGym:
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
         info = {
             aid: {
-                "action_mask": [1] * 18,
+                "action_mask": [1] * 19,
                 "alive": True,
                 "profile": self.state.agents[aid].profile_name,
                 "race": self.state.agents[aid].race_name,
@@ -404,6 +410,7 @@ class MultiAgentRLRLGym:
         if self.state is None:
             raise RuntimeError("Environment must be reset before step")
         self._guard_assignments = {}
+        self._defending_agents = set()
         self._revived_this_step = set()
         self._deferred_agent_rewards = {}
         self._deferred_agent_events = {}
@@ -884,6 +891,9 @@ class MultiAgentRLRLGym:
         elif action == ACTION_GUARD:
             reward += self._guard_ally(actor=agent, actor_id=aid, events=events)
 
+        elif action == ACTION_DEFEND:
+            reward += self._defend(actor=agent, actor_id=aid, events=events)
+
         elif action == ACTION_LEAVE_FACTION:
             reward += self._leave_faction(actor=agent, actor_id=aid, events=events)
 
@@ -1163,6 +1173,31 @@ class MultiAgentRLRLGym:
         if not allowed:
             return 0.0
         return float(self.config.team_guard_reward)
+
+    def _defend(self, _actor: AgentState, actor_id: str, events: List[str]) -> float:
+        self._defending_agents.add(actor_id)
+        defend_bonus, weapon_id, shield_bonus = self._defend_dr_bonus_for(actor_id)
+        events.append(f"defend:dr_bonus:{defend_bonus}")
+        events.append(f"defend:weapon:{weapon_id}")
+        if shield_bonus > 0:
+            events.append(f"defend:shield_bonus:{shield_bonus}")
+        return 0.01
+
+    def _defend_dr_bonus_for(self, agent_id: str) -> Tuple[int, str, int]:
+        if self.state is None:
+            return max(0, int(self.config.defend_unarmed_dr_bonus)), "unarmed", 0
+        agent = self.state.agents.get(agent_id)
+        if agent is None:
+            return max(0, int(self.config.defend_unarmed_dr_bonus)), "unarmed", 0
+        weapon_id, _, _, _ = self._equipped_weapon(agent)
+        if weapon_id == "unarmed":
+            weapon_bonus = max(0, int(self.config.defend_unarmed_dr_bonus))
+        else:
+            weapon_bonus = max(0, int(self.weapon_defense_dr_bonus.get(weapon_id, 0)))
+        shield_bonus = 0
+        for item in agent.equipped:
+            shield_bonus = max(shield_bonus, int(self.item_defense_dr_bonus.get(item, 0)))
+        return weapon_bonus + shield_bonus, weapon_id, shield_bonus
 
     def _leave_faction(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
         assert self.state is not None
@@ -1602,6 +1637,9 @@ class MultiAgentRLRLGym:
         dr = self._rng.randint(base_min, base_max)
         dr += int(race.dr_bonus_vs.get(damage_type, 0))
         dr += armor_mitigation
+        if target.agent_id in self._defending_agents:
+            defend_bonus, _, _ = self._defend_dr_bonus_for(target.agent_id)
+            dr += int(defend_bonus)
         if self._has_adjacent_ally(target):
             dr += int(self.config.formation_dr_bonus)
         return max(0, dr), hit_slot, max(0, armor_mitigation), armor_skill

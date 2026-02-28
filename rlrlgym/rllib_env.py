@@ -39,7 +39,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             shape=(observation_vector_size(),),
             dtype=np.float32,
         )
-        self._action_space = spaces.Discrete(18)
+        self._action_space = spaces.Discrete(19)
         self.possible_agents = list(self.base.possible_agents)
         self.agents = []
         self.observation_spaces = {aid: self._obs_space for aid in self.possible_agents}
@@ -289,6 +289,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         for aid in self.possible_agents:
             agent_info = info.get(aid, {})
             events = list(agent_info.get("events", [])) if isinstance(agent_info, dict) else []
+            events = self._filter_agent_log_events(events)
             reason = self._death_reason_from_events(events)
             if reason is None:
                 reason = derived_death_reasons.get(aid)
@@ -328,6 +329,15 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                 return "starvation"
             return "combat/unknown"
         return None
+
+    def _filter_agent_log_events(self, events: list[object]) -> list[str]:
+        out: list[str] = []
+        for raw in events:
+            evt = str(raw)
+            if evt.startswith("monster_move:") or evt.startswith("monster_wander:"):
+                continue
+            out.append(evt)
+        return out
 
     def _agent_damage_events(self, prev_state, curr_state, info) -> list[dict]:
         out = []
@@ -377,7 +387,9 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                 continue
             if bool(prev_mon.alive) and not bool(curr_mon.alive):
                 killer = killer_by_monster_id.get(curr_mon.monster_id)
-                reason = f"killed by agent ({killer})" if killer else "died/unknown"
+                if killer is None:
+                    continue
+                reason = f"killed by agent ({killer})"
                 out.append(
                     {
                         "entity_id": entity_id,
@@ -396,7 +408,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             dmg = int(prev_mon.hp) - int(curr_mon.hp)
             if dmg <= 0:
                 continue
-            source = "unknown"
+            source = None
             for src_aid, src_info in info.items():
                 for evt in list(src_info.get("events", [])):
                     if (
@@ -405,8 +417,10 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                     ):
                         source = f"agent:{src_aid}"
                         break
-                if source != "unknown":
+                if source is not None:
                     break
+            if source is None:
+                continue
             out.append(
                 {
                     "entity_id": entity_id,

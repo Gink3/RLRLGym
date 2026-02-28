@@ -27,6 +27,7 @@ class TestItemsJson(unittest.TestCase):
                         "damage_min": 2,
                         "damage_max": 4,
                         "skill": "melee",
+                        "defense_dr_bonus": 3,
                     },
                 },
                 {
@@ -45,6 +46,7 @@ class TestItemsJson(unittest.TestCase):
             items = load_items(p)
             self.assertIn("dagger", items.weapon_damage_type)
             self.assertEqual(items.weapon_damage_type["dagger"], "pierce")
+            self.assertEqual(items.weapon_defense_dr_bonus["dagger"], 3)
             self.assertIn("leather_cap", items.armor_slot_by_item)
             self.assertEqual(items.armor_slot_by_item["leather_cap"], "head")
             self.assertIn("coin", items.treasure_items)
