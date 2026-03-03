@@ -28,6 +28,10 @@ class MapGenConfig:
 
 def load_mapgen_config(path: str | Path) -> MapGenConfig:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return parse_mapgen_config(raw)
+
+
+def parse_mapgen_config(raw: object) -> MapGenConfig:
     if not isinstance(raw, dict):
         raise ValueError("Mapgen config JSON must be an object")
     if "schema_version" not in raw or not isinstance(raw["schema_version"], int):

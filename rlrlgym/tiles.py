@@ -52,6 +52,10 @@ def _validate_tile_schema(data: object) -> dict:
 
 def load_tileset(path: str | Path) -> Dict[str, TileDef]:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return parse_tileset(raw)
+
+
+def parse_tileset(raw: object) -> Dict[str, TileDef]:
     data = _validate_tile_schema(raw)
 
     tiles: Dict[str, TileDef] = {}

@@ -131,6 +131,37 @@ class ScenarioEditorApp:
             cfg = EnvConfig()
         out = dict(vars(cfg))
         out.pop("agent_scenario", None)
+        return self._expand_embedded_spawn_data(out)
+
+    def _read_json_file(self, path_value: object, fallback: str) -> Dict[str, object]:
+        p = Path(str(path_value or fallback))
+        raw = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError(f"Expected JSON object at {p}")
+        return raw
+
+    def _expand_embedded_spawn_data(self, env_cfg: Dict[str, object]) -> Dict[str, object]:
+        out = dict(env_cfg)
+        if not out.get("structures_data"):
+            out["structures_data"] = self._read_json_file(
+                out.get("tiles_path"), "data/base/tiles.json"
+            )
+        if not out.get("items_data"):
+            out["items_data"] = self._read_json_file(
+                out.get("items_path"), "data/base/items.json"
+            )
+        if not out.get("monsters_data"):
+            out["monsters_data"] = self._read_json_file(
+                out.get("monsters_path"), "data/base/monsters.json"
+            )
+        if not out.get("monster_spawns_data"):
+            out["monster_spawns_data"] = self._read_json_file(
+                out.get("monster_spawns_path"), "data/base/monster_spawns.json"
+            )
+        if not out.get("mapgen_config_data"):
+            out["mapgen_config_data"] = self._read_json_file(
+                out.get("mapgen_config_path"), "data/base/mapgen_config.json"
+            )
         return out
 
     def _on_theme_change(self) -> None:
@@ -241,7 +272,7 @@ class ScenarioEditorApp:
         merged_env = copy.deepcopy(self.default_env_config)
         for key, value in dict(self.scenario.env_config).items():
             merged_env[key] = value
-        self.scenario.env_config = merged_env
+        self.scenario.env_config = self._expand_embedded_spawn_data(merged_env)
         self.env_text.delete("1.0", tk.END)
         self.env_text.insert("1.0", json.dumps(self.scenario.env_config, indent=2))
         self._refresh_list()
@@ -273,6 +304,7 @@ class ScenarioEditorApp:
                     clean_env[key] = env_payload[key]
                 else:
                     clean_env[key] = self.default_env_config[key]
+            clean_env = self._expand_embedded_spawn_data(clean_env)
             self.scenario.name = self.name_var.get().strip() or "scenario"
             self.scenario.env_config = clean_env
             out_dir = save_scenario(self.scenario_path, self.scenario)

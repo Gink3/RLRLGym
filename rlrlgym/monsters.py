@@ -60,6 +60,10 @@ class MonsterSpawnEntry:
 
 def load_monsters(path: str | Path) -> Dict[str, MonsterDef]:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return parse_monsters(raw)
+
+
+def parse_monsters(raw: object) -> Dict[str, MonsterDef]:
     if not isinstance(raw, dict):
         raise ValueError("Monsters JSON must be an object")
     if "schema_version" not in raw or not isinstance(raw["schema_version"], int):
@@ -135,6 +139,12 @@ def load_monster_spawns(
     path: str | Path, monsters: Dict[str, MonsterDef]
 ) -> List[MonsterSpawnEntry]:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return parse_monster_spawns(raw, monsters)
+
+
+def parse_monster_spawns(
+    raw: object, monsters: Dict[str, MonsterDef]
+) -> List[MonsterSpawnEntry]:
     if not isinstance(raw, dict):
         raise ValueError("Monster spawn JSON must be an object")
     if "schema_version" not in raw or not isinstance(raw["schema_version"], int):

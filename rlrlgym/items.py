@@ -144,6 +144,10 @@ REQUIRED_ITEM_FIELDS = {"id", "weight"}
 
 def load_items(path: str | Path) -> ItemCatalog:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    return parse_items(raw)
+
+
+def parse_items(raw: object) -> ItemCatalog:
     if not isinstance(raw, dict):
         raise ValueError("Items JSON must be an object")
     if "schema_version" not in raw or not isinstance(raw["schema_version"], int):

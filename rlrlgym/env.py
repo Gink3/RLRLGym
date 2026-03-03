@@ -32,16 +32,23 @@ from .constants import (
     MOVE_DELTAS,
 )
 from .classes import AgentClass, load_classes
-from .items import ItemCatalog, load_items
+from .items import ItemCatalog, load_items, parse_items
 from .mapgen import generate_map, sample_walkable_positions
-from .mapgen_config import MapGenConfig, load_mapgen_config
+from .mapgen_config import MapGenConfig, load_mapgen_config, parse_mapgen_config
 from .models import AgentState, ChestState, EnvState, MonsterState
-from .monsters import MonsterDef, MonsterSpawnEntry, load_monster_spawns, load_monsters
+from .monsters import (
+    MonsterDef,
+    MonsterSpawnEntry,
+    load_monster_spawns,
+    load_monsters,
+    parse_monster_spawns,
+    parse_monsters,
+)
 from .profiles import AgentProfile, load_profiles
 from .races import AgentRace, load_races
 from .render import RenderWindow
 from .scenario import apply_scenario_to_env_config, load_scenario
-from .tiles import load_tileset
+from .tiles import load_tileset, parse_tileset
 
 MOVE_VALID_REWARD = 0.005
 MOVE_STEP_COST = 0.002
@@ -106,6 +113,13 @@ class EnvConfig:
     monsters_path: str = str(Path("data") / "base" / "monsters.json")
     monster_spawns_path: str = str(Path("data") / "base" / "monster_spawns.json")
     mapgen_config_path: str = str(Path("data") / "base" / "mapgen_config.json")
+    # Optional scenario-bundled payloads. When set, these override *_path files.
+    structures_data: Dict[str, object] = field(default_factory=dict)
+    tiles_data: Dict[str, object] = field(default_factory=dict)
+    items_data: Dict[str, object] = field(default_factory=dict)
+    monsters_data: Dict[str, object] = field(default_factory=dict)
+    monster_spawns_data: Dict[str, object] = field(default_factory=dict)
+    mapgen_config_data: Dict[str, object] = field(default_factory=dict)
     scenario_path: str = ""
     agent_scenario: List[Dict[str, object]] = field(default_factory=list)
     agent_observation_config: Dict[str, Dict[str, object]] = field(default_factory=dict)
@@ -187,6 +201,16 @@ class EnvConfig:
         merged["agent_profile_map"] = dict(merged.get("agent_profile_map", {}))
         merged["agent_race_map"] = dict(merged.get("agent_race_map", {}))
         merged["agent_class_map"] = dict(merged.get("agent_class_map", {}))
+        merged["structures_data"] = dict(merged.get("structures_data", {}) or {})
+        merged["tiles_data"] = dict(merged.get("tiles_data", {}) or {})
+        merged["items_data"] = dict(merged.get("items_data", {}) or {})
+        merged["monsters_data"] = dict(merged.get("monsters_data", {}) or {})
+        merged["monster_spawns_data"] = dict(
+            merged.get("monster_spawns_data", {}) or {}
+        )
+        merged["mapgen_config_data"] = dict(
+            merged.get("mapgen_config_data", {}) or {}
+        )
         return cls(**merged)
 
 
@@ -212,17 +236,36 @@ class MultiAgentRLRLGym:
         if str(self.config.scenario_path).strip():
             self.scenario = load_scenario(self.config.scenario_path)
             self.config = apply_scenario_to_env_config(self.config, self.scenario)
-        self.tiles = load_tileset(self.config.tiles_path)
+        tiles_payload = (
+            self.config.structures_data
+            if self.config.structures_data
+            else self.config.tiles_data
+        )
+        if tiles_payload:
+            self.tiles = parse_tileset(tiles_payload)
+        else:
+            self.tiles = load_tileset(self.config.tiles_path)
         self.profiles: Dict[str, AgentProfile] = load_profiles(
             self.config.profiles_path
         )
         self.races: Dict[str, AgentRace] = load_races(self.config.races_path)
         self.classes: Dict[str, AgentClass] = load_classes(self.config.classes_path)
-        self.items: ItemCatalog = load_items(self.config.items_path)
-        self.monsters: Dict[str, MonsterDef] = load_monsters(self.config.monsters_path)
-        self.monster_spawns: List[MonsterSpawnEntry] = load_monster_spawns(
-            self.config.monster_spawns_path, self.monsters
-        )
+        if self.config.items_data:
+            self.items = parse_items(self.config.items_data)
+        else:
+            self.items = load_items(self.config.items_path)
+        if self.config.monsters_data:
+            self.monsters = parse_monsters(self.config.monsters_data)
+        else:
+            self.monsters = load_monsters(self.config.monsters_path)
+        if self.config.monster_spawns_data:
+            self.monster_spawns = parse_monster_spawns(
+                self.config.monster_spawns_data, self.monsters
+            )
+        else:
+            self.monster_spawns = load_monster_spawns(
+                self.config.monster_spawns_path, self.monsters
+            )
         self.weapon_damage_type = dict(self.items.weapon_damage_type)
         self.weapon_damage_range = dict(self.items.weapon_damage_range)
         self.weapon_skill_by_item = dict(self.items.weapon_skill)
@@ -236,9 +279,10 @@ class MultiAgentRLRLGym:
         self.treasure_items = set(self.items.treasure_items)
         self.chest_loot_table = list(self.items.chest_loot_table)
         self._validate_item_references()
-        self.mapgen_cfg: MapGenConfig = load_mapgen_config(
-            self.config.mapgen_config_path
-        )
+        if self.config.mapgen_config_data:
+            self.mapgen_cfg = parse_mapgen_config(self.config.mapgen_config_data)
+        else:
+            self.mapgen_cfg = load_mapgen_config(self.config.mapgen_config_path)
         self._rng = random.Random(0)
         self.possible_agents = [f"agent_{i}" for i in range(self.config.n_agents)]
         self.agents = list(self.possible_agents)

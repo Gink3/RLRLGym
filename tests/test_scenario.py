@@ -99,6 +99,47 @@ class TestScenario(unittest.TestCase):
             self.assertEqual(loaded.agents[0].name, "Atlas")
             self.assertEqual(loaded.env_config.get("width"), 20)
 
+    def test_scenario_can_bundle_spawn_and_structure_tables(self):
+        base = Path("data/base")
+        bundled_env = {
+            "width": 16,
+            "height": 12,
+            "max_steps": 10,
+            # Intentionally bad paths to prove bundled payloads are used.
+            "tiles_path": "missing/tiles.json",
+            "items_path": "missing/items.json",
+            "monsters_path": "missing/monsters.json",
+            "monster_spawns_path": "missing/monster_spawns.json",
+            "mapgen_config_path": "missing/mapgen_config.json",
+            "structures_data": json.loads((base / "tiles.json").read_text(encoding="utf-8")),
+            "items_data": json.loads((base / "items.json").read_text(encoding="utf-8")),
+            "monsters_data": json.loads((base / "monsters.json").read_text(encoding="utf-8")),
+            "monster_spawns_data": json.loads(
+                (base / "monster_spawns.json").read_text(encoding="utf-8")
+            ),
+            "mapgen_config_data": json.loads(
+                (base / "mapgen_config.json").read_text(encoding="utf-8")
+            ),
+        }
+        scenario = Scenario(
+            name="bundled_case",
+            env_config=bundled_env,
+            agents=[
+                ScenarioAgent(agent_id="agent_0", race="human", class_name="fighter"),
+                ScenarioAgent(agent_id="agent_1", race="orc", class_name="rogue"),
+            ],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = save_scenario(Path(tmp) / "bundled_case", scenario)
+            env = PettingZooParallelRLRLGym(
+                EnvConfig(scenario_path=str(out_dir), render_enabled=False)
+            )
+            obs, _ = env.reset(seed=123)
+            self.assertEqual(set(obs.keys()), {"agent_0", "agent_1"})
+            self.assertIn("floor", env.tiles)
+            self.assertIn("rat", env.monsters)
+            self.assertGreater(len(env.monster_spawns), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
