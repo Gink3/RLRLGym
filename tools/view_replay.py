@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.models import AgentState, ChestState, EnvState, MonsterState
+from rlrlgym.models import AgentState, AnimalState, ChestState, EnvState, MonsterState
 
 
 def _state_from_payload(frame: dict) -> EnvState:
@@ -46,6 +46,8 @@ def _state_from_payload(frame: dict) -> EnvState:
             class_name=str(row.get("class_name", "fighter")),
             hp=int(row.get("hp", 0)),
             max_hp=int(row.get("max_hp", 0)),
+            mana=int(row.get("mana", 0)),
+            max_mana=int(row.get("max_mana", 0)),
             hunger=int(row.get("hunger", 0)),
             max_hunger=int(row.get("max_hunger", 0)),
             inventory=list(row.get("inventory", [])),
@@ -70,6 +72,10 @@ def _state_from_payload(frame: dict) -> EnvState:
             intellect=int(row.get("intellect", 5)),
             skills={str(k): int(v) for k, v in dict(row.get("skills", {})).items()},
             skill_xp={str(k): int(v) for k, v in dict(row.get("skill_xp", {})).items()},
+            spell_cooldowns={
+                str(k): int(v) for k, v in dict(row.get("spell_cooldowns", {})).items()
+            },
+            known_spells=[str(x) for x in row.get("known_spells", [])],
         )
         agents[aid] = agent
     monsters = {}
@@ -93,6 +99,34 @@ def _state_from_payload(frame: dict) -> EnvState:
             alive=bool(row.get("alive", True)),
         )
         monsters[entity_id] = monster
+    animals = {}
+    for row in frame.get("animals", []):
+        entity_id = str(row.get("entity_id", "animal"))
+        animal = AnimalState(
+            entity_id=entity_id,
+            animal_id=str(row.get("animal_id", entity_id)),
+            name=str(row.get("name", row.get("animal_id", entity_id))),
+            symbol=str(row.get("symbol", "a"))[:1] or "a",
+            color=str(row.get("color", "green")),
+            position=(int(row["position"][0]), int(row["position"][1])),
+            hp=int(row.get("hp", 1)),
+            max_hp=int(row.get("max_hp", 1)),
+            hunger=int(row.get("hunger", 1)),
+            max_hunger=int(row.get("max_hunger", 1)),
+            thirst=int(row.get("thirst", 1)),
+            max_thirst=int(row.get("max_thirst", 1)),
+            age=int(row.get("age", 0)),
+            mature_age=int(row.get("mature_age", 1)),
+            reproduction_cooldown=int(row.get("reproduction_cooldown", 0)),
+            reproduction_cooldown_max=int(row.get("reproduction_cooldown_max", 1)),
+            can_shear=bool(row.get("can_shear", False)),
+            sheared=bool(row.get("sheared", False)),
+            shear_item=str(row.get("shear_item", "")),
+            wool_regrow=int(row.get("wool_regrow", 0)),
+            shear_regrow_max=int(row.get("shear_regrow_max", 0)),
+            alive=bool(row.get("alive", True)),
+        )
+        animals[entity_id] = animal
     return EnvState(
         grid=frame["grid"],
         tile_interactions=tile_interactions,
@@ -100,6 +134,7 @@ def _state_from_payload(frame: dict) -> EnvState:
         agents=agents,
         chests=chests,
         monsters=monsters,
+        animals=animals,
         faction_leaders={
             int(fid): str(leader)
             for fid, leader in dict(frame.get("factions", {}).get("leaders", {})).items()

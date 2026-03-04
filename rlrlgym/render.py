@@ -81,6 +81,20 @@ class AsciiRenderer:
             for pos, chest in state.chests.items()
             if not chest.opened
         }
+        station_positions = {
+            pos: station
+            for pos, station in state.stations.items()
+        }
+        animal_positions = {
+            animal.position: animal
+            for animal in state.animals.values()
+            if animal.alive
+        }
+        resource_positions = {
+            pos: node
+            for pos, node in state.resource_nodes.items()
+            if int(node.remaining) > 0
+        }
         monster_positions = {
             monster.position: monster
             for monster in state.monsters.values()
@@ -104,6 +118,27 @@ class AsciiRenderer:
                     row_cells.append(
                         (monster.symbol, TK_COLORS.get(monster.color, "#ff7675"), False, True)
                     )
+                    continue
+                if pos in animal_positions:
+                    animal = animal_positions[pos]
+                    row_cells.append(
+                        (animal.symbol, TK_COLORS.get(animal.color, "#f6e58d"), False, False)
+                    )
+                    continue
+                if pos in station_positions:
+                    row_cells.append(("T", TK_COLORS["cyan"], False, False))
+                    continue
+                if pos in resource_positions:
+                    node = resource_positions[pos]
+                    glyph = "R"
+                    color = TK_COLORS["green"]
+                    if str(node.skill) == "mining":
+                        glyph = "M"
+                        color = TK_COLORS["yellow"]
+                    elif str(node.skill) == "woodcutting":
+                        glyph = "W"
+                        color = TK_COLORS["green"]
+                    row_cells.append((glyph, color, False, False))
                     continue
                 if pos in chest_positions:
                     row_cells.append(("C", TK_COLORS["yellow"], False, False))
@@ -1103,6 +1138,34 @@ class RenderWindow:
             return f"died to monster {evt.split(':', 1)[1]}"
         if evt.startswith("monster_loot_drop:"):
             return f"monster dropped loot ({evt.split(':', 1)[1]})"
+        if evt.startswith("gather:"):
+            parts = evt.split(":")
+            if len(parts) >= 5:
+                return f"gathered {parts[2]} x{parts[3]} from {parts[1]}"
+        if evt.startswith("resource_depleted:"):
+            return f"resource depleted {evt.split(':', 1)[1]}"
+        if evt.startswith("station_idle:"):
+            return f"station idle {evt.split(':', 1)[1]}"
+        if evt.startswith("craft:"):
+            return f"crafted via {evt.split(':', 1)[1]}"
+        if evt.startswith("build:"):
+            return f"built {evt.split(':', 3)[1]} at ({evt.split(':', 3)[2]},{evt.split(':', 3)[3]})"
+        if evt.startswith("drop_overweight:"):
+            return f"dropped overweight item {evt.split(':', 1)[1]}"
+        if evt.startswith("dragging:"):
+            return "too encumbered to move"
+        if evt.startswith("status_apply:"):
+            return f"status applied {evt.split(':', 1)[1]}"
+        if evt.startswith("status_expire:"):
+            return f"status expired {evt.split(':', 1)[1]}"
+        if evt.startswith("cast:"):
+            return f"cast {evt.split(':', 1)[1]}"
+        if evt.startswith("write_book:"):
+            return f"wrote skill book {evt.split(':', 1)[1]}"
+        if evt.startswith("teach:"):
+            return f"teaching event {evt.split(':', 1)[1]}"
+        if evt.startswith("enchant:"):
+            return f"enchanted item {evt.split(':', 1)[1]}"
         if evt.startswith("winner:"):
             return f"winner marker {evt.split(':', 1)[1]}"
         return evt

@@ -35,7 +35,34 @@
       "walkable": true,
       "spawn_weight": 0.07,
       "max_interactions": 2,
-      "loot_table": ["ration", "ration", "fruit"]
+      "loot_table": ["ration", "ration", "fruit", "seed_packet"]
+    },
+    {
+      "id": "grass",
+      "glyph": "\"",
+      "color": "green",
+      "walkable": true,
+      "spawn_weight": 0.0,
+      "max_interactions": 2,
+      "loot_table": []
+    },
+    {
+      "id": "bush",
+      "glyph": "&",
+      "color": "green",
+      "walkable": true,
+      "spawn_weight": 0.0,
+      "max_interactions": 3,
+      "loot_table": []
+    },
+    {
+      "id": "tree",
+      "glyph": "T",
+      "color": "bright_green",
+      "walkable": false,
+      "spawn_weight": 0.0,
+      "max_interactions": 4,
+      "loot_table": []
     },
     {
       "id": "chest",
@@ -53,6 +80,24 @@
       "walkable": true,
       "spawn_weight": 0.02,
       "max_interactions": 3,
+      "loot_table": []
+    },
+    {
+      "id": "wood_wall",
+      "glyph": "H",
+      "color": "yellow",
+      "walkable": false,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
+      "id": "stone_wall",
+      "glyph": "X",
+      "color": "bright_black",
+      "walkable": false,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
       "loot_table": []
     }
   ]

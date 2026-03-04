@@ -111,6 +111,10 @@ class TestScenario(unittest.TestCase):
             "monsters_path": "missing/monsters.json",
             "monster_spawns_path": "missing/monster_spawns.json",
             "mapgen_config_path": "missing/mapgen_config.json",
+            "recipes_path": "missing/recipes.json",
+            "statuses_path": "missing/statuses.json",
+            "spells_path": "missing/spells.json",
+            "enchantments_path": "missing/enchantments.json",
             "structures_data": json.loads((base / "tiles.json").read_text(encoding="utf-8")),
             "items_data": json.loads((base / "items.json").read_text(encoding="utf-8")),
             "monsters_data": json.loads((base / "monsters.json").read_text(encoding="utf-8")),
@@ -119,6 +123,18 @@ class TestScenario(unittest.TestCase):
             ),
             "mapgen_config_data": json.loads(
                 (base / "mapgen_config.json").read_text(encoding="utf-8")
+            ),
+            "recipes_data": json.loads(
+                (base / "recipes.json").read_text(encoding="utf-8")
+            ),
+            "statuses_data": json.loads(
+                (base / "statuses.json").read_text(encoding="utf-8")
+            ),
+            "spells_data": json.loads(
+                (base / "spells.json").read_text(encoding="utf-8")
+            ),
+            "enchantments_data": json.loads(
+                (base / "enchantments.json").read_text(encoding="utf-8")
             ),
         }
         scenario = Scenario(

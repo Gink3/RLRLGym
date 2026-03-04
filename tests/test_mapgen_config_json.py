@@ -22,6 +22,7 @@ class TestMapgenConfigJson(unittest.TestCase):
                 "wall_tile_id": "wall",
                 "floor_fallback_id": "floor",
                 "chest_density": 0.05,
+                "animal_density": 0.02,
                 "min_width": 6,
                 "min_height": 5,
             },
@@ -33,6 +34,7 @@ class TestMapgenConfigJson(unittest.TestCase):
             self.assertEqual(cfg.wall_tile_id, "wall")
             self.assertEqual(cfg.floor_fallback_id, "floor")
             self.assertEqual(cfg.chest_density, 0.05)
+            self.assertEqual(cfg.animal_density, 0.02)
             self.assertEqual(cfg.min_width, 6)
             self.assertEqual(cfg.min_height, 5)
 

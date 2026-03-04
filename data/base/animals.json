@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "animals": [
+    {
+      "id": "cow",
+      "name": "Cow",
+      "symbol": "C",
+      "color": "white",
+      "spawn_weight": 1.2,
+      "hp": 10,
+      "drop_item": "cow_hide",
+      "mature_age": 10,
+      "reproduction_cooldown": 10,
+      "can_shear": false
+    },
+    {
+      "id": "sheep",
+      "name": "Sheep",
+      "symbol": "S",
+      "color": "white",
+      "spawn_weight": 1.3,
+      "hp": 8,
+      "drop_item": "sheep_mutton",
+      "mature_age": 8,
+      "reproduction_cooldown": 8,
+      "can_shear": true,
+      "shear_item": "sheep_wool",
+      "shear_regrow_steps": 6
+    },
+    {
+      "id": "pig",
+      "name": "Pig",
+      "symbol": "P",
+      "color": "yellow",
+      "spawn_weight": 1.1,
+      "hp": 9,
+      "drop_item": "pig_leather",
+      "mature_age": 8,
+      "reproduction_cooldown": 9,
+      "can_shear": false
+    },
+    {
+      "id": "chicken",
+      "name": "Chicken",
+      "symbol": "K",
+      "color": "yellow",
+      "spawn_weight": 1.5,
+      "hp": 5,
+      "drop_item": "chicken_feather",
+      "mature_age": 6,
+      "reproduction_cooldown": 6,
+      "can_shear": false
+    }
+  ]
+}

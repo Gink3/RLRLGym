@@ -5,7 +5,125 @@
     "floor_fallback_id": "floor",
     "chest_density": 0.06,
     "monster_density": 0.05,
+    "animal_density": 0.0,
     "min_width": 4,
-    "min_height": 4
+    "min_height": 4,
+    "biomes": [
+      {
+        "id": "plains",
+        "weight": 0.45,
+        "tile_weights": {
+          "floor": 0.58,
+          "grass": 0.2,
+          "bush": 0.08,
+          "food_cache": 0.12,
+          "water": 0.06,
+          "shrine": 0.04
+        }
+      },
+      {
+        "id": "forest",
+        "weight": 0.35,
+        "tile_weights": {
+          "floor": 0.44,
+          "grass": 0.14,
+          "bush": 0.18,
+          "tree": 0.14,
+          "food_cache": 0.12,
+          "water": 0.07,
+          "shrine": 0.03
+        }
+      },
+      {
+        "id": "rocky",
+        "weight": 0.2,
+        "tile_weights": {
+          "floor": 0.62,
+          "wall": 0.18,
+          "bush": 0.05,
+          "water": 0.06,
+          "shrine": 0.04
+        }
+      }
+    ],
+    "resource_nodes": [
+      {
+        "id": "stone_vein",
+        "skill": "mining",
+        "drop_item": "stone",
+        "density": 0.04,
+        "min_yield": 2,
+        "max_yield": 5,
+        "biomes": ["rocky", "plains"]
+      },
+      {
+        "id": "copper_vein",
+        "skill": "mining",
+        "drop_item": "copper_ore",
+        "density": 0.02,
+        "min_yield": 1,
+        "max_yield": 3,
+        "biomes": ["rocky"]
+      },
+      {
+        "id": "iron_vein",
+        "skill": "mining",
+        "drop_item": "iron_ore",
+        "density": 0.015,
+        "min_yield": 1,
+        "max_yield": 3,
+        "biomes": ["rocky"]
+      },
+      {
+        "id": "silver_vein",
+        "skill": "mining",
+        "drop_item": "silver_ore",
+        "density": 0.008,
+        "min_yield": 1,
+        "max_yield": 2,
+        "biomes": ["rocky"]
+      },
+      {
+        "id": "gold_vein",
+        "skill": "mining",
+        "drop_item": "gold_ore",
+        "density": 0.006,
+        "min_yield": 1,
+        "max_yield": 2,
+        "biomes": ["rocky"]
+      },
+      {
+        "id": "timber_stand",
+        "skill": "woodcutting",
+        "drop_item": "wood",
+        "density": 0.04,
+        "min_yield": 2,
+        "max_yield": 5,
+        "biomes": ["forest", "plains"]
+      }
+    ],
+    "station_spawns": [
+      {
+        "id": "workbench",
+        "density": 0.006,
+        "speed_multiplier": 1.0,
+        "quality_tier": 0,
+        "unlock_recipes": ["craft_wood_wall", "craft_stone_wall"]
+      },
+      {
+        "id": "smelter",
+        "density": 0.005,
+        "speed_multiplier": 1.1,
+        "quality_tier": 0,
+        "unlock_recipes": ["smelt_copper_ingot", "smelt_iron_ingot"]
+      },
+      {
+        "id": "mint",
+        "density": 0.004,
+        "speed_multiplier": 1.0,
+        "quality_tier": 1,
+        "unlock_recipes": ["mint_copper_coin", "mint_silver_coin", "mint_gold_coin"]
+      }
+    ]
   }
 }

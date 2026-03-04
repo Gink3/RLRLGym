@@ -25,6 +25,9 @@ python3 examples/train_demo.py
 - `tools/scenario_editor.py`: GUI editor for scenario files (snapshot `env_config` + agent list). Agent creation flow is race + class selection followed by editable combined JSON before save.
 - `tools/train_launcher.py`: GUI launcher for training jobs with live log streaming and basic live metrics (`return`, `win`, `survival`, `starvation`, `loss`, `epsilon`).
 - `python3 -m train`: training CLI (custom and RLlib backends) with scenario support.
+- `docs/CraftingSystem.md`: crafting runtime behavior and content authoring reference.
+- `docs/ConstructionSystem.md`: construction/build placement behavior and authoring reference.
+- `docs/Combat.md`: combat resolution, statuses, and spells reference.
 - Both GUI tools include a top-bar `Settings -> Theme` selector. Selected theme is shared and persisted in `data/user/tool_settings.json`.
 
 Replay viewer example:
@@ -95,12 +98,13 @@ By default training logs Aim runs to `/proj/aimml`. Start the UI against that re
 
 The environment exposes per-agent spaces in PettingZoo Parallel style:
 
-- `env.action_space(agent_id)` returns a discrete integer range `(0, 17)`
+- `env.action_space(agent_id)` returns a discrete integer range `(0, 18)`
 - `env.observation_space(agent_id)` returns a dict-style shape descriptor based on the agent profile
+- Extended systems/skills/observation/reward write-up: [docs/EnvironmentSystems.md](/proj/RLRLGym/docs/EnvironmentSystems.md)
 
 ### Action Space
 
-Each action is an integer in `0..17`:
+Each action is an integer in `0..18`:
 
 - `0`: move north
 - `1`: move south
@@ -114,12 +118,13 @@ Each action is an integer in `0..17`:
 - `9`: use item
 - `10`: interact with environment / nearby agent
 - `11`: attack
-- `12`: create faction / invite ally (contextual)
-- `13`: give item to adjacent ally
-- `14`: trade with adjacent ally
-- `15`: revive adjacent ally
-- `16`: guard adjacent ally
+- `12`: give item to adjacent ally
+- `13`: trade with adjacent ally
+- `14`: revive adjacent ally
+- `15`: guard adjacent ally
+- `16`: leave faction
 - `17`: accept pending faction invite
+- `18`: defend
 
 ### Observation Space
 

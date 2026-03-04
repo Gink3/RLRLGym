@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "enchantments": [
+    {
+      "id": "damage_plus",
+      "tags": ["weapon"],
+      "effects": [{"type": "damage_plus", "amount": 1}],
+      "max_stacks": 2
+    },
+    {
+      "id": "defense_plus",
+      "tags": ["armor"],
+      "effects": [{"type": "defense_plus", "amount": 1}],
+      "max_stacks": 2
+    },
+    {
+      "id": "gather_yield_plus",
+      "tags": ["tool"],
+      "effects": [{"type": "gather_yield_plus", "amount": 1}],
+      "max_stacks": 1
+    },
+    {
+      "id": "status_resist",
+      "tags": ["defensive"],
+      "effects": [{"type": "status_resist", "amount": 0.15}],
+      "max_stacks": 3
+    }
+  ]
+}

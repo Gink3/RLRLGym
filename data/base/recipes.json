@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "recipes": [
+    {
+      "id": "smelt_copper_ingot",
+      "inputs": {"copper_ore": 2},
+      "outputs": {"copper_ingot": 1},
+      "skill": "smithing",
+      "min_skill": 0,
+      "station": "smelter",
+      "craft_time": 2,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["smelting"]
+    },
+    {
+      "id": "smelt_iron_ingot",
+      "inputs": {"iron_ore": 2},
+      "outputs": {"iron_ingot": 1},
+      "skill": "smithing",
+      "min_skill": 1,
+      "station": "smelter",
+      "craft_time": 3,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["smelting"]
+    },
+    {
+      "id": "craft_wood_wall",
+      "inputs": {"wood": 4},
+      "outputs": {},
+      "skill": "crafting",
+      "min_skill": 0,
+      "station": "workbench",
+      "craft_time": 2,
+      "build_tile_id": "wood_wall",
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "wall"]
+    },
+    {
+      "id": "craft_stone_wall",
+      "inputs": {"stone": 4},
+      "outputs": {},
+      "skill": "crafting",
+      "min_skill": 1,
+      "station": "workbench",
+      "craft_time": 3,
+      "build_tile_id": "stone_wall",
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "wall"]
+    },
+    {
+      "id": "mint_copper_coin",
+      "inputs": {"copper_ingot": 1},
+      "outputs": {"copper_coin": 8},
+      "skill": "smithing",
+      "min_skill": 0,
+      "station": "mint",
+      "craft_time": 2,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["coinage"]
+    },
+    {
+      "id": "mint_silver_coin",
+      "inputs": {"silver_ore": 2},
+      "outputs": {"silver_coin": 6},
+      "skill": "smithing",
+      "min_skill": 1,
+      "station": "mint",
+      "craft_time": 2,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["coinage"]
+    },
+    {
+      "id": "mint_gold_coin",
+      "inputs": {"gold_ore": 2},
+      "outputs": {"gold_coin": 4},
+      "skill": "smithing",
+      "min_skill": 2,
+      "station": "mint",
+      "craft_time": 3,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["coinage"]
+    }
+  ]
+}

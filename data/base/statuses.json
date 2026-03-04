@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "statuses": [
+    {
+      "id": "poison",
+      "duration": 6,
+      "tick_interval": 1,
+      "tick": [{"type": "damage", "amount": 1}],
+      "tags": ["dot"]
+    },
+    {
+      "id": "bleed",
+      "duration": 4,
+      "tick_interval": 1,
+      "tick": [{"type": "damage", "amount": 1}],
+      "tags": ["dot"]
+    },
+    {
+      "id": "regen",
+      "duration": 5,
+      "tick_interval": 1,
+      "tick": [{"type": "heal", "amount": 1}],
+      "tags": ["buff"]
+    },
+    {
+      "id": "confused",
+      "duration": 3,
+      "tick_interval": 1,
+      "tick": [],
+      "tags": ["debuff", "confuse"]
+    },
+    {
+      "id": "paralyzed",
+      "duration": 2,
+      "tick_interval": 1,
+      "tick": [],
+      "tags": ["debuff", "paralyze"]
+    },
+    {
+      "id": "resistance",
+      "duration": 5,
+      "tick_interval": 1,
+      "tick": [],
+      "tags": ["buff", "status_resist"]
+    },
+    {
+      "id": "haste",
+      "duration": 4,
+      "tick_interval": 1,
+      "tick": [{"type": "mana", "amount": 1}],
+      "tags": ["buff"]
+    }
+  ]
+}

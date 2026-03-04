@@ -488,6 +488,33 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                 }
                 for _, monster in sorted(state.monsters.items())
             ],
+            "animals": [
+                {
+                    "entity_id": animal.entity_id,
+                    "animal_id": animal.animal_id,
+                    "name": animal.name,
+                    "symbol": animal.symbol,
+                    "color": animal.color,
+                    "position": [animal.position[0], animal.position[1]],
+                    "hp": int(animal.hp),
+                    "max_hp": int(animal.max_hp),
+                    "hunger": int(animal.hunger),
+                    "max_hunger": int(animal.max_hunger),
+                    "thirst": int(animal.thirst),
+                    "max_thirst": int(animal.max_thirst),
+                    "age": int(animal.age),
+                    "mature_age": int(animal.mature_age),
+                    "reproduction_cooldown": int(animal.reproduction_cooldown),
+                    "reproduction_cooldown_max": int(animal.reproduction_cooldown_max),
+                    "can_shear": bool(animal.can_shear),
+                    "sheared": bool(animal.sheared),
+                    "shear_item": str(animal.shear_item),
+                    "wool_regrow": int(animal.wool_regrow),
+                    "shear_regrow_max": int(animal.shear_regrow_max),
+                    "alive": bool(animal.alive),
+                }
+                for _, animal in sorted(state.animals.items())
+            ],
             "agents": {
                 aid: {
                     "agent_id": agent.agent_id,
@@ -497,6 +524,8 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                     "class_name": agent.class_name,
                     "hp": agent.hp,
                     "max_hp": agent.max_hp,
+                    "mana": int(agent.mana),
+                    "max_mana": int(agent.max_mana),
                     "hunger": agent.hunger,
                     "max_hunger": agent.max_hunger,
                     "inventory": list(agent.inventory),
@@ -512,6 +541,8 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                     "intellect": agent.intellect,
                     "skills": dict(agent.skills),
                     "skill_xp": dict(agent.skill_xp),
+                    "spell_cooldowns": dict(agent.spell_cooldowns),
+                    "known_spells": list(agent.known_spells),
                 }
                 for aid, agent in sorted(state.agents.items())
             },

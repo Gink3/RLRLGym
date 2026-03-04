@@ -26,6 +26,7 @@ ARMOR_SLOTS = {
     "ring_4",
 }
 WEAPON_SKILLS = {"melee", "archery", "thrown_weapons"}
+ARMOR_CLASSES = {"light", "medium", "heavy"}
 
 
 @dataclass
@@ -45,6 +46,7 @@ class ItemDef:
     edible_hunger: int = 0
     is_treasure: bool = False
     armor_slot: Optional[str] = None
+    armor_class: Optional[str] = None
     dr_bonus_vs: Dict[str, int] = field(default_factory=dict)
     defense_dr_bonus: int = 0
     weapon: Optional[WeaponDef] = None
@@ -75,6 +77,14 @@ class ItemCatalog:
             item_id: str(item.armor_slot)
             for item_id, item in self.items.items()
             if item.armor_slot is not None
+        }
+
+    @property
+    def armor_class_by_item(self) -> Dict[str, str]:
+        return {
+            item_id: str(item.armor_class)
+            for item_id, item in self.items.items()
+            if item.armor_class is not None
         }
 
     @property
@@ -179,6 +189,13 @@ def parse_items(raw: object) -> ItemCatalog:
             armor_slot = str(armor_slot)
             if armor_slot not in ARMOR_SLOTS:
                 raise ValueError(f"item[{idx}].armor_slot '{armor_slot}' must be one of {sorted(ARMOR_SLOTS)}")
+        armor_class = row.get("armor_class")
+        if armor_class is not None:
+            armor_class = str(armor_class).strip().lower()
+            if armor_class not in ARMOR_CLASSES:
+                raise ValueError(
+                    f"item[{idx}].armor_class '{armor_class}' must be one of {sorted(ARMOR_CLASSES)}"
+                )
 
         dr_bonus_vs_raw = row.get("dr_bonus_vs", {})
         if not isinstance(dr_bonus_vs_raw, dict):
@@ -247,6 +264,7 @@ def parse_items(raw: object) -> ItemCatalog:
             edible_hunger=edible_hunger,
             is_treasure=is_treasure,
             armor_slot=armor_slot,
+            armor_class=armor_class,
             dr_bonus_vs=dr_bonus_vs,
             defense_dr_bonus=defense_dr_bonus,
             weapon=weapon,

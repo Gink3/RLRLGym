@@ -32,10 +32,21 @@ from .constants import (
     MOVE_DELTAS,
 )
 from .classes import AgentClass, load_classes
+from .animals import AnimalDef, load_animals, parse_animals
 from .items import ItemCatalog, load_items, parse_items
 from .mapgen import generate_map, sample_walkable_positions
 from .mapgen_config import MapGenConfig, load_mapgen_config, parse_mapgen_config
-from .models import AgentState, ChestState, EnvState, MonsterState
+from .models import (
+    ActiveStatus,
+    AgentState,
+    AnimalState,
+    ChestState,
+    EnvState,
+    MonsterState,
+    ResourceNodeState,
+    StationState,
+)
+from .enchantments import EnchantDef, load_enchantments, parse_enchantments
 from .monsters import (
     MonsterDef,
     MonsterSpawnEntry,
@@ -46,9 +57,12 @@ from .monsters import (
 )
 from .profiles import AgentProfile, load_profiles
 from .races import AgentRace, load_races
+from .recipes import RecipeDef, load_recipes, parse_recipes
+from .spells import SpellDef, load_spells, parse_spells
+from .statuses import StatusDef, load_statuses, parse_statuses
 from .render import RenderWindow
 from .scenario import apply_scenario_to_env_config, load_scenario
-from .tiles import load_tileset, parse_tileset
+from .tiles import load_tileset, parse_tileset, weighted_tile_ids, weighted_tile_weights
 
 MOVE_VALID_REWARD = 0.005
 MOVE_STEP_COST = 0.002
@@ -85,14 +99,10 @@ HIT_SLOT_TO_ARMOR_SLOTS: Dict[str, Tuple[str, ...]] = {
     "neck": ("neck",),
     "rings": RING_ARMOR_SLOTS,
 }
-HIT_SLOT_TO_ARMOR_SKILL: Dict[str, str] = {
-    "head": "armor_head",
-    "chest": "armor_chest",
-    "back": "armor_back",
-    "arms": "armor_arms",
-    "legs": "armor_legs",
-    "neck": "armor_neck",
-    "rings": "armor_rings",
+ARMOR_CLASS_TO_SKILL: Dict[str, str] = {
+    "light": "armor_light",
+    "medium": "armor_medium",
+    "heavy": "armor_heavy",
 }
 PROFILE_ALIASES: Dict[str, str] = {
     "human": "reward_explorer_policy_v1",
@@ -111,15 +121,25 @@ class EnvConfig:
     classes_path: str = str(Path("data") / "base" / "agent_classes.json")
     items_path: str = str(Path("data") / "base" / "items.json")
     monsters_path: str = str(Path("data") / "base" / "monsters.json")
+    animals_path: str = str(Path("data") / "base" / "animals.json")
     monster_spawns_path: str = str(Path("data") / "base" / "monster_spawns.json")
     mapgen_config_path: str = str(Path("data") / "base" / "mapgen_config.json")
+    recipes_path: str = str(Path("data") / "base" / "recipes.json")
+    statuses_path: str = str(Path("data") / "base" / "statuses.json")
+    spells_path: str = str(Path("data") / "base" / "spells.json")
+    enchantments_path: str = str(Path("data") / "base" / "enchantments.json")
     # Optional scenario-bundled payloads. When set, these override *_path files.
     structures_data: Dict[str, object] = field(default_factory=dict)
     tiles_data: Dict[str, object] = field(default_factory=dict)
     items_data: Dict[str, object] = field(default_factory=dict)
     monsters_data: Dict[str, object] = field(default_factory=dict)
+    animals_data: Dict[str, object] = field(default_factory=dict)
     monster_spawns_data: Dict[str, object] = field(default_factory=dict)
     mapgen_config_data: Dict[str, object] = field(default_factory=dict)
+    recipes_data: Dict[str, object] = field(default_factory=dict)
+    statuses_data: Dict[str, object] = field(default_factory=dict)
+    spells_data: Dict[str, object] = field(default_factory=dict)
+    enchantments_data: Dict[str, object] = field(default_factory=dict)
     scenario_path: str = ""
     agent_scenario: List[Dict[str, object]] = field(default_factory=list)
     agent_observation_config: Dict[str, Dict[str, object]] = field(default_factory=dict)
@@ -205,12 +225,17 @@ class EnvConfig:
         merged["tiles_data"] = dict(merged.get("tiles_data", {}) or {})
         merged["items_data"] = dict(merged.get("items_data", {}) or {})
         merged["monsters_data"] = dict(merged.get("monsters_data", {}) or {})
+        merged["animals_data"] = dict(merged.get("animals_data", {}) or {})
         merged["monster_spawns_data"] = dict(
             merged.get("monster_spawns_data", {}) or {}
         )
         merged["mapgen_config_data"] = dict(
             merged.get("mapgen_config_data", {}) or {}
         )
+        merged["recipes_data"] = dict(merged.get("recipes_data", {}) or {})
+        merged["statuses_data"] = dict(merged.get("statuses_data", {}) or {})
+        merged["spells_data"] = dict(merged.get("spells_data", {}) or {})
+        merged["enchantments_data"] = dict(merged.get("enchantments_data", {}) or {})
         return cls(**merged)
 
 
@@ -258,6 +283,10 @@ class MultiAgentRLRLGym:
             self.monsters = parse_monsters(self.config.monsters_data)
         else:
             self.monsters = load_monsters(self.config.monsters_path)
+        if self.config.animals_data:
+            self.animals = parse_animals(self.config.animals_data)
+        else:
+            self.animals = load_animals(self.config.animals_path)
         if self.config.monster_spawns_data:
             self.monster_spawns = parse_monster_spawns(
                 self.config.monster_spawns_data, self.monsters
@@ -274,6 +303,7 @@ class MultiAgentRLRLGym:
         self.item_dr_bonus_vs = dict(self.items.item_dr_bonus_vs)
         self.item_defense_dr_bonus = dict(self.items.item_defense_dr_bonus)
         self.armor_slot_by_item = dict(self.items.armor_slot_by_item)
+        self.armor_class_by_item = dict(self.items.armor_class_by_item)
         self.item_weight = dict(self.items.item_weight)
         self.edible_items = set(self.items.edible_items)
         self.treasure_items = set(self.items.treasure_items)
@@ -283,6 +313,25 @@ class MultiAgentRLRLGym:
             self.mapgen_cfg = parse_mapgen_config(self.config.mapgen_config_data)
         else:
             self.mapgen_cfg = load_mapgen_config(self.config.mapgen_config_path)
+        if self.config.recipes_data:
+            self.recipes = parse_recipes(self.config.recipes_data)
+        else:
+            self.recipes = load_recipes(self.config.recipes_path)
+        if self.config.statuses_data:
+            self.status_defs = parse_statuses(self.config.statuses_data)
+        else:
+            self.status_defs = load_statuses(self.config.statuses_path)
+        if self.config.spells_data:
+            self.spell_defs = parse_spells(self.config.spells_data)
+        else:
+            self.spell_defs = load_spells(self.config.spells_path)
+        if self.config.enchantments_data:
+            self.enchant_defs = parse_enchantments(self.config.enchantments_data)
+        else:
+            self.enchant_defs = load_enchantments(self.config.enchantments_path)
+        self._recipe_ids = sorted(self.recipes.keys())
+        self._validate_recipe_references()
+        self._validate_effect_references()
         self._rng = random.Random(0)
         self.possible_agents = [f"agent_{i}" for i in range(self.config.n_agents)]
         self.agents = list(self.possible_agents)
@@ -334,16 +383,7 @@ class MultiAgentRLRLGym:
         if seed is not None:
             self._rng.seed(seed)
 
-        grid = generate_map(
-            self.config.width,
-            self.config.height,
-            self.tiles,
-            self._rng,
-            wall_tile_id=self.mapgen_cfg.wall_tile_id,
-            floor_fallback_id=self.mapgen_cfg.floor_fallback_id,
-            min_width=self.mapgen_cfg.min_width,
-            min_height=self.mapgen_cfg.min_height,
-        )
+        grid, biome_map = self._generate_world_terrain()
         starts = sample_walkable_positions(
             grid, self.tiles, self.config.n_agents, self._rng
         )
@@ -367,12 +407,15 @@ class MultiAgentRLRLGym:
                 class_name=cls.name,
                 hp=profile.max_hp,
                 max_hp=profile.max_hp,
+                mana=max(0, race.intellect + 4),
+                max_mana=max(0, race.intellect + 4),
                 hunger=profile.max_hunger,
                 max_hunger=profile.max_hunger,
                 strength=race.strength,
                 dexterity=race.dexterity,
                 intellect=race.intellect,
             )
+            agent.known_spells = self._default_known_spells_for_class(cls.name)
             self._apply_class_modifiers(agent, cls)
             if cls.starting_items:
                 agent.inventory.extend(list(cls.starting_items))
@@ -385,8 +428,11 @@ class MultiAgentRLRLGym:
             ground_items={},
             agents=agents,
             chests={},
+            agent_statuses={aid: [] for aid in self.possible_agents},
+            item_metadata={},
             faction_leaders={},
             pending_faction_invites={},
+            biomes=biome_map,
             step_count=0,
         )
         self._next_faction_id = 1
@@ -397,8 +443,17 @@ class MultiAgentRLRLGym:
         self._team_pair_reward_counts = {}
         self._team_pair_last_reward_step = {}
         self.state.chests = self._spawn_chests(starts)
+        occupied = starts + list(self.state.chests.keys())
+        self.state.resource_nodes = self._spawn_resource_nodes(occupied=occupied)
+        occupied.extend(list(self.state.resource_nodes.keys()))
+        self.state.stations = self._spawn_stations(occupied=occupied)
+        occupied.extend(list(self.state.stations.keys()))
+        self.state.animals = self._spawn_animals(occupied=occupied)
+        occupied.extend(
+            [a.position for a in self.state.animals.values() if a.alive]
+        )
         self.state.monsters = self._spawn_monsters(
-            occupied=starts + list(self.state.chests.keys())
+            occupied=occupied
         )
         self._walkable_tile_count = max(
             1,
@@ -495,6 +550,7 @@ class MultiAgentRLRLGym:
                 continue
 
             action = int(actions.get(aid, ACTION_WAIT))
+            action = self._status_adjust_action(aid=aid, action=action, info=info)
             info[aid]["action"] = action
             delta_reward, events = self._apply_action(aid, action)
             rewards[aid] += delta_reward
@@ -502,6 +558,8 @@ class MultiAgentRLRLGym:
             info[aid]["events"].extend(events)
             survival_delta = self._apply_survival_costs(agent, rewards, aid, info)
             reward_components[aid]["survival"] += float(survival_delta)
+            status_delta = self._tick_agent_statuses(aid=aid, rewards=rewards, info=info)
+            reward_components[aid]["survival"] += float(status_delta)
             search_delta = self._apply_search_and_exploration_rewards(
                 aid=aid,
                 rewards=rewards,
@@ -537,6 +595,7 @@ class MultiAgentRLRLGym:
             info[aid]["events"].extend(list(events))
 
         self._apply_monster_turn(rewards, terminations, info)
+        self._apply_animal_turn(info=info)
         self.state.step_count += 1
 
         if self.state.step_count >= self.config.max_steps:
@@ -781,6 +840,11 @@ class MultiAgentRLRLGym:
             old_food_distance = self._nearest_food_distance(agent.position)
             athletics_level = self._skill_level(agent, "athletics")
             encumbrance_penalty = self._encumbrance_penalty(agent, athletics_level)
+            enc_ratio = self._encumbrance_ratio(agent)
+            if enc_ratio > 1.8:
+                reward -= 0.03
+                events.append("dragging:immobile")
+                return reward, events
             dr, dc = MOVE_DELTAS[action]
             nr, nc = agent.position[0] + dr, agent.position[1] + dc
             if self._walkable(nr, nc):
@@ -877,7 +941,8 @@ class MultiAgentRLRLGym:
         elif action == ACTION_EQUIP:
             if agent.inventory:
                 item = agent.inventory.pop(0)
-                armor_slot = self.armor_slot_by_item.get(item)
+                base_item = self._item_base_id(item)
+                armor_slot = self.armor_slot_by_item.get(base_item)
                 if armor_slot is not None:
                     target_slot = armor_slot
                     if armor_slot == RING_ITEM_SLOT:
@@ -905,23 +970,7 @@ class MultiAgentRLRLGym:
                 reward -= 0.01
 
         elif action == ACTION_USE:
-            medic_level = self._skill_level(agent, "medic")
-            if "bandage" in agent.inventory and agent.hp < agent.max_hp:
-                agent.inventory.remove("bandage")
-                heal = 3 + (medic_level // 2) + max(0, (agent.intellect - 5) // 4)
-                agent.hp = min(agent.max_hp, agent.hp + heal)
-                reward += 0.12 + 0.01 * medic_level
-                events.append("use:bandage")
-                self._gain_skill_xp(agent, "medic", 2, events)
-            elif "healing_potion" in agent.inventory and agent.hp < agent.max_hp:
-                agent.inventory.remove("healing_potion")
-                heal = 5 + medic_level + max(0, (agent.intellect - 5) // 3)
-                agent.hp = min(agent.max_hp, agent.hp + heal)
-                reward += 0.2 + 0.015 * medic_level
-                events.append("use:healing_potion")
-                self._gain_skill_xp(agent, "medic", 3, events)
-            else:
-                reward -= 0.01
+            reward += self._use_item_or_spell(actor=agent, aid=aid, events=events)
 
         elif action == ACTION_GIVE:
             reward += self._give_to_ally(actor=agent, actor_id=aid, events=events)
@@ -960,6 +1009,38 @@ class MultiAgentRLRLGym:
     def _interact(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
         assert self.state is not None
         reward = 0.0
+        prefer_faction = self._pending_invite_faction_id(actor_id) is not None
+        if not prefer_faction:
+            for other_id, other in self.state.agents.items():
+                if other_id == actor_id or not other.alive:
+                    continue
+                if self._manhattan(actor.position, other.position) == 1:
+                    prefer_faction = True
+                    break
+        if prefer_faction:
+            faction_reward, faction_handled = self._handle_faction_interact(
+                actor=actor, actor_id=actor_id, events=events
+            )
+            if faction_handled:
+                return reward + faction_reward
+        resource_reward, resource_handled = self._interact_resource_node(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if resource_handled:
+            return reward + resource_reward
+        station_reward, station_handled = self._interact_station(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if station_handled:
+            return reward + station_reward
+        shear_reward, shear_handled = self._interact_shear(actor=actor, actor_id=actor_id, events=events)
+        if shear_handled:
+            return reward + shear_reward
+        plant_reward, plant_handled = self._interact_plant(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if plant_handled:
+            return reward + plant_reward
         faction_reward, faction_handled = self._handle_faction_interact(
             actor=actor, actor_id=actor_id, events=events
         )
@@ -994,6 +1075,728 @@ class MultiAgentRLRLGym:
             events.append("interact_exhausted")
             reward -= 0.02
         return reward
+
+    def _interact_shear(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        for animal in self.state.animals.values():
+            if not animal.alive:
+                continue
+            if animal.position != actor.position:
+                continue
+            if not animal.can_shear or not animal.shear_item:
+                continue
+            if animal.age < animal.mature_age:
+                events.append(f"shear_fail:young:{animal.animal_id}")
+                return -0.01, True
+            if animal.sheared and animal.wool_regrow > 0:
+                events.append(f"shear_fail:regrow:{animal.animal_id}")
+                return -0.01, True
+            added = self._add_item_or_drop(actor, animal.shear_item, 1, events)
+            animal.sheared = True
+            animal.wool_regrow = max(1, int(animal.shear_regrow_max) or 6)
+            events.append(f"shear:{animal.animal_id}:{animal.shear_item}:{added}")
+            return 0.1, True
+        return 0.0, False
+
+    def _interact_plant(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        del actor_id
+        r, c = actor.position
+        tile_id = self.state.grid[r][c]
+        if tile_id not in {"floor", "grass", "bush"}:
+            return 0.0, False
+        seed = self._pop_first_base_item(actor.inventory, "seed_packet")
+        if seed is None:
+            return 0.0, False
+        self.state.grid[r][c] = "food_cache"
+        self.state.tile_interactions[(r, c)] = 0
+        farming = self._skill_level(actor, "farming")
+        preserve_chance = min(0.5, 0.05 * float(farming))
+        if self._rng.random() < preserve_chance:
+            actor.inventory.append("seed_packet")
+            events.append("plant:seed_preserved")
+        bonus_chance = min(0.6, 0.08 * float(farming))
+        if self._rng.random() < bonus_chance:
+            self.state.ground_items.setdefault((r, c), []).append("fruit")
+            events.append("plant:bonus_yield:fruit")
+        self._gain_skill_xp(actor, "farming", 2, events)
+        events.append(f"plant:food_cache:{r}:{c}")
+        return 0.08 + min(0.08, 0.01 * float(farming)), True
+
+    def _can_carry_item(self, agent: AgentState, item_id: str, qty: int = 1) -> bool:
+        base_id = self._item_base_id(item_id)
+        extra = float(self.item_weight.get(base_id, 1.0)) * float(max(1, int(qty)))
+        cap = self._carry_capacity(agent)
+        return (self._carried_weight(agent) + extra) <= (cap * 1.35)
+
+    def _add_item_or_drop(
+        self, agent: AgentState, item_id: str, qty: int, events: List[str]
+    ) -> int:
+        assert self.state is not None
+        added = 0
+        for _ in range(max(0, int(qty))):
+            if self._can_carry_item(agent, item_id, 1):
+                agent.inventory.append(item_id)
+                added += 1
+            else:
+                pos = agent.position
+                self.state.ground_items.setdefault(pos, []).append(item_id)
+                events.append(f"drop_overweight:{item_id}")
+        return added
+
+    def _interact_resource_node(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        node = self.state.resource_nodes.get(actor.position)
+        if node is None or int(node.remaining) <= 0:
+            return 0.0, False
+        skill_level = self._skill_level(actor, node.skill)
+        base = self._rng.randint(1, 2)
+        bonus = int(round(self._agent_enchant_bonus(actor, "gather_yield_plus")))
+        qty = min(int(node.remaining), base + (skill_level // 3) + max(0, bonus))
+        if qty <= 0:
+            return -0.01, True
+        added = self._add_item_or_drop(actor, node.drop_item, qty, events)
+        node.remaining = max(0, int(node.remaining) - qty)
+        if int(node.remaining) <= 0:
+            self.state.resource_nodes.pop(actor.position, None)
+            events.append(f"resource_depleted:{node.node_id}")
+        self._gain_skill_xp(actor, node.skill, max(1, qty * 2), events)
+        events.append(f"gather:{node.node_id}:{node.drop_item}:{qty}:{added}")
+        reward = 0.06 * float(max(1, qty))
+        if added <= 0:
+            reward -= 0.02
+            events.append("carry_blocked")
+        return reward, True
+
+    def _interact_station(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        station = self.state.stations.get(actor.position)
+        if station is None:
+            return 0.0, False
+        recipe = self._best_station_recipe(actor, station)
+        if recipe is None:
+            events.append(f"station_idle:{station.station_id}")
+            return -0.01, True
+        self._consume_recipe_inputs(actor, recipe)
+        if recipe.build_tile_id:
+            built = self._build_from_recipe(actor, recipe, events)
+            if not built:
+                # Refund inputs if no valid build location.
+                for item_id, qty in recipe.inputs.items():
+                    self._add_item_or_drop(actor, item_id, qty, events)
+                events.append("build_fail:no_space")
+                return -0.02, True
+        else:
+            for item_id, qty in recipe.outputs.items():
+                bonus = max(0, int(station.quality_tier))
+                self._add_item_or_drop(actor, item_id, int(qty) + bonus, events)
+        craft_skill = recipe.skill or "crafting"
+        self._gain_skill_xp(actor, craft_skill, max(1, 2 + recipe.min_skill), events)
+        speed = max(0.1, float(station.speed_multiplier) * float(recipe.speed_multiplier))
+        events.append(f"craft:{recipe.recipe_id}:station={station.station_id}:speed={speed:.2f}")
+        return 0.14 + (0.02 * float(station.quality_tier)), True
+
+    def _consume_recipe_inputs(self, agent: AgentState, recipe: RecipeDef) -> None:
+        for item_id, qty in recipe.inputs.items():
+            remaining = int(qty)
+            for idx in range(len(agent.inventory) - 1, -1, -1):
+                if remaining <= 0:
+                    break
+                if self._item_base_id(agent.inventory[idx]) == item_id:
+                    agent.inventory.pop(idx)
+                    remaining -= 1
+
+    def _best_station_recipe(
+        self, agent: AgentState, station: StationState
+    ) -> RecipeDef | None:
+        allowed = set(station.unlock_recipes)
+        candidates: List[RecipeDef] = []
+        for rid in self._recipe_ids:
+            recipe = self.recipes[rid]
+            if recipe.station and recipe.station != station.station_id:
+                continue
+            if allowed and rid not in allowed:
+                continue
+            if self._skill_level(agent, recipe.skill or "crafting") < recipe.min_skill:
+                continue
+            if not self._has_recipe_inputs(agent, recipe):
+                continue
+            candidates.append(recipe)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda r: (r.min_skill, r.recipe_id), reverse=True)
+        return candidates[0]
+
+    def _has_recipe_inputs(self, agent: AgentState, recipe: RecipeDef) -> bool:
+        counts = self._count_base_items(agent.inventory)
+        for item_id, qty in recipe.inputs.items():
+            if int(counts.get(item_id, 0)) < int(qty):
+                return False
+        return True
+
+    def _build_from_recipe(
+        self, actor: AgentState, recipe: RecipeDef, events: List[str]
+    ) -> bool:
+        assert self.state is not None
+        if recipe.build_tile_id not in self.tiles:
+            return False
+        ar, ac = actor.position
+        for nr, nc in ((ar - 1, ac), (ar + 1, ac), (ar, ac - 1), (ar, ac + 1)):
+            if nr <= 0 or nc <= 0:
+                continue
+            if nr >= (len(self.state.grid) - 1) or nc >= (len(self.state.grid[0]) - 1):
+                continue
+            occupied = any(a.alive and a.position == (nr, nc) for a in self.state.agents.values())
+            occupied = occupied or any(
+                m.alive and m.position == (nr, nc) for m in self.state.monsters.values()
+            )
+            occupied = occupied or ((nr, nc) in self.state.chests)
+            occupied = occupied or ((nr, nc) in self.state.stations)
+            occupied = occupied or ((nr, nc) in self.state.resource_nodes)
+            if occupied:
+                continue
+            self.state.grid[nr][nc] = recipe.build_tile_id
+            events.append(f"build:{recipe.build_tile_id}:{nr}:{nc}")
+            return True
+        return False
+
+    def _item_base_id(self, item_id: str) -> str:
+        assert self.state is not None
+        meta = self.state.item_metadata.get(str(item_id), {})
+        base = str(meta.get("base_id", "")).strip()
+        return base or str(item_id)
+
+    def _pop_first_base_item(self, bag: List[str], base_id: str) -> str | None:
+        for idx, item in enumerate(bag):
+            if self._item_base_id(item) == base_id:
+                return bag.pop(idx)
+        return None
+
+    def _count_base_items(self, bag: List[str]) -> Dict[str, int]:
+        out: Dict[str, int] = {}
+        for item in bag:
+            base = self._item_base_id(item)
+            out[base] = out.get(base, 0) + 1
+        return out
+
+    def _make_item_instance(
+        self,
+        *,
+        base_id: str,
+        kind: str,
+        metadata: Dict[str, object],
+    ) -> str:
+        assert self.state is not None
+        uid = int(self.state.item_metadata.get("__next_uid__", {}).get("value", 1))
+        self.state.item_metadata["__next_uid__"] = {"value": uid + 1}
+        token = f"{kind}@{uid}"
+        row = dict(metadata)
+        row["base_id"] = str(base_id)
+        row["kind"] = str(kind)
+        self.state.item_metadata[token] = row
+        return token
+
+    def _is_skill_book(self, item_id: str) -> bool:
+        assert self.state is not None
+        return str(self.state.item_metadata.get(str(item_id), {}).get("kind", "")) == "skill_book"
+
+    def _item_enchant_rows(self, item_id: str) -> List[Dict[str, object]]:
+        assert self.state is not None
+        row = self.state.item_metadata.get(str(item_id), {})
+        raw = row.get("enchantments", [])
+        if not isinstance(raw, list):
+            return []
+        return [dict(x) for x in raw if isinstance(x, dict)]
+
+    def _enchant_bonus_for_item(self, item_id: str, bonus_key: str) -> float:
+        total = 0.0
+        for ench in self._item_enchant_rows(item_id):
+            eid = str(ench.get("id", "")).strip()
+            edef = self.enchant_defs.get(eid)
+            if edef is None:
+                continue
+            for eff in edef.effects:
+                if str(eff.get("type", "")) == bonus_key:
+                    total += float(eff.get("amount", 0.0))
+        return total
+
+    def _agent_enchant_bonus(self, agent: AgentState, bonus_key: str) -> float:
+        total = 0.0
+        for item in agent.equipped:
+            total += self._enchant_bonus_for_item(item, bonus_key)
+        return total
+
+    def _use_item_or_spell(self, actor: AgentState, aid: str, events: List[str]) -> float:
+        assert self.state is not None
+        medic_level = self._skill_level(actor, "medic")
+        rewards = {aid: 0.0}
+        info = {aid: {"events": events}}
+        bandage_item = self._pop_first_base_item(actor.inventory, "bandage")
+        if bandage_item is not None and actor.hp < actor.max_hp:
+            heal = 3 + (medic_level // 2) + max(0, (actor.intellect - 5) // 4)
+            actor.hp = min(actor.max_hp, actor.hp + heal)
+            events.append("use:bandage")
+            self._clear_status(aid, "bleed", info=info, rewards=rewards)
+            self._gain_skill_xp(actor, "medic", 2, events)
+            return 0.12 + 0.01 * medic_level
+        if bandage_item is not None:
+            actor.inventory.insert(0, bandage_item)
+
+        heal_item = self._pop_first_base_item(actor.inventory, "healing_potion")
+        if heal_item is not None and actor.hp < actor.max_hp:
+            heal = 5 + medic_level + max(0, (actor.intellect - 5) // 3)
+            actor.hp = min(actor.max_hp, actor.hp + heal)
+            events.append("use:healing_potion")
+            self._gain_skill_xp(actor, "medic", 3, events)
+            return 0.2 + 0.015 * medic_level
+        if heal_item is not None:
+            actor.inventory.insert(0, heal_item)
+
+        if self._pop_first_base_item(actor.inventory, "antidote") is not None:
+            self._clear_status(aid, "poison", info=info, rewards=rewards)
+            events.append("use:antidote")
+            self._gain_skill_xp(actor, "medic", 2, events)
+            return 0.08
+        if self._pop_first_base_item(actor.inventory, "cleanse_potion") is not None:
+            for sid in ("poison", "bleed", "confused", "paralyzed"):
+                self._clear_status(aid, sid, info=info, rewards=rewards)
+            events.append("use:cleanse_potion")
+            self._gain_skill_xp(actor, "alchemy", 2, events)
+            return 0.1
+        if self._pop_first_base_item(actor.inventory, "regen_potion") is not None:
+            self._apply_status(
+                target_aid=aid,
+                status_id="regen",
+                source_aid=aid,
+                info=info,
+                rewards=rewards,
+            )
+            events.append("use:regen_potion")
+            self._gain_skill_xp(actor, "alchemy", 2, events)
+            return 0.08
+        if self._pop_first_base_item(actor.inventory, "resistance_tonic") is not None:
+            self._apply_status(
+                target_aid=aid,
+                status_id="resistance",
+                source_aid=aid,
+                info=info,
+                rewards=rewards,
+            )
+            events.append("use:resistance_tonic")
+            self._gain_skill_xp(actor, "alchemy", 2, events)
+            return 0.08
+        if (
+            self._pop_first_base_item(actor.inventory, "blank_book") is not None
+            and self._pop_first_base_item(actor.inventory, "ink_vial") is not None
+        ):
+            skill = self._best_teachable_skill(actor)
+            book_cap = max(1, self._skill_level(actor, skill) - 1)
+            token = self._make_item_instance(
+                base_id="skill_book",
+                kind="skill_book",
+                metadata={
+                    "skill_name": skill,
+                    "max_teachable_level": book_cap,
+                    "uses": 3,
+                    "author_id": aid,
+                    "author_level": self._skill_level(actor, skill),
+                },
+            )
+            actor.inventory.append(token)
+            events.append(f"write_book:{skill}:cap={book_cap}")
+            self._gain_skill_xp(actor, "crafting", 3, events)
+            return 0.1
+        if self._pop_first_base_item(actor.inventory, "enchant_rune") is not None:
+            if self._apply_enchant_to_equipped(actor, aid, events):
+                self._gain_skill_xp(actor, "crafting", 2, events)
+                return 0.11
+            actor.inventory.append("enchant_rune")
+        spell_reward, casted = self._cast_best_spell(actor, aid, info=info, rewards=rewards)
+        if casted:
+            return spell_reward
+        return -0.01
+
+    def _best_teachable_skill(self, agent: AgentState) -> str:
+        candidates = [
+            "mining",
+            "woodcutting",
+            "crafting",
+            "smithing",
+            "alchemy",
+            "farming",
+            "medic",
+            "athletics",
+        ]
+        best = "crafting"
+        best_level = -1
+        for skill in candidates:
+            lvl = self._skill_level(agent, skill)
+            if lvl > best_level:
+                best = skill
+                best_level = lvl
+        return best
+
+    def _apply_enchant_to_equipped(self, actor: AgentState, aid: str, events: List[str]) -> bool:
+        assert self.state is not None
+        if not actor.equipped:
+            events.append("enchant_fail:no_equipped")
+            return False
+        item = actor.equipped[-1]
+        base = self._item_base_id(item)
+        choice = "status_resist"
+        if base in self.weapon_damage_type:
+            choice = "damage_plus"
+        elif base in self.armor_slot_by_item:
+            choice = "defense_plus"
+        elif base in {"pickaxe", "hatchet"}:
+            choice = "gather_yield_plus"
+        meta = self.state.item_metadata.setdefault(str(item), {"base_id": base})
+        ench = list(meta.get("enchantments", []))
+        limits = self.enchant_defs.get(choice)
+        max_stacks = int(limits.max_stacks) if limits is not None else 1
+        current = sum(1 for row in ench if str(row.get("id", "")) == choice)
+        if current >= max_stacks:
+            events.append(f"enchant_fail:max_stacks:{choice}")
+            return False
+        ench.append({"id": choice, "by": aid})
+        meta["enchantments"] = ench
+        meta["kind"] = str(meta.get("kind", "enchanted_item"))
+        meta["base_id"] = base
+        self.state.item_metadata[str(item)] = meta
+        events.append(f"enchant:{choice}:{base}:by={aid}")
+        return True
+
+    def _cast_best_spell(
+        self,
+        actor: AgentState,
+        aid: str,
+        info: Dict[str, Dict[str, object]],
+        rewards: Dict[str, float],
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        for spell_id in actor.known_spells:
+            spell = self.spell_defs.get(spell_id)
+            if spell is None:
+                continue
+            if int(actor.mana) < int(spell.mana_cost):
+                continue
+            if int(actor.spell_cooldowns.get(spell_id, 0)) > 0:
+                continue
+            if not self._has_required_reagents(actor.inventory, spell):
+                continue
+            target_id = self._choose_spell_target(aid, spell)
+            if target_id is None:
+                continue
+            self._consume_required_reagents(actor.inventory, spell)
+            actor.mana = max(0, int(actor.mana) - int(spell.mana_cost))
+            if spell.cooldown > 0:
+                actor.spell_cooldowns[spell_id] = int(spell.cooldown)
+            source = actor
+            target = self.state.agents[target_id]
+            delta = self._apply_effects(
+                effects=spell.effects,
+                source_agent=source,
+                target_agent=target,
+                events=info[aid]["events"],
+                rewards=rewards,
+                target_aid=target_id,
+                context=f"spell:{spell_id}",
+            )
+            info[aid]["events"].append(f"cast:{spell_id}:{target_id}")
+            self._gain_skill_xp(actor, "alchemy", 1, info[aid]["events"])
+            return 0.05 + delta, True
+        return 0.0, False
+
+    def _has_required_reagents(self, inventory: List[str], spell: SpellDef) -> bool:
+        counts = self._count_base_items(inventory)
+        for item_id, qty in spell.required_reagents.items():
+            if int(counts.get(item_id, 0)) < int(qty):
+                return False
+        return True
+
+    def _consume_required_reagents(self, inventory: List[str], spell: SpellDef) -> None:
+        for item_id, qty in spell.required_reagents.items():
+            for _ in range(int(qty)):
+                taken = self._pop_first_base_item(inventory, item_id)
+                if taken is None:
+                    break
+
+    def _choose_spell_target(self, aid: str, spell: SpellDef) -> str | None:
+        assert self.state is not None
+        if spell.target == "self":
+            return aid
+        actor = self.state.agents[aid]
+        if spell.target == "ally":
+            allies = [
+                other_id
+                for other_id, other in self.state.agents.items()
+                if other_id != aid
+                and other.alive
+                and self._is_allied(actor, other)
+                and self._manhattan(actor.position, other.position) <= max(1, int(spell.range))
+            ]
+            return sorted(allies)[0] if allies else None
+        enemies = [
+            other_id
+            for other_id, other in self.state.agents.items()
+            if other_id != aid
+            and other.alive
+            and not self._is_allied(actor, other)
+            and self._manhattan(actor.position, other.position) <= max(1, int(spell.range))
+        ]
+        if enemies:
+            enemies.sort(
+                key=lambda x: self._manhattan(actor.position, self.state.agents[x].position)
+            )
+            return enemies[0]
+        return None
+
+    def _status_has_tag(self, aid: str, tag: str) -> bool:
+        assert self.state is not None
+        for active in self.state.agent_statuses.get(aid, []):
+            sdef = self.status_defs.get(active.status_id)
+            if sdef is None:
+                continue
+            if tag in sdef.tags:
+                return True
+        return False
+
+    def _status_adjust_action(
+        self, aid: str, action: int, info: Dict[str, Dict[str, object]]
+    ) -> int:
+        if self.state is None:
+            return action
+        if self._status_has_tag(aid, "paralyze"):
+            info[aid]["events"].append("status_block:paralyzed")
+            return ACTION_WAIT
+        if self._status_has_tag(aid, "confuse"):
+            roll = self._rng.random()
+            if roll < 0.4:
+                choices = [ACTION_MOVE_NORTH, ACTION_MOVE_SOUTH, ACTION_MOVE_WEST, ACTION_MOVE_EAST, ACTION_WAIT]
+                scrambled = int(self._rng.choice(choices))
+                info[aid]["events"].append(f"status_confused_action:{action}->{scrambled}")
+                return scrambled
+        return action
+
+    def _tick_agent_statuses(
+        self,
+        aid: str,
+        rewards: Dict[str, float],
+        info: Dict[str, Dict[str, object]],
+    ) -> float:
+        assert self.state is not None
+        agent = self.state.agents[aid]
+        bag = list(self.state.agent_statuses.get(aid, []))
+        keep: List[ActiveStatus] = []
+        delta = 0.0
+        for active in bag:
+            sdef = self.status_defs.get(active.status_id)
+            if sdef is None:
+                continue
+            active.remaining = int(active.remaining) - 1
+            active.tick_counter = int(active.tick_counter) + 1
+            if active.tick_counter >= max(1, int(active.tick_interval)):
+                active.tick_counter = 0
+                delta += self._apply_effects(
+                    effects=sdef.tick_effects,
+                    source_agent=self.state.agents.get(active.source_id),
+                    target_agent=agent,
+                    events=info[aid]["events"],
+                    rewards=rewards,
+                    target_aid=aid,
+                    context="status_tick",
+                )
+            if active.remaining <= 0:
+                delta += self._apply_effects(
+                    effects=sdef.expire_effects,
+                    source_agent=self.state.agents.get(active.source_id),
+                    target_agent=agent,
+                    events=info[aid]["events"],
+                    rewards=rewards,
+                    target_aid=aid,
+                    context="status_expire",
+                )
+                info[aid]["events"].append(f"status_expire:{active.status_id}")
+                continue
+            keep.append(active)
+        self.state.agent_statuses[aid] = keep
+        return delta
+
+    def _apply_status(
+        self,
+        target_aid: str,
+        status_id: str,
+        source_aid: str,
+        info: Dict[str, Dict[str, object]],
+        rewards: Dict[str, float],
+    ) -> None:
+        assert self.state is not None
+        sdef = self.status_defs.get(status_id)
+        if sdef is None:
+            return
+        agent = self.state.agents[target_aid]
+        resist = 0.0
+        if self._status_has_tag(target_aid, "status_resist"):
+            resist += 0.25
+        resist += self._agent_enchant_bonus(agent, "status_resist")
+        if resist > 0 and self._rng.random() < min(0.85, resist):
+            info[target_aid]["events"].append(f"status_resisted:{status_id}")
+            return
+        bag = self.state.agent_statuses.setdefault(target_aid, [])
+        bag = [x for x in bag if x.status_id != status_id]
+        bag.append(
+            ActiveStatus(
+                status_id=status_id,
+                remaining=max(1, int(sdef.duration)),
+                tick_interval=max(1, int(sdef.tick_interval)),
+                tick_counter=0,
+                source_id=str(source_aid),
+            )
+        )
+        self.state.agent_statuses[target_aid] = bag
+        info[target_aid]["events"].append(f"status_apply:{status_id}:{source_aid}")
+        self._apply_effects(
+            effects=sdef.apply_effects,
+            source_agent=self.state.agents.get(source_aid),
+            target_agent=agent,
+            events=info[target_aid]["events"],
+            rewards=rewards,
+            target_aid=target_aid,
+            context="status_apply",
+        )
+
+    def _clear_status(
+        self,
+        target_aid: str,
+        status_id: str,
+        info: Dict[str, Dict[str, object]],
+        rewards: Dict[str, float],
+    ) -> bool:
+        assert self.state is not None
+        sdef = self.status_defs.get(status_id)
+        if sdef is None:
+            return False
+        bag = self.state.agent_statuses.setdefault(target_aid, [])
+        kept = [x for x in bag if x.status_id != status_id]
+        changed = len(kept) != len(bag)
+        self.state.agent_statuses[target_aid] = kept
+        if changed:
+            agent = self.state.agents[target_aid]
+            self._apply_effects(
+                effects=sdef.expire_effects,
+                source_agent=agent,
+                target_agent=agent,
+                events=info[target_aid]["events"],
+                rewards=rewards,
+                target_aid=target_aid,
+                context="status_cleanse",
+            )
+            info[target_aid]["events"].append(f"status_cleared:{status_id}")
+        return changed
+
+    def _apply_effects(
+        self,
+        effects: List[Dict[str, object]],
+        source_agent: AgentState | None,
+        target_agent: AgentState,
+        events: List[str],
+        rewards: Dict[str, float],
+        target_aid: str,
+        context: str,
+    ) -> float:
+        delta = 0.0
+        for eff in effects:
+            et = str(eff.get("type", "")).strip()
+            amount = float(eff.get("amount", 0.0))
+            if et == "damage":
+                dmg = max(0, int(round(amount)))
+                if dmg > 0:
+                    target_agent.hp = max(0, int(target_agent.hp) - dmg)
+                    rewards[target_aid] = float(rewards.get(target_aid, 0.0)) - (0.02 * float(dmg))
+                    delta -= 0.02 * float(dmg)
+                    events.append(f"{context}:damage:{dmg}")
+            elif et == "heal":
+                heal = max(0, int(round(amount)))
+                if heal > 0:
+                    target_agent.hp = min(int(target_agent.max_hp), int(target_agent.hp) + heal)
+                    rewards[target_aid] = float(rewards.get(target_aid, 0.0)) + (0.01 * float(heal))
+                    delta += 0.01 * float(heal)
+                    events.append(f"{context}:heal:{heal}")
+            elif et == "hunger":
+                gain = int(round(amount))
+                target_agent.hunger = max(0, min(int(target_agent.max_hunger), int(target_agent.hunger) + gain))
+                events.append(f"{context}:hunger:{gain}")
+            elif et == "mana":
+                gain = int(round(amount))
+                target_agent.mana = max(0, min(int(target_agent.max_mana), int(target_agent.mana) + gain))
+                events.append(f"{context}:mana:{gain}")
+            elif et == "apply_status":
+                status_id = str(eff.get("status", "")).strip()
+                if status_id and self.state is not None:
+                    source_id = source_agent.agent_id if source_agent is not None else target_aid
+                    tmp_info = {target_aid: {"events": events}}
+                    self._apply_status(
+                        target_aid=target_aid,
+                        status_id=status_id,
+                        source_aid=source_id,
+                        info=tmp_info,
+                        rewards=rewards,
+                    )
+            elif et == "cure_status":
+                status_id = str(eff.get("status", "")).strip()
+                if status_id:
+                    tmp_info = {target_aid: {"events": events}}
+                    self._clear_status(
+                        target_aid=target_aid,
+                        status_id=status_id,
+                        info=tmp_info,
+                        rewards=rewards,
+                    )
+            elif et == "cleanse":
+                tmp_info = {target_aid: {"events": events}}
+                for sid in ("poison", "bleed", "confused", "paralyzed"):
+                    self._clear_status(
+                        target_aid=target_aid,
+                        status_id=sid,
+                        info=tmp_info,
+                        rewards=rewards,
+                    )
+            elif et == "reveal":
+                events.append(f"{context}:reveal")
+            elif et == "teleport_blink":
+                if self.state is not None:
+                    tr, tc = target_agent.position
+                    options = [
+                        (tr - 1, tc),
+                        (tr + 1, tc),
+                        (tr, tc - 1),
+                        (tr, tc + 1),
+                    ]
+                    walkable = [(r, c) for (r, c) in options if self._walkable(r, c)]
+                    if walkable:
+                        old = target_agent.position
+                        target_agent.position = self._rng.choice(walkable)
+                        events.append(f"{context}:blink:{old}->{target_agent.position}")
+            elif et == "knockback":
+                if self.state is not None and source_agent is not None:
+                    sr, sc = source_agent.position
+                    tr, tc = target_agent.position
+                    dr = 1 if tr > sr else (-1 if tr < sr else 0)
+                    dc = 1 if tc > sc else (-1 if tc < sc else 0)
+                    nr, nc = tr + dr, tc + dc
+                    if self._walkable(nr, nc):
+                        old = target_agent.position
+                        target_agent.position = (nr, nc)
+                        events.append(f"{context}:knockback:{old}->{target_agent.position}")
+        return delta
 
     def _handle_faction_interact(
         self, actor: AgentState, actor_id: str, events: List[str]
@@ -1093,8 +1896,21 @@ class MultiAgentRLRLGym:
         target_id = sorted(candidates)[0]
         target = self.state.agents[target_id]
         item = actor.inventory.pop(0)
-        target.inventory.append(item)
-        events.append(f"team_give:{target_id}:{item}")
+        if self._is_skill_book(item):
+            taught = self._teach_from_book(
+                teacher=actor,
+                teacher_id=actor_id,
+                target=target,
+                target_id=target_id,
+                book_item=item,
+                events=events,
+            )
+            if not taught:
+                target.inventory.append(item)
+                events.append(f"team_give:{target_id}:{item}")
+        else:
+            target.inventory.append(item)
+            events.append(f"team_give:{target_id}:{item}")
         self._set_action_cooldown(actor_id, "team_give")
         allowed = self._team_pair_reward_allowed(
             action="team_give",
@@ -1107,6 +1923,43 @@ class MultiAgentRLRLGym:
         if not allowed:
             return 0.0
         return float(self.config.team_give_reward)
+
+    def _teach_from_book(
+        self,
+        teacher: AgentState,
+        teacher_id: str,
+        target: AgentState,
+        target_id: str,
+        book_item: str,
+        events: List[str],
+    ) -> bool:
+        assert self.state is not None
+        meta = dict(self.state.item_metadata.get(book_item, {}))
+        if not meta:
+            return False
+        skill = str(meta.get("skill_name", "")).strip()
+        if not skill:
+            return False
+        book_cap = max(0, int(meta.get("max_teachable_level", 0)))
+        author_level = max(0, int(meta.get("author_level", self._skill_level(teacher, skill))))
+        margin = 1
+        cap = min(book_cap, max(0, author_level - margin))
+        current = self._skill_level(target, skill)
+        if current >= cap:
+            events.append(f"teach_fail:cap_reached:{target_id}:{skill}:{cap}")
+            target.inventory.append(book_item)
+            return False
+        target.skills[skill] = current + 1
+        uses = max(0, int(meta.get("uses", 1)) - 1)
+        meta["uses"] = uses
+        self.state.item_metadata[book_item] = meta
+        events.append(f"teach:{target_id}:{skill}:{current + 1}:by={teacher_id}")
+        if uses > 0:
+            target.inventory.append(book_item)
+        else:
+            events.append(f"book_expired:{skill}")
+            self.state.item_metadata.pop(book_item, None)
+        return True
 
     def _trade_with_ally(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
         assert self.state is not None
@@ -1240,7 +2093,8 @@ class MultiAgentRLRLGym:
             weapon_bonus = max(0, int(self.weapon_defense_dr_bonus.get(weapon_id, 0)))
         shield_bonus = 0
         for item in agent.equipped:
-            shield_bonus = max(shield_bonus, int(self.item_defense_dr_bonus.get(item, 0)))
+            base = self._item_base_id(item)
+            shield_bonus = max(shield_bonus, int(self.item_defense_dr_bonus.get(base, 0)))
         return weapon_bonus + shield_bonus, weapon_id, shield_bonus
 
     def _leave_faction(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
@@ -1504,6 +2358,17 @@ class MultiAgentRLRLGym:
                 reward += self._attack_monster(actor, monster, events)
                 return reward
 
+        for animal in self.state.animals.values():
+            if not animal.alive:
+                continue
+            if (
+                abs(animal.position[0] - actor.position[0])
+                + abs(animal.position[1] - actor.position[1])
+                == 1
+            ):
+                reward += self._attack_animal(actor, animal, events)
+                return reward
+
         for other_id, other in self.state.agents.items():
             if other_id == actor_id or not other.alive:
                 continue
@@ -1516,6 +2381,40 @@ class MultiAgentRLRLGym:
                 return reward
         events.append("attack_no_target")
         reward -= 0.01
+        return reward
+
+    def _attack_animal(
+        self, attacker: AgentState, target: AnimalState, events: List[str]
+    ) -> float:
+        weapon, damage_type, damage_range, skill_name = self._equipped_weapon(attacker)
+        skill_level = self._skill_level(attacker, skill_name)
+        hit_chance = 0.75 + 0.015 * float(attacker.dexterity - 5)
+        hit_chance += 0.02 * float(skill_level)
+        hit_chance = max(0.25, min(0.95, hit_chance))
+        if self._rng.random() > hit_chance:
+            events.append(f"agent_interact:attack_animal:{target.animal_id}:{weapon}:{damage_type}")
+            events.append(f"agent_interact:miss_animal:{target.entity_id}")
+            return -0.01
+
+        raw_damage = self._rng.randint(damage_range[0], damage_range[1])
+        raw_damage += self._damage_stat_bonus(attacker, damage_type)
+        raw_damage += max(0, (skill_level - 1) // 2)
+        raw_damage += int(round(self._agent_enchant_bonus(attacker, "damage_plus")))
+        final_damage = max(0, raw_damage)
+        events.append(f"agent_interact:attack_animal:{target.animal_id}:{weapon}:{damage_type}")
+        events.append(f"agent_interact:attack_roll_animal:{raw_damage}:final:{final_damage}")
+        if final_damage <= 0:
+            events.append(f"agent_interact:blocked_animal:{target.entity_id}")
+            return -0.01
+
+        target.hp = max(0, int(target.hp) - int(final_damage))
+        events.append(f"agent_interact:hit_animal:{target.entity_id}")
+        reward = 0.04 + 0.015 * float(final_damage)
+        if target.hp <= 0 and target.alive:
+            target.alive = False
+            events.append(f"agent_interact:kill_animal:{target.animal_id}")
+            self._drop_animal_material(target, events)
+            reward += 0.2
         return reward
 
     def _attack_agent(
@@ -1541,6 +2440,7 @@ class MultiAgentRLRLGym:
             target, damage_type
         )
         final_damage = max(0, raw_damage - dr)
+        final_damage += int(round(self._agent_enchant_bonus(attacker, "damage_plus")))
         final_damage = self._apply_guard_reduction(target, final_damage, events)
 
         events.append(
@@ -1581,6 +2481,17 @@ class MultiAgentRLRLGym:
                 else:
                     reward += 0.5
                     self._gain_skill_xp(attacker, skill_name, 4, events)
+            elif not allied_target and self._rng.random() < 0.18:
+                tmp_info = {target.agent_id: {"events": []}}
+                tmp_rewards = {target.agent_id: 0.0}
+                self._apply_status(
+                    target_aid=target.agent_id,
+                    status_id="bleed",
+                    source_aid=attacker.agent_id,
+                    info=tmp_info,
+                    rewards=tmp_rewards,
+                )
+                events.extend(list(tmp_info[target.agent_id]["events"]))
         else:
             events.append(f"agent_interact:blocked:{target.agent_id}")
             reward -= 0.01
@@ -1608,6 +2519,7 @@ class MultiAgentRLRLGym:
         raw_damage += max(0, (skill_level - 1) // 2)
         dr = self._rng.randint(target.dr_min, max(target.dr_min, target.dr_max))
         final_damage = max(0, raw_damage - dr)
+        final_damage += int(round(self._agent_enchant_bonus(attacker, "damage_plus")))
 
         events.append(
             f"agent_interact:attack_monster:{target.monster_id}:{weapon}:{damage_type}"
@@ -1635,12 +2547,13 @@ class MultiAgentRLRLGym:
 
     def _equipped_weapon(self, agent: AgentState) -> Tuple[str, str, Tuple[int, int], str]:
         for item in reversed(agent.equipped):
-            if item in self.weapon_damage_type:
-                skill_name = self.weapon_skill_by_item.get(item, "melee")
+            base = self._item_base_id(item)
+            if base in self.weapon_damage_type:
+                skill_name = self.weapon_skill_by_item.get(base, "melee")
                 return (
-                    item,
-                    self.weapon_damage_type[item],
-                    self.weapon_damage_range[item],
+                    base,
+                    self.weapon_damage_type[base],
+                    self.weapon_damage_range[base],
                     skill_name,
                 )
         return "unarmed", DAMAGE_TYPE_BLUNT, UNARMED_DAMAGE_RANGE, "melee"
@@ -1660,16 +2573,31 @@ class MultiAgentRLRLGym:
         armor_slots = HIT_SLOT_TO_ARMOR_SLOTS.get(hit_slot, ())
         armor_mitigation = 0
         has_armor_in_slot = False
+        best_armor_class = ""
+        best_armor_score = -1
         for slot in armor_slots:
             item = target.armor_slots.get(slot)
             if item is None:
                 continue
             has_armor_in_slot = True
-            armor_mitigation += int(self.item_dr_bonus_vs.get(item, {}).get(damage_type, 0))
+            base = self._item_base_id(item)
+            armor_mitigation += int(self.item_dr_bonus_vs.get(base, {}).get(damage_type, 0))
+            armor_mitigation += int(round(self._enchant_bonus_for_item(item, "defense_plus")))
+            armor_class = self._armor_class_for_item(base)
+            score = 0
+            if armor_class == "heavy":
+                score = 3
+            elif armor_class == "medium":
+                score = 2
+            elif armor_class == "light":
+                score = 1
+            if score > best_armor_score:
+                best_armor_score = score
+                best_armor_class = armor_class
 
         armor_skill = ""
         if has_armor_in_slot:
-            armor_skill = HIT_SLOT_TO_ARMOR_SKILL.get(hit_slot, "")
+            armor_skill = ARMOR_CLASS_TO_SKILL.get(best_armor_class, "")
             if armor_skill:
                 armor_mitigation += max(0, self._skill_level(target, armor_skill) // 3)
 
@@ -1692,6 +2620,26 @@ class MultiAgentRLRLGym:
         dr, _, _, _ = self._roll_hit_location_dr(target, damage_type)
         return dr
 
+    def _armor_class_for_item(self, base_item: str) -> str:
+        explicit = str(self.armor_class_by_item.get(base_item, "")).strip().lower()
+        if explicit in {"light", "medium", "heavy"}:
+            return explicit
+        if base_item.startswith("steel_"):
+            return "heavy"
+        if base_item.startswith("chain_") or base_item.startswith("bronze_"):
+            return "medium"
+        if base_item in {"chain_mail", "shield"}:
+            return "medium"
+        if base_item.startswith("leather_"):
+            return "light"
+        if base_item.startswith("ring_") or base_item in {
+            "amulet",
+            "silver_necklace",
+            "guardian_torc",
+        }:
+            return "light"
+        return "light"
+
     def _pickup_from_tile(self, agent: AgentState, events: List[str]) -> float:
         assert self.state is not None
         r, c = agent.position
@@ -1700,14 +2648,19 @@ class MultiAgentRLRLGym:
         items = self.state.ground_items.get((r, c), [])
         if items:
             item = items.pop(0)
-            agent.inventory.append(item)
-            reward += 0.1
-            events.append(f"pickup:{item}")
-            if item in ("bow", "crossbow"):
+            added = self._add_item_or_drop(agent, item, 1, events)
+            base_item = self._item_base_id(item)
+            if added <= 0:
+                reward -= 0.01
+                events.append("pickup_blocked")
+            else:
+                reward += 0.1
+                events.append(f"pickup:{item}")
+            if base_item in ("bow", "crossbow"):
                 self._gain_skill_xp(agent, "archery", 1, events)
-            elif item in ("thrown_rock", "thrown_knife"):
+            elif base_item in ("thrown_rock", "thrown_knife"):
                 self._gain_skill_xp(agent, "thrown_weapons", 1, events)
-            elif item in ("bandage", "healing_potion", "antidote"):
+            elif base_item in ("bandage", "healing_potion", "antidote"):
                 self._gain_skill_xp(agent, "medic", 1, events)
             return reward
 
@@ -1716,7 +2669,7 @@ class MultiAgentRLRLGym:
             chest.opened = True
             if chest.loot:
                 for item in chest.loot:
-                    agent.inventory.append(item)
+                    self._add_item_or_drop(agent, item, 1, events)
                     events.append(f"chest_open:{item}")
                 reward += 0.16 + 0.06 * min(4, len(chest.loot))
             else:
@@ -1734,9 +2687,13 @@ class MultiAgentRLRLGym:
         ):
             self.state.tile_interactions[(r, c)] = used + 1
             item = self._rng.choice(tile.loot_table)
-            agent.inventory.append(item)
-            reward += 0.2
-            events.append(f"loot:{tile_id}:{item}")
+            added = self._add_item_or_drop(agent, item, 1, events)
+            if added > 0:
+                reward += 0.2
+                events.append(f"loot:{tile_id}:{item}")
+            else:
+                reward -= 0.01
+                events.append("loot_blocked")
         else:
             reward -= 0.02
             events.append("loot_fail")
@@ -1751,6 +2708,15 @@ class MultiAgentRLRLGym:
         info: Dict[str, Dict[str, object]],
     ) -> float:
         delta = 0.0
+        # Passive spell resource updates each step.
+        if agent.max_mana > 0 and agent.mana < agent.max_mana:
+            agent.mana = min(agent.max_mana, agent.mana + 1)
+        for spell_id in list(agent.spell_cooldowns.keys()):
+            remain = int(agent.spell_cooldowns.get(spell_id, 0))
+            if remain <= 1:
+                agent.spell_cooldowns.pop(spell_id, None)
+            else:
+                agent.spell_cooldowns[spell_id] = remain - 1
         if not self.config.hunger_tick_enabled:
             return delta
         agent.hunger = max(0, agent.hunger - 1)
@@ -1970,7 +2936,7 @@ class MultiAgentRLRLGym:
     def _count_held_treasures(self, agent: AgentState) -> int:
         count = 0
         for item in agent.inventory + agent.equipped:
-            if item in self.treasure_items:
+            if self._item_base_id(item) in self.treasure_items:
                 count += 1
         return count
 
@@ -2168,6 +3134,9 @@ class MultiAgentRLRLGym:
         for monster in self.state.monsters.values():
             if monster.alive and monster.position == (r, c):
                 return False
+        for animal in self.state.animals.values():
+            if animal.alive and animal.position == (r, c):
+                return False
         return True
 
     def _walkable_for_monster(
@@ -2188,6 +3157,9 @@ class MultiAgentRLRLGym:
                 and monster.entity_id != moving_entity_id
                 and monster.position == (r, c)
             ):
+                return False
+        for animal in self.state.animals.values():
+            if animal.alive and animal.position == (r, c):
                 return False
         return True
 
@@ -2227,15 +3199,29 @@ class MultiAgentRLRLGym:
             dsum = float(metrics.get("enemy_distance_delta_sum", 0.0))
             obs["stats"] = {
                 "hp": agent.hp,
+                "mana": agent.mana,
+                "max_mana": agent.max_mana,
                 "hunger": agent.hunger,
                 "position": agent.position,
                 "equipped_count": len(agent.equipped),
+                "carried_weight": self._carried_weight(agent),
+                "carry_capacity": self._carry_capacity(agent),
                 "armor_slots": dict(agent.armor_slots),
                 "strength": agent.strength,
                 "dexterity": agent.dexterity,
                 "intellect": agent.intellect,
                 "skills": dict(agent.skills),
                 "skill_xp": dict(agent.skill_xp),
+                "known_spells": list(agent.known_spells),
+                "spell_cooldowns": dict(agent.spell_cooldowns),
+                "statuses": [
+                    {
+                        "id": s.status_id,
+                        "remaining": int(s.remaining),
+                        "tick_interval": int(s.tick_interval),
+                    }
+                    for s in self.state.agent_statuses.get(aid, [])
+                ],
                 "overall_level": self._overall_level(agent),
                 "encumbrance_ratio": self._encumbrance_ratio(agent),
                 "faction_id": int(agent.faction_id),
@@ -2256,10 +3242,20 @@ class MultiAgentRLRLGym:
                 "nearby_chests": self._nearby_chest_counts(
                     center=agent.position, height=view_height, width=view_width
                 ),
+                "nearby_resource_nodes": self._nearby_resource_counts(
+                    center=agent.position, height=view_height, width=view_width
+                ),
+                "nearby_stations": self._nearby_station_counts(
+                    center=agent.position, height=view_height, width=view_width
+                ),
+                "biome": self.state.biomes.get(agent.position, ""),
                 "nearby_agents": self._nearby_agent_counts(
                     aid=aid, center=agent.position, height=view_height, width=view_width
                 ),
                 "nearby_monsters": self._nearby_monster_counts(
+                    center=agent.position, height=view_height, width=view_width
+                ),
+                "nearby_animals": self._nearby_animal_counts(
                     center=agent.position, height=view_height, width=view_width
                 ),
             }
@@ -2293,6 +3289,16 @@ class MultiAgentRLRLGym:
         if not ordered:
             raise ValueError("No agent classes are loaded")
         return ordered[index % len(ordered)]
+
+    def _default_known_spells_for_class(self, class_name: str) -> List[str]:
+        base = ["arc_bolt", "cleanse", "haste"]
+        if class_name == "rogue":
+            base = ["arc_bolt", "blink", "reveal"]
+        elif class_name == "fighter":
+            base = ["arc_bolt", "cleanse", "haste"]
+        elif class_name == "medic":
+            base = ["cleanse", "regen_touch", "reveal"]
+        return [s for s in base if s in self.spell_defs]
 
     def _resolve_race_name(self, agent_id: str, index: int) -> str:
         if agent_id in self.config.agent_race_map:
@@ -2344,6 +3350,61 @@ class MultiAgentRLRLGym:
                 self._assert_item_known(
                     loot.item, f"monster '{monster_id}' loot[{idx}]"
                 )
+        for animal_id, animal in sorted(self.animals.items()):
+            if animal.drop_item:
+                self._assert_item_known(
+                    animal.drop_item, f"animal '{animal_id}' drop_item"
+                )
+            if animal.can_shear and animal.shear_item:
+                self._assert_item_known(
+                    animal.shear_item, f"animal '{animal_id}' shear_item"
+                )
+
+    def _validate_recipe_references(self) -> None:
+        for recipe_id, recipe in sorted(self.recipes.items()):
+            for idx, item_id in enumerate(sorted(recipe.inputs.keys())):
+                self._assert_item_known(
+                    item_id, f"recipe '{recipe_id}' inputs[{idx}]"
+                )
+            for idx, item_id in enumerate(sorted(recipe.outputs.keys())):
+                self._assert_item_known(
+                    item_id, f"recipe '{recipe_id}' outputs[{idx}]"
+                )
+            if recipe.build_tile_id and recipe.build_tile_id not in self.tiles:
+                raise ValueError(
+                    f"recipe '{recipe_id}' build_tile_id '{recipe.build_tile_id}' is unknown"
+                )
+        for idx, row in enumerate(self.mapgen_cfg.resource_nodes):
+            if not isinstance(row, dict):
+                continue
+            drop_item = str(row.get("drop_item", "")).strip()
+            if drop_item:
+                self._assert_item_known(
+                    drop_item, f"mapgen.resource_nodes[{idx}].drop_item"
+                )
+
+    def _validate_effect_references(self) -> None:
+        for spell_id, spell in sorted(self.spell_defs.items()):
+            for idx, reagent in enumerate(sorted(spell.required_reagents.keys())):
+                self._assert_item_known(
+                    reagent, f"spell '{spell_id}' required_reagents[{idx}]"
+                )
+            for eff in spell.effects:
+                self._validate_effect_item_refs(
+                    eff, f"spell '{spell_id}' effect"
+                )
+        for status_id, status in sorted(self.status_defs.items()):
+            for eff in status.apply_effects + status.tick_effects + status.expire_effects:
+                self._validate_effect_item_refs(
+                    eff, f"status '{status_id}' effect"
+                )
+
+    def _validate_effect_item_refs(self, eff: Dict[str, object], source: str) -> None:
+        et = str(eff.get("type", "")).strip()
+        if et in {"consume_item", "require_item", "grant_item"}:
+            item_id = str(eff.get("item", "")).strip()
+            if item_id:
+                self._assert_item_known(item_id, source)
 
     def _local_view_dims(
         self, center: Tuple[int, int], height: int, width: int
@@ -2449,6 +3510,211 @@ class MultiAgentRLRLGym:
                     best = dist
         return best
 
+    def _generate_world_terrain(self) -> Tuple[List[List[str]], Dict[Tuple[int, int], str]]:
+        biome_defs = [dict(x) for x in self.mapgen_cfg.biomes if isinstance(x, dict)]
+        if not biome_defs:
+            grid = generate_map(
+                self.config.width,
+                self.config.height,
+                self.tiles,
+                self._rng,
+                wall_tile_id=self.mapgen_cfg.wall_tile_id,
+                floor_fallback_id=self.mapgen_cfg.floor_fallback_id,
+                min_width=self.mapgen_cfg.min_width,
+                min_height=self.mapgen_cfg.min_height,
+            )
+            return grid, {}
+
+        width = int(self.config.width)
+        height = int(self.config.height)
+        min_width = max(1, int(self.mapgen_cfg.min_width))
+        min_height = max(1, int(self.mapgen_cfg.min_height))
+        if width < min_width or height < min_height:
+            raise ValueError(f"Map must be at least {min_width}x{min_height}")
+
+        global_tile_ids = weighted_tile_ids(self.tiles)
+        global_tile_weights = weighted_tile_weights(self.tiles)
+        if not global_tile_ids:
+            raise ValueError("No tiles available for map generation")
+
+        biome_ids: List[str] = []
+        biome_weights: List[float] = []
+        for row in biome_defs:
+            bid = str(row.get("id", "")).strip()
+            if not bid:
+                continue
+            biome_ids.append(bid)
+            biome_weights.append(max(0.0, float(row.get("weight", 1.0))))
+        if not biome_ids or sum(biome_weights) <= 0.0:
+            grid = generate_map(
+                self.config.width,
+                self.config.height,
+                self.tiles,
+                self._rng,
+                wall_tile_id=self.mapgen_cfg.wall_tile_id,
+                floor_fallback_id=self.mapgen_cfg.floor_fallback_id,
+                min_width=self.mapgen_cfg.min_width,
+                min_height=self.mapgen_cfg.min_height,
+            )
+            return grid, {}
+
+        defs_by_biome = {str(row.get("id", "")): row for row in biome_defs}
+        grid: List[List[str]] = []
+        biomes: Dict[Tuple[int, int], str] = {}
+        wall_id = (
+            self.mapgen_cfg.wall_tile_id
+            if self.mapgen_cfg.wall_tile_id in self.tiles
+            else self.mapgen_cfg.floor_fallback_id
+        )
+        floor_id = (
+            self.mapgen_cfg.floor_fallback_id
+            if self.mapgen_cfg.floor_fallback_id in self.tiles
+            else "floor"
+        )
+        for r in range(height):
+            row_tiles: List[str] = []
+            for c in range(width):
+                if r in (0, height - 1) or c in (0, width - 1):
+                    row_tiles.append(wall_id)
+                    continue
+                biome_id = str(self._rng.choices(biome_ids, weights=biome_weights, k=1)[0])
+                biomes[(r, c)] = biome_id
+                bdef = defs_by_biome.get(biome_id, {})
+                tile_weights_raw = dict(bdef.get("tile_weights", {}))
+                tile_ids: List[str] = []
+                tile_weights: List[float] = []
+                for tid, weight in tile_weights_raw.items():
+                    if str(tid) not in self.tiles:
+                        continue
+                    tile_ids.append(str(tid))
+                    tile_weights.append(max(0.0, float(weight)))
+                if not tile_ids or sum(tile_weights) <= 0.0:
+                    tile_ids = list(global_tile_ids)
+                    tile_weights = list(global_tile_weights)
+                chosen = str(self._rng.choices(tile_ids, weights=tile_weights, k=1)[0])
+                if chosen not in self.tiles:
+                    chosen = floor_id
+                row_tiles.append(chosen)
+            grid.append(row_tiles)
+
+        walkable = [
+            (r, c)
+            for r in range(height)
+            for c in range(width)
+            if self.tiles[grid[r][c]].walkable
+        ]
+        if len(walkable) < 2:
+            for r in range(1, height - 1):
+                for c in range(1, width - 1):
+                    grid[r][c] = floor_id
+        return grid, biomes
+
+    def _spawn_resource_nodes(
+        self, occupied: List[Tuple[int, int]]
+    ) -> Dict[Tuple[int, int], ResourceNodeState]:
+        assert self.state is not None
+        defs = [dict(x) for x in self.mapgen_cfg.resource_nodes if isinstance(x, dict)]
+        if not defs:
+            return {}
+        occupied_set = set(occupied)
+        walkable = [
+            (r, c)
+            for r, row in enumerate(self.state.grid)
+            for c, tile_id in enumerate(row)
+            if self.tiles[tile_id].walkable and (r, c) not in occupied_set
+        ]
+        if not walkable:
+            return {}
+        self._rng.shuffle(walkable)
+        out: Dict[Tuple[int, int], ResourceNodeState] = {}
+        for row in defs:
+            node_id = str(row.get("id", "")).strip()
+            drop_item = str(row.get("drop_item", "")).strip()
+            skill = str(row.get("skill", "")).strip()
+            if not node_id or not drop_item or not skill:
+                continue
+            density = max(0.0, float(row.get("density", 0.0)))
+            if density <= 0.0:
+                continue
+            target = max(0, int(len(walkable) * density))
+            if target <= 0:
+                continue
+            min_yield = max(1, int(row.get("min_yield", 1)))
+            max_yield = max(min_yield, int(row.get("max_yield", min_yield)))
+            allowed_biomes = {
+                str(x).strip()
+                for x in list(row.get("biomes", []))
+                if str(x).strip()
+            }
+            placed = 0
+            for pos in walkable:
+                if placed >= target:
+                    break
+                if pos in out:
+                    continue
+                biome = str(self.state.biomes.get(pos, ""))
+                if allowed_biomes and biome and biome not in allowed_biomes:
+                    continue
+                qty = self._rng.randint(min_yield, max_yield)
+                out[pos] = ResourceNodeState(
+                    node_id=node_id,
+                    position=pos,
+                    skill=skill,
+                    drop_item=drop_item,
+                    remaining=qty,
+                    max_yield=qty,
+                    biome=biome,
+                )
+                placed += 1
+        return out
+
+    def _spawn_stations(
+        self, occupied: List[Tuple[int, int]]
+    ) -> Dict[Tuple[int, int], StationState]:
+        assert self.state is not None
+        defs = [dict(x) for x in self.mapgen_cfg.station_spawns if isinstance(x, dict)]
+        if not defs:
+            return {}
+        occupied_set = set(occupied)
+        walkable = [
+            (r, c)
+            for r, row in enumerate(self.state.grid)
+            for c, tile_id in enumerate(row)
+            if self.tiles[tile_id].walkable and (r, c) not in occupied_set
+        ]
+        if not walkable:
+            return {}
+        self._rng.shuffle(walkable)
+        out: Dict[Tuple[int, int], StationState] = {}
+        for row in defs:
+            station_id = str(row.get("id", "")).strip()
+            if not station_id:
+                continue
+            density = max(0.0, float(row.get("density", 0.0)))
+            if density <= 0.0:
+                continue
+            target = max(0, int(len(walkable) * density))
+            if target <= 0:
+                continue
+            speed = max(0.1, float(row.get("speed_multiplier", 1.0)))
+            quality = max(0, int(row.get("quality_tier", 0)))
+            unlock = [str(x).strip() for x in list(row.get("unlock_recipes", [])) if str(x).strip()]
+            placed = 0
+            for pos in walkable:
+                if placed >= target:
+                    break
+                if pos in out:
+                    continue
+                out[pos] = StationState(
+                    station_id=station_id,
+                    position=pos,
+                    speed_multiplier=speed,
+                    quality_tier=quality,
+                    unlock_recipes=unlock,
+                )
+                placed += 1
+        return out
+
     def _spawn_chests(self, occupied: List[Tuple[int, int]]) -> Dict[Tuple[int, int], ChestState]:
         assert self.state is not None
         occupied_set = set(occupied)
@@ -2522,6 +3788,60 @@ class MultiAgentRLRLGym:
             )
         return out
 
+    def _spawn_animals(
+        self, occupied: List[Tuple[int, int]]
+    ) -> Dict[str, AnimalState]:
+        assert self.state is not None
+        density = max(0.0, float(getattr(self.mapgen_cfg, "animal_density", 0.0) or 0.0))
+        if density <= 0.0 or not self.animals:
+            return {}
+        occupied_set = set(occupied)
+        walkable = [
+            (r, c)
+            for r, row in enumerate(self.state.grid)
+            for c, tile_id in enumerate(row)
+            if self.tiles[tile_id].walkable and (r, c) not in occupied_set
+        ]
+        if not walkable:
+            return {}
+        n_animals = max(1, int(len(walkable) * density))
+        n_animals = min(n_animals, len(walkable))
+        ids = [a.animal_id for a in self.animals.values()]
+        weights = [max(0.0, float(a.spawn_weight)) for a in self.animals.values()]
+        if sum(weights) <= 0.0:
+            return {}
+        self._rng.shuffle(walkable)
+        out: Dict[str, AnimalState] = {}
+        for idx, pos in enumerate(walkable[:n_animals]):
+            aid = str(self._rng.choices(ids, weights=weights, k=1)[0])
+            adef = self.animals[aid]
+            entity_id = f"animal_{idx}"
+            out[entity_id] = AnimalState(
+                entity_id=entity_id,
+                animal_id=adef.animal_id,
+                name=adef.name,
+                symbol=adef.symbol,
+                color=adef.color,
+                position=pos,
+                hp=adef.hp,
+                max_hp=adef.hp,
+                hunger=max(2, adef.hp),
+                max_hunger=max(3, adef.hp + 4),
+                thirst=max(2, adef.hp),
+                max_thirst=max(3, adef.hp + 4),
+                age=self._rng.randint(0, max(1, adef.mature_age)),
+                mature_age=adef.mature_age,
+                reproduction_cooldown=self._rng.randint(0, max(1, adef.reproduction_cooldown)),
+                reproduction_cooldown_max=adef.reproduction_cooldown,
+                can_shear=adef.can_shear,
+                sheared=False,
+                shear_item=adef.shear_item,
+                wool_regrow=0,
+                shear_regrow_max=adef.shear_regrow_steps,
+                alive=True,
+            )
+        return out
+
     def _apply_class_modifiers(self, agent: AgentState, cls: AgentClass) -> None:
         for skill, delta in cls.skill_modifiers.items():
             base = int(agent.skills.get(skill, 0))
@@ -2556,7 +3876,7 @@ class MultiAgentRLRLGym:
     def _carried_weight(self, agent: AgentState) -> float:
         weight = 0.0
         for item in agent.inventory + agent.equipped:
-            weight += float(self.item_weight.get(item, 1.0))
+            weight += float(self.item_weight.get(self._item_base_id(item), 1.0))
         return weight
 
     def _carry_capacity(self, agent: AgentState, athletics_level: int | None = None) -> float:
@@ -2610,6 +3930,38 @@ class MultiAgentRLRLGym:
                 else:
                     counts["closed"] += 1
         return counts
+
+    def _nearby_resource_counts(
+        self, center: Tuple[int, int], height: int, width: int
+    ) -> Dict[str, int]:
+        assert self.state is not None
+        cr, cc = center
+        start_r = cr - (height // 2)
+        start_c = cc - (width // 2)
+        out: Dict[str, int] = {}
+        for r in range(start_r, start_r + height):
+            for c in range(start_c, start_c + width):
+                node = self.state.resource_nodes.get((r, c))
+                if node is None or int(node.remaining) <= 0:
+                    continue
+                out[node.node_id] = out.get(node.node_id, 0) + 1
+        return out
+
+    def _nearby_station_counts(
+        self, center: Tuple[int, int], height: int, width: int
+    ) -> Dict[str, int]:
+        assert self.state is not None
+        cr, cc = center
+        start_r = cr - (height // 2)
+        start_c = cc - (width // 2)
+        out: Dict[str, int] = {}
+        for r in range(start_r, start_r + height):
+            for c in range(start_c, start_c + width):
+                station = self.state.stations.get((r, c))
+                if station is None:
+                    continue
+                out[station.station_id] = out.get(station.station_id, 0) + 1
+        return out
 
     def _nearby_agent_counts(
         self, aid: str, center: Tuple[int, int], height: int, width: int
@@ -2668,6 +4020,39 @@ class MultiAgentRLRLGym:
             total_visible += 1
             by_type[monster.monster_id] = by_type.get(monster.monster_id, 0) + 1
             dist = self._manhattan(center, monster.position)
+            if dist == 1:
+                adjacent += 1
+            if nearest is None or dist < nearest:
+                nearest = dist
+        return {
+            "visible": total_visible,
+            "adjacent": adjacent,
+            "nearest_distance": nearest,
+            "by_type": by_type,
+        }
+
+    def _nearby_animal_counts(
+        self, center: Tuple[int, int], height: int, width: int
+    ) -> Dict[str, object]:
+        assert self.state is not None
+        cr, cc = center
+        start_r = cr - (height // 2)
+        start_c = cc - (width // 2)
+        end_r = start_r + height - 1
+        end_c = start_c + width - 1
+        total_visible = 0
+        adjacent = 0
+        nearest: int | None = None
+        by_type: Dict[str, int] = {}
+        for animal in self.state.animals.values():
+            if not animal.alive:
+                continue
+            r, c = animal.position
+            if r < start_r or r > end_r or c < start_c or c > end_c:
+                continue
+            total_visible += 1
+            by_type[animal.animal_id] = by_type.get(animal.animal_id, 0) + 1
+            dist = self._manhattan(center, animal.position)
             if dist == 1:
                 adjacent += 1
             if nearest is None or dist < nearest:
@@ -2769,6 +4154,200 @@ class MultiAgentRLRLGym:
             else:
                 self._monster_move_toward_target(monster, target.position, info)
 
+    def _apply_animal_turn(self, info: Dict[str, Dict[str, object]]) -> None:
+        assert self.state is not None
+        if not self.state.animals:
+            return
+        for entity_id in sorted(self.state.animals.keys()):
+            animal = self.state.animals[entity_id]
+            if not animal.alive:
+                continue
+            animal.age = int(animal.age) + 1
+            if animal.reproduction_cooldown > 0:
+                animal.reproduction_cooldown = int(animal.reproduction_cooldown) - 1
+            if animal.sheared and animal.wool_regrow > 0:
+                animal.wool_regrow = int(animal.wool_regrow) - 1
+                if animal.wool_regrow <= 0:
+                    animal.sheared = False
+
+            self._animal_move(animal)
+            self._animal_tick_needs(animal)
+            if not animal.alive:
+                continue
+            self._animal_try_reproduce(animal)
+
+    def _animal_tick_needs(self, animal: AnimalState) -> None:
+        assert self.state is not None
+        animal.hunger = max(0, int(animal.hunger) - 1)
+        animal.thirst = max(0, int(animal.thirst) - 1)
+        if self._animal_consume_forage(animal.position):
+            animal.hunger = min(int(animal.max_hunger), int(animal.hunger) + 2)
+        if self._animal_can_drink(animal.position):
+            animal.thirst = min(int(animal.max_thirst), int(animal.thirst) + 2)
+        if animal.hunger <= 0 or animal.thirst <= 0:
+            animal.alive = False
+            self._drop_animal_material(animal, [])
+
+    def _animal_can_eat(self, pos: Tuple[int, int]) -> bool:
+        assert self.state is not None
+        forage_tiles = {"grass", "bush", "tree"}
+        for nr, nc in self._animal_neighborhood(pos):
+            if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
+                continue
+            tile_id = self.state.grid[nr][nc]
+            if tile_id not in forage_tiles:
+                continue
+            max_interactions = max(1, int(self.tiles[tile_id].max_interactions))
+            used = int(self.state.tile_interactions.get((nr, nc), 0))
+            if used < max_interactions:
+                return True
+        return False
+
+    def _animal_consume_forage(self, pos: Tuple[int, int]) -> bool:
+        assert self.state is not None
+        forage_tiles = {"grass", "bush", "tree"}
+        candidates = self._animal_neighborhood(pos)
+        self._rng.shuffle(candidates)
+        for nr, nc in candidates:
+            if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
+                continue
+            tile_id = self.state.grid[nr][nc]
+            if tile_id not in forage_tiles:
+                continue
+            max_interactions = max(1, int(self.tiles[tile_id].max_interactions))
+            used = int(self.state.tile_interactions.get((nr, nc), 0))
+            if used >= max_interactions:
+                continue
+            used += 1
+            if used >= max_interactions:
+                floor_id = (
+                    self.mapgen_cfg.floor_fallback_id
+                    if self.mapgen_cfg.floor_fallback_id in self.tiles
+                    else "floor"
+                )
+                self.state.grid[nr][nc] = floor_id
+                self.state.tile_interactions.pop((nr, nc), None)
+            else:
+                self.state.tile_interactions[(nr, nc)] = used
+            return True
+        return False
+
+    def _animal_neighborhood(self, pos: Tuple[int, int]) -> List[Tuple[int, int]]:
+        r, c = pos
+        return [(r, c), (r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+
+    def _animal_can_drink(self, pos: Tuple[int, int]) -> bool:
+        assert self.state is not None
+        r, c = pos
+        if self.state.grid[r][c] == "water":
+            return True
+        for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+            if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
+                continue
+            if self.state.grid[nr][nc] == "water":
+                return True
+        return False
+
+    def _animal_move(self, animal: AnimalState) -> None:
+        assert self.state is not None
+        r, c = animal.position
+        candidates = [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+        walkable = [(nr, nc) for (nr, nc) in candidates if self._walkable_for_animal(nr, nc, animal.entity_id)]
+        if not walkable:
+            return
+        hungry = int(animal.hunger) <= max(2, int(animal.max_hunger) // 3)
+        thirsty = int(animal.thirst) <= max(2, int(animal.max_thirst) // 3)
+        if thirsty:
+            near_water = [p for p in walkable if self._animal_can_drink(p)]
+            if near_water:
+                animal.position = self._rng.choice(near_water)
+                return
+        if hungry:
+            near_food = [p for p in walkable if self._animal_can_eat(p)]
+            if near_food:
+                animal.position = self._rng.choice(near_food)
+                return
+        animal.position = self._rng.choice(walkable)
+
+    def _animal_try_reproduce(self, animal: AnimalState) -> None:
+        assert self.state is not None
+        if not animal.alive:
+            return
+        if animal.age < animal.mature_age:
+            return
+        if animal.reproduction_cooldown > 0:
+            return
+        if animal.hunger < max(3, animal.max_hunger // 2):
+            return
+        if animal.thirst < max(3, animal.max_thirst // 2):
+            return
+        partner = None
+        for other in self.state.animals.values():
+            if other.entity_id == animal.entity_id or not other.alive:
+                continue
+            if other.animal_id != animal.animal_id:
+                continue
+            if other.age < other.mature_age or other.reproduction_cooldown > 0:
+                continue
+            if self._manhattan(animal.position, other.position) <= 1:
+                partner = other
+                break
+        if partner is None:
+            return
+        ar, ac = animal.position
+        spawn_pos = None
+        for nr, nc in ((ar - 1, ac), (ar + 1, ac), (ar, ac - 1), (ar, ac + 1)):
+            if self._walkable_for_animal(nr, nc, moving_entity_id=""):
+                spawn_pos = (nr, nc)
+                break
+        if spawn_pos is None:
+            return
+        entity_id = f"animal_{len(self.state.animals)}"
+        parent_def = self.animals.get(animal.animal_id)
+        if parent_def is None:
+            return
+        self.state.animals[entity_id] = AnimalState(
+            entity_id=entity_id,
+            animal_id=parent_def.animal_id,
+            name=parent_def.name,
+            symbol=parent_def.symbol,
+            color=parent_def.color,
+            position=spawn_pos,
+            hp=parent_def.hp,
+            max_hp=parent_def.hp,
+            hunger=max(2, parent_def.hp),
+            max_hunger=max(3, parent_def.hp + 4),
+            thirst=max(2, parent_def.hp),
+            max_thirst=max(3, parent_def.hp + 4),
+            age=0,
+            mature_age=parent_def.mature_age,
+            reproduction_cooldown=parent_def.reproduction_cooldown,
+            reproduction_cooldown_max=parent_def.reproduction_cooldown,
+            can_shear=parent_def.can_shear,
+            sheared=False,
+            shear_item=parent_def.shear_item,
+            wool_regrow=0,
+            shear_regrow_max=parent_def.shear_regrow_steps,
+            alive=True,
+        )
+        animal.reproduction_cooldown = animal.reproduction_cooldown_max
+        partner.reproduction_cooldown = partner.reproduction_cooldown_max
+
+    def _walkable_for_animal(
+        self, r: int, c: int, moving_entity_id: str
+    ) -> bool:
+        assert self.state is not None
+        if not self._walkable(r, c):
+            return False
+        for animal in self.state.animals.values():
+            if (
+                animal.alive
+                and animal.entity_id != moving_entity_id
+                and animal.position == (r, c)
+            ):
+                return False
+        return True
+
     def _nearest_alive_agent_id(
         self, position: Tuple[int, int], max_range: int | None = None
     ) -> str | None:
@@ -2831,6 +4410,14 @@ class MultiAgentRLRLGym:
         target.hp = max(0, target.hp - final_damage)
         rewards[target.agent_id] -= 0.03 * final_damage
         target_events.append(f"monster_hit:{monster.monster_id}:{final_damage}")
+        if target.hp > 0 and self._rng.random() < 0.14:
+            self._apply_status(
+                target_aid=target.agent_id,
+                status_id="poison",
+                source_aid=monster.entity_id,
+                info=info,
+                rewards=rewards,
+            )
         if target.hp <= 0 and target.alive:
             target.alive = False
             terminations[target.agent_id] = True
@@ -2923,6 +4510,18 @@ class MultiAgentRLRLGym:
         for _ in range(qty):
             bag.append(picked.item)
         events.append(f"monster_loot_drop:{monster.monster_id}:{picked.item}:{qty}")
+
+    def _drop_animal_material(self, animal: AnimalState, events: List[str]) -> None:
+        assert self.state is not None
+        adef = self.animals.get(animal.animal_id)
+        if adef is None or not adef.drop_item:
+            return
+        qty = 1 if animal.animal_id != "chicken" else 2
+        bag = self.state.ground_items.setdefault(animal.position, [])
+        for _ in range(max(1, qty)):
+            bag.append(adef.drop_item)
+        if events is not None:
+            events.append(f"animal_drop:{animal.animal_id}:{adef.drop_item}:{qty}")
 
     def _manhattan(self, a: Tuple[int, int], b: Tuple[int, int]) -> int:
         return abs(a[0] - b[0]) + abs(a[1] - b[1])

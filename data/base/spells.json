@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "spells": [
+    {
+      "id": "arc_bolt",
+      "mana_cost": 3,
+      "cooldown": 2,
+      "range": 4,
+      "target": "enemy",
+      "effects": [
+        {"type": "damage", "amount": 3}
+      ]
+    },
+    {
+      "id": "cleanse",
+      "mana_cost": 4,
+      "cooldown": 3,
+      "range": 0,
+      "target": "self",
+      "effects": [
+        {"type": "cleanse"}
+      ]
+    },
+    {
+      "id": "blink",
+      "mana_cost": 3,
+      "cooldown": 3,
+      "range": 0,
+      "target": "self",
+      "effects": [
+        {"type": "teleport_blink"}
+      ]
+    },
+    {
+      "id": "haste",
+      "mana_cost": 3,
+      "cooldown": 4,
+      "range": 0,
+      "target": "self",
+      "effects": [
+        {"type": "apply_status", "status": "haste"}
+      ]
+    },
+    {
+      "id": "regen_touch",
+      "mana_cost": 4,
+      "cooldown": 4,
+      "range": 1,
+      "target": "ally",
+      "effects": [
+        {"type": "apply_status", "status": "regen"}
+      ]
+    },
+    {
+      "id": "reveal",
+      "mana_cost": 2,
+      "cooldown": 2,
+      "range": 0,
+      "target": "self",
+      "effects": [
+        {"type": "reveal"}
+      ]
+    }
+  ]
+}

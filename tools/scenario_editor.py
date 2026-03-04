@@ -154,6 +154,10 @@ class ScenarioEditorApp:
             out["monsters_data"] = self._read_json_file(
                 out.get("monsters_path"), "data/base/monsters.json"
             )
+        if not out.get("animals_data"):
+            out["animals_data"] = self._read_json_file(
+                out.get("animals_path"), "data/base/animals.json"
+            )
         if not out.get("monster_spawns_data"):
             out["monster_spawns_data"] = self._read_json_file(
                 out.get("monster_spawns_path"), "data/base/monster_spawns.json"
@@ -161,6 +165,22 @@ class ScenarioEditorApp:
         if not out.get("mapgen_config_data"):
             out["mapgen_config_data"] = self._read_json_file(
                 out.get("mapgen_config_path"), "data/base/mapgen_config.json"
+            )
+        if not out.get("recipes_data"):
+            out["recipes_data"] = self._read_json_file(
+                out.get("recipes_path"), "data/base/recipes.json"
+            )
+        if not out.get("statuses_data"):
+            out["statuses_data"] = self._read_json_file(
+                out.get("statuses_path"), "data/base/statuses.json"
+            )
+        if not out.get("spells_data"):
+            out["spells_data"] = self._read_json_file(
+                out.get("spells_path"), "data/base/spells.json"
+            )
+        if not out.get("enchantments_data"):
+            out["enchantments_data"] = self._read_json_file(
+                out.get("enchantments_path"), "data/base/enchantments.json"
             )
         return out
 

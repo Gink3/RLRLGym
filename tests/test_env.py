@@ -815,12 +815,30 @@ class TestEnv(unittest.TestCase):
         defender.armor_slots["head"] = "steel_helm"
         defender.equipped.append("steel_helm")
 
-        start_xp = int(defender.skill_xp.get("armor_head", 0))
+        start_xp = int(defender.skill_xp.get("armor_heavy", 0))
         for _ in range(20):
             env._attack_agent(attacker, defender, events=[])
-            if int(defender.skill_xp.get("armor_head", 0)) > start_xp:
+            if int(defender.skill_xp.get("armor_heavy", 0)) > start_xp:
                 break
-        self.assertGreater(int(defender.skill_xp.get("armor_head", 0)), start_xp)
+        self.assertGreater(int(defender.skill_xp.get("armor_heavy", 0)), start_xp)
+
+    def test_planting_uses_farming_skill(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=1, max_steps=6, render_enabled=False)
+        )
+        env.reset(seed=131)
+        aid = "agent_0"
+        agent = env.state.agents[aid]
+        agent.position = (5, 5)
+        env.state.grid[5][5] = "floor"
+        agent.inventory.append("seed_packet")
+        start_xp = int(agent.skill_xp.get("farming", 0))
+        _, _, _, _, info = env.step({aid: ACTION_INTERACT})
+        self.assertEqual(env.state.grid[5][5], "food_cache")
+        self.assertTrue(
+            any(str(evt).startswith("plant:food_cache:") for evt in info[aid]["events"])
+        )
+        self.assertGreater(int(agent.skill_xp.get("farming", 0)), start_xp)
 
     def test_monster_attacks_when_adjacent(self):
         env = PettingZooParallelRLRLGym(
