@@ -18,6 +18,7 @@ from typing import Dict, Optional, Tuple
 from rlrlgym.curriculum import load_curriculum_phases
 
 from .aim_logger import AimLogger
+from .data_archive import archive_training_inputs
 
 @dataclass
 class RLlibTrainConfig:
@@ -630,6 +631,12 @@ class RLlibTrainer:
 
         out = Path(self.config.output_dir)
         out.mkdir(parents=True, exist_ok=True)
+        archive_paths = archive_training_inputs(
+            output_dir=self.config.output_dir,
+            env_config_path=self.config.env_config_path,
+            curriculum_path=self.config.curriculum_path,
+            scenario_path=self.config.scenario_path or None,
+        )
 
         metrics_rows = []
         death_histogram = {
@@ -1113,6 +1120,7 @@ class RLlibTrainer:
             "metrics": str(metrics_path),
             "replay_dir": str((out / "replays").resolve()),
             "replay_save_every": int(self.config.replay_save_every),
+            "data_snapshot": archive_paths,
             "cause_of_death_histogram": self._compose_cause_histogram(
                 death_histogram=death_histogram,
                 death_by_monster_histogram=death_by_monster_histogram,

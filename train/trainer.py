@@ -15,6 +15,7 @@ from rlrlgym.constants import ACTION_NAMES
 from rlrlgym.scenario import estimate_max_networks
 
 from .aim_logger import AimLogger
+from .data_archive import archive_training_inputs
 from .network_config import NetworkConfig, load_network_configs
 from .policies import NeuralQPolicy
 
@@ -153,6 +154,12 @@ class MultiAgentTrainer:
             return 0
 
     def train(self) -> Dict[str, object]:
+        archive_paths = archive_training_inputs(
+            output_dir=self.config.output_dir,
+            env_config_path=self.config.env_config_path,
+            networks_path=self.config.networks_path,
+            scenario_path=self.config.scenario_path or None,
+        )
         window = max(1, int(self.config.progress_window))
         recent_returns: deque[float] = deque(maxlen=window)
         recent_wins: deque[float] = deque(maxlen=window)
@@ -376,7 +383,7 @@ class MultiAgentTrainer:
 
         return {
             "aggregate": aggregate,
-            "artifacts": {},
+            "artifacts": {"data_snapshot": archive_paths},
             "checkpoint": checkpoint_path,
             "replays": replay_paths,
         }
