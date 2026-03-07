@@ -1,7 +1,7 @@
 import unittest
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import ACTION_INTERACT
+from rlrlgym.constants import ACTION_EQUIP, ACTION_INTERACT, ACTION_INTERACT_MINE, ACTION_INTERACT_STATION
 from rlrlgym.models import ResourceNodeState, StationState
 
 
@@ -65,6 +65,82 @@ class TestGatherAndCrafting(unittest.TestCase):
             any(str(evt).startswith("craft:mint_test:") for evt in info[aid]["events"])
         )
         self.assertGreaterEqual(env.state.agents[aid].inventory.count("copper_coin"), 4)
+
+    def test_mine_tree_harvests_sticks_and_can_fell_with_axe(self):
+        cfg = EnvConfig(width=12, height=10, n_agents=1, max_steps=10, render_enabled=False)
+        env = PettingZooParallelRLRLGym(cfg)
+        env.reset(seed=14)
+        aid = "agent_0"
+        env.state.agents[aid].position = (5, 5)
+        env.state.grid[5][5] = "grass"
+        env.state.grid[5][6] = "tree"
+        env.state.agents[aid].equipped.append("axe")
+
+        for _ in range(4):
+            env.step({aid: ACTION_INTERACT_MINE})
+            if env.state.grid[5][6] != "tree":
+                break
+
+        inv = env.state.agents[aid].inventory
+        self.assertIn("stick", inv)
+        self.assertIn("log", inv)
+        self.assertNotEqual(env.state.grid[5][6], "tree")
+
+    def test_station_recipe_with_required_tool_category(self):
+        recipes_data = {
+            "schema_version": 1,
+            "recipes": [
+                {
+                    "id": "plank_test",
+                    "inputs": {"log": 1},
+                    "outputs": {"wood_plank": 2},
+                    "skill": "crafting",
+                    "station": "workbench",
+                    "required_tool_category": "axe",
+                }
+            ],
+        }
+        cfg = EnvConfig(
+            width=12,
+            height=10,
+            n_agents=1,
+            max_steps=8,
+            render_enabled=False,
+            recipes_data=recipes_data,
+        )
+        env = PettingZooParallelRLRLGym(cfg)
+        env.reset(seed=18)
+        aid = "agent_0"
+        pos = env.state.agents[aid].position
+        env.state.stations[pos] = StationState(
+            station_id="workbench",
+            position=pos,
+            speed_multiplier=1.0,
+            quality_tier=0,
+            unlock_recipes=["plank_test"],
+        )
+        env.state.agents[aid].inventory.append("log")
+        _, _, _, _, info = env.step({aid: ACTION_INTERACT_STATION})
+        self.assertIn("station_idle:workbench", info[aid]["events"])
+
+        env.state.agents[aid].inventory.insert(0, "axe")
+        env.step({aid: ACTION_EQUIP})
+        _, _, _, _, info = env.step({aid: ACTION_INTERACT_STATION})
+        self.assertTrue(any(str(evt).startswith("craft:plank_test:") for evt in info[aid]["events"]))
+        self.assertGreaterEqual(env.state.agents[aid].inventory.count("wood_plank"), 2)
+
+    def test_harvest_limit_blocks_tile_abuse(self):
+        cfg = EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
+        env = PettingZooParallelRLRLGym(cfg)
+        env.reset(seed=22)
+        aid = "agent_0"
+        env.state.agents[aid].position = (4, 4)
+        env.state.grid[4][4] = "stone_floor"
+        env.state.tile_harvest_counts[(4, 4)] = 12
+        _, _, _, _, info = env.step({aid: ACTION_INTERACT_MINE})
+        self.assertTrue(
+            any(str(evt).startswith("harvest_tile_exhausted:stone_floor") for evt in info[aid]["events"])
+        )
 
 
 if __name__ == "__main__":

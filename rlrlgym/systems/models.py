@@ -174,6 +174,7 @@ class PlantPlotState:
 class EnvState:
     grid: List[List[str]]
     tile_interactions: Dict[Tuple[int, int], int]
+    tile_harvest_counts: Dict[Tuple[int, int], int]
     ground_items: Dict[Tuple[int, int], List[str]]
     agents: Dict[str, AgentState]
     chests: Dict[Tuple[int, int], ChestState] = field(default_factory=dict)

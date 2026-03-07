@@ -126,6 +126,10 @@ PROFILE_ALIASES: Dict[str, str] = {
 WATER_TILE_IDS = {"water", "shallow_water", "deep_water"}
 MINABLE_WALL_TILE_IDS = {"rock_wall", "stone_wall"}
 MINABLE_GROUND_TILE_IDS = {"stone_floor"}
+TREE_TILE_IDS = {"tree"}
+HARVESTS_PER_TILE_LIMIT = 12
+TREE_CHOP_PROGRESS_REQUIRED = 10
+STONE_FLOOR_FLINT_CHANCE = 0.18
 PLANT_TYPES: Dict[str, Dict[str, object]] = {
     "berry": {
         "seed_item": "berry_seed",
@@ -351,6 +355,9 @@ class MultiAgentRLRLGym:
         self.weapon_two_handed = dict(self.items.weapon_two_handed)
         self.item_dr_bonus_vs = dict(self.items.item_dr_bonus_vs)
         self.item_defense_dr_bonus = dict(self.items.item_defense_dr_bonus)
+        self.tool_category_by_item = dict(self.items.tool_category_by_item)
+        self.tool_skill_by_item = dict(self.items.tool_skill_by_item)
+        self.tool_skill_bonus_by_item = dict(self.items.tool_skill_bonus_by_item)
         self.armor_slot_by_item = dict(self.items.armor_slot_by_item)
         self.armor_class_by_item = dict(self.items.armor_class_by_item)
         self.item_weight = dict(self.items.item_weight)
@@ -488,6 +495,7 @@ class MultiAgentRLRLGym:
         self.state = EnvState(
             grid=grid,
             tile_interactions={},
+            tile_harvest_counts={},
             ground_items={},
             agents=agents,
             chests={},
@@ -1282,6 +1290,50 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         r, c = actor.position
         mining = self._skill_level(actor, "mining")
+        mining_tool_bonus = self._max_equipped_tool_bonus(actor, skill="mining")
+
+        # Harvest nearby trees for sticks; axes can also fell trees into logs.
+        for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+            if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
+                continue
+            adj_tile = self.state.grid[nr][nc]
+            if adj_tile not in TREE_TILE_IDS:
+                continue
+            if self._harvest_exhausted((nr, nc), adj_tile, events):
+                return -0.02, True
+            woodcutting = self._skill_level(actor, "woodcutting")
+            axe_bonus = max(
+                self._max_equipped_tool_bonus(actor, skill="woodcutting", category="axe"),
+                self._max_equipped_tool_bonus(actor, skill="woodcutting", category="handaxe"),
+            )
+            if axe_bonus <= 0:
+                continue
+            stick_qty = 1 + (woodcutting // 6) + (axe_bonus // 3)
+            stick_added = self._add_item_or_drop(actor, "stick", max(1, stick_qty), events)
+            self._record_harvest((nr, nc))
+            self._gain_skill_xp(actor, "woodcutting", max(1, 2 + stick_qty), events)
+            events.append(f"harvest_tree:stick:{stick_qty}:{stick_added}:{nr}:{nc}")
+            reward = 0.05 + (0.01 * float(max(1, stick_qty)))
+            progress = 1 + axe_bonus + max(0, woodcutting // 5)
+            used = int(self.state.tile_interactions.get((nr, nc), 0)) + progress
+            self.state.tile_interactions[(nr, nc)] = used
+            events.append(f"chop_tree_progress:{nr}:{nc}:{used}/{TREE_CHOP_PROGRESS_REQUIRED}")
+            if used >= TREE_CHOP_PROGRESS_REQUIRED:
+                floor_id = (
+                    self.mapgen_cfg.floor_fallback_id
+                    if self.mapgen_cfg.floor_fallback_id in self.tiles
+                    else "floor"
+                )
+                self.state.grid[nr][nc] = floor_id
+                self.state.tile_interactions.pop((nr, nc), None)
+                log_qty = 1 + max(0, axe_bonus // 2)
+                log_added = self._add_item_or_drop(actor, "log", log_qty, events)
+                events.append(f"chop_tree_felled:{nr}:{nc}:log:{log_qty}:{log_added}")
+                reward += 0.08 + (0.02 * float(log_qty))
+            if stick_added <= 0:
+                reward -= 0.02
+                events.append("carry_blocked")
+            return reward, True
 
         # Mine adjacent stone walls; interior walls break into stone floor after 5 mines.
         for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
@@ -1290,13 +1342,16 @@ class MultiAgentRLRLGym:
             adj_tile = self.state.grid[nr][nc]
             if adj_tile not in MINABLE_WALL_TILE_IDS:
                 continue
+            if self._harvest_exhausted((nr, nc), adj_tile, events):
+                return -0.02, True
             if self._is_unbreakable_edge((nr, nc)):
                 events.append("mine_wall_unbreakable_edge")
                 return -0.01, True
             used = int(self.state.tile_interactions.get((nr, nc), 0)) + 1
             self.state.tile_interactions[(nr, nc)] = used
-            qty = 1 + (mining // 3)
+            qty = 1 + (mining // 3) + (mining_tool_bonus // 2)
             added = self._add_item_or_drop(actor, "stone", max(1, qty), events)
+            self._record_harvest((nr, nc))
             self._gain_skill_xp(actor, "mining", max(1, qty * 2), events)
             if used >= 5:
                 self.state.grid[nr][nc] = "stone_floor" if "stone_floor" in self.tiles else (
@@ -1315,6 +1370,8 @@ class MultiAgentRLRLGym:
         # Mine stone floor underfoot. It depletes after 5 interactions but remains stone.
         tile_id = self.state.grid[r][c]
         if tile_id in MINABLE_GROUND_TILE_IDS:
+            if self._harvest_exhausted((r, c), tile_id, events):
+                return -0.02, True
             used = int(self.state.tile_interactions.get((r, c), 0))
             max_uses = 5
             if used >= max_uses:
@@ -1322,12 +1379,19 @@ class MultiAgentRLRLGym:
                 return -0.01, True
             used += 1
             self.state.tile_interactions[(r, c)] = used
-            qty = 1 + (mining // 4)
+            qty = 1 + (mining // 4) + (mining_tool_bonus // 2)
             added = self._add_item_or_drop(actor, "stone", max(1, qty), events)
+            self._record_harvest((r, c))
+            flint_added = 0
+            flint_chance = min(0.35, STONE_FLOOR_FLINT_CHANCE + (0.01 * float(mining_tool_bonus)))
+            if self._rng.random() < flint_chance:
+                flint_added = self._add_item_or_drop(actor, "flint", 1, events)
             self._gain_skill_xp(actor, "mining", max(1, qty * 2), events)
-            events.append(f"mine_ground:{tile_id}:yield={qty}:added={added}:used={used}/5")
+            events.append(
+                f"mine_ground:{tile_id}:stone={qty}:{added}:flint={flint_added}:used={used}/5"
+            )
             reward = 0.05 + (0.01 * float(max(1, qty)))
-            if added <= 0:
+            if (added + flint_added) <= 0:
                 reward -= 0.02
                 events.append("carry_blocked")
             return reward, True
@@ -1345,12 +1409,15 @@ class MultiAgentRLRLGym:
         tile = self.tiles.get(tile_id)
         if tile is None or not tile.loot_table:
             return 0.0, False
+        if self._harvest_exhausted(pos, tile_id, events):
+            return -0.02, True
         used = int(self.state.tile_interactions.get(pos, 0))
         max_uses = max(1, int(tile.max_interactions))
         if used >= max_uses:
             events.append(f"forage_depleted:{tile_id}")
             return -0.01, True
         self.state.tile_interactions[pos] = used + 1
+        self._record_harvest(pos)
         foraging = self._skill_level(actor, "foraging")
         qty = 1 + (foraging // 5)
         added_total = 0
@@ -1427,6 +1494,8 @@ class MultiAgentRLRLGym:
     ) -> Tuple[float, bool]:
         assert self.state is not None
         pos = actor.position
+        if self._harvest_exhausted(pos, self.state.grid[pos[0]][pos[1]], events):
+            return -0.02, True
         plot = self.state.plant_plots.get(pos)
         crop_id = plot.crop_id if plot is not None else self._crop_from_tile(self.state.grid[pos[0]][pos[1]])
         if not crop_id or crop_id not in PLANT_TYPES:
@@ -1446,6 +1515,7 @@ class MultiAgentRLRLGym:
             if self.mapgen_cfg.floor_fallback_id in self.tiles
             else "floor"
         )
+        self._record_harvest(pos)
         self.state.plant_plots.pop(pos, None)
         self.state.tile_interactions.pop(pos, None)
         same_faction_bonus = 0.0
@@ -1508,13 +1578,20 @@ class MultiAgentRLRLGym:
         node = self.state.resource_nodes.get(actor.position)
         if node is None or int(node.remaining) <= 0:
             return 0.0, False
+        if self._harvest_exhausted(actor.position, f"node:{node.node_id}", events):
+            return -0.02, True
         skill_level = self._skill_level(actor, node.skill)
         base = self._rng.randint(1, 2)
+        tool_bonus = self._max_equipped_tool_bonus(actor, skill=node.skill)
         bonus = int(round(self._agent_enchant_bonus(actor, "gather_yield_plus")))
-        qty = min(int(node.remaining), base + (skill_level // 3) + max(0, bonus))
+        qty = min(
+            int(node.remaining),
+            base + (skill_level // 3) + (tool_bonus // 2) + max(0, bonus),
+        )
         if qty <= 0:
             return -0.01, True
         added = self._add_item_or_drop(actor, node.drop_item, qty, events)
+        self._record_harvest(actor.position)
         node.remaining = max(0, int(node.remaining) - qty)
         if int(node.remaining) <= 0:
             self.state.resource_nodes.pop(actor.position, None)
@@ -1580,6 +1657,8 @@ class MultiAgentRLRLGym:
                 continue
             if self._skill_level(agent, recipe.skill or "crafting") < recipe.min_skill:
                 continue
+            if not self._has_required_recipe_tool(agent, recipe):
+                continue
             if not self._has_recipe_inputs(agent, recipe):
                 continue
             candidates.append(recipe)
@@ -1626,6 +1705,49 @@ class MultiAgentRLRLGym:
         meta = self.state.item_metadata.get(str(item_id), {})
         base = str(meta.get("base_id", "")).strip()
         return base or str(item_id)
+
+    def _max_equipped_tool_bonus(
+        self,
+        agent: AgentState,
+        *,
+        skill: str = "",
+        category: str = "",
+    ) -> int:
+        best = 0
+        skill = str(skill).strip().lower()
+        category = str(category).strip().lower()
+        for item in agent.equipped:
+            base = self._item_base_id(item)
+            tool_category = str(self.tool_category_by_item.get(base, "")).strip().lower()
+            if category and tool_category != category:
+                continue
+            tool_skill = str(self.tool_skill_by_item.get(base, "")).strip().lower()
+            if skill and tool_skill != skill:
+                continue
+            best = max(best, int(self.tool_skill_bonus_by_item.get(base, 0)))
+        return max(0, int(best))
+
+    def _has_required_recipe_tool(self, agent: AgentState, recipe: RecipeDef) -> bool:
+        required = str(recipe.required_tool_category).strip().lower()
+        if not required:
+            return True
+        for item in agent.equipped:
+            base = self._item_base_id(item)
+            if str(self.tool_category_by_item.get(base, "")).strip().lower() == required:
+                return True
+        return False
+
+    def _harvest_exhausted(self, pos: Tuple[int, int], tile_id: str, events: List[str]) -> bool:
+        assert self.state is not None
+        used = int(self.state.tile_harvest_counts.get(pos, 0))
+        if used >= HARVESTS_PER_TILE_LIMIT:
+            events.append(f"harvest_tile_exhausted:{tile_id}:{pos[0]}:{pos[1]}")
+            return True
+        return False
+
+    def _record_harvest(self, pos: Tuple[int, int], amount: int = 1) -> None:
+        assert self.state is not None
+        self.state.tile_harvest_counts[pos] = int(self.state.tile_harvest_counts.get(pos, 0)) + max(1, int(amount))
 
     def _pop_first_base_item(self, bag: List[str], base_id: str) -> str | None:
         for idx, item in enumerate(bag):
@@ -1809,7 +1931,7 @@ class MultiAgentRLRLGym:
             choice = "damage_plus"
         elif base in self.armor_slot_by_item:
             choice = "defense_plus"
-        elif base in {"pickaxe", "hatchet"}:
+        elif str(self.tool_category_by_item.get(base, "")).strip() in {"axe", "pickaxe", "shovel", "handaxe"}:
             choice = "gather_yield_plus"
         meta = self.state.item_metadata.setdefault(str(item), {"base_id": base})
         ench = list(meta.get("enchantments", []))
@@ -3729,6 +3851,12 @@ class MultiAgentRLRLGym:
                 raise ValueError(
                     f"recipe '{recipe_id}' build_tile_id '{recipe.build_tile_id}' is unknown"
                 )
+            if recipe.required_tool_category:
+                categories = set(self.tool_category_by_item.values())
+                if recipe.required_tool_category not in categories:
+                    raise ValueError(
+                        f"recipe '{recipe_id}' required_tool_category '{recipe.required_tool_category}' has no matching items"
+                    )
         for idx, row in enumerate(self.mapgen_cfg.resource_nodes):
             if not isinstance(row, dict):
                 continue

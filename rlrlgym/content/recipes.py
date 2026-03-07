@@ -18,6 +18,7 @@ class RecipeDef:
     station: str = ""
     craft_time: int = 1
     build_tile_id: str = ""
+    required_tool_category: str = ""
     speed_multiplier: float = 1.0
     quality_bonus: float = 0.0
     tags: List[str] = field(default_factory=list)
@@ -53,6 +54,7 @@ def parse_recipes(raw: object) -> Dict[str, RecipeDef]:
         if not isinstance(outputs_raw, dict):
             raise ValueError(f"recipes[{idx}].outputs must be an object")
         build_tile_id = str(row.get("build_tile_id", "")).strip()
+        required_tool_category = str(row.get("required_tool_category", "")).strip().lower()
         if not outputs_raw and not build_tile_id:
             raise ValueError(
                 f"recipes[{idx}] must define non-empty outputs or build_tile_id"
@@ -69,6 +71,7 @@ def parse_recipes(raw: object) -> Dict[str, RecipeDef]:
             station=str(row.get("station", "")).strip(),
             craft_time=max(1, int(row.get("craft_time", 1))),
             build_tile_id=build_tile_id,
+            required_tool_category=required_tool_category,
             speed_multiplier=max(0.1, float(row.get("speed_multiplier", 1.0))),
             quality_bonus=float(row.get("quality_bonus", 0.0)),
             tags=[str(x) for x in row.get("tags", []) if str(x).strip()],

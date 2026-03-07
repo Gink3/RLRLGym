@@ -18,6 +18,7 @@ class TestRecipesJson(unittest.TestCase):
                     "skill": "smithing",
                     "min_skill": 0,
                     "station": "smelter",
+                    "required_tool_category": "pickaxe",
                 }
             ],
         }
@@ -27,6 +28,7 @@ class TestRecipesJson(unittest.TestCase):
             out = load_recipes(p)
             self.assertIn("smelt_test", out)
             self.assertEqual(out["smelt_test"].inputs["copper_ore"], 2)
+            self.assertEqual(out["smelt_test"].required_tool_category, "pickaxe")
 
     def test_requires_outputs_or_build_tile(self):
         payload = {

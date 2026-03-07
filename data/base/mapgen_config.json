@@ -159,7 +159,16 @@
         "density": 0.006,
         "speed_multiplier": 1.0,
         "quality_tier": 0,
-        "unlock_recipes": ["craft_wood_wall", "craft_rock_wall"]
+        "unlock_recipes": [
+          "craft_stone_pickaxe",
+          "craft_stone_axe",
+          "craft_stone_shovel",
+          "craft_stone_handaxe",
+          "craft_wood_planks",
+          "craft_wood_from_log",
+          "craft_wood_wall",
+          "craft_rock_wall"
+        ]
       },
       {
         "id": "smelter",

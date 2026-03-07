@@ -27,6 +27,7 @@ ARMOR_SLOTS = {
 }
 WEAPON_SKILLS = {"melee", "archery", "thrown_weapons"}
 ARMOR_CLASSES = {"light", "medium", "heavy"}
+TOOL_CATEGORIES = {"axe", "pickaxe", "shovel", "handaxe"}
 
 
 @dataclass
@@ -50,6 +51,9 @@ class ItemDef:
     dr_bonus_vs: Dict[str, int] = field(default_factory=dict)
     defense_dr_bonus: int = 0
     weapon: Optional[WeaponDef] = None
+    tool_category: Optional[str] = None
+    tool_skill: str = ""
+    tool_skill_bonus: int = 0
 
 
 @dataclass
@@ -148,6 +152,30 @@ class ItemCatalog:
             if int(item.defense_dr_bonus) > 0
         }
 
+    @property
+    def tool_category_by_item(self) -> Dict[str, str]:
+        return {
+            item_id: str(item.tool_category)
+            for item_id, item in self.items.items()
+            if item.tool_category is not None
+        }
+
+    @property
+    def tool_skill_by_item(self) -> Dict[str, str]:
+        return {
+            item_id: str(item.tool_skill)
+            for item_id, item in self.items.items()
+            if str(item.tool_skill).strip()
+        }
+
+    @property
+    def tool_skill_bonus_by_item(self) -> Dict[str, int]:
+        return {
+            item_id: int(item.tool_skill_bonus)
+            for item_id, item in self.items.items()
+            if int(item.tool_skill_bonus) > 0
+        }
+
 
 REQUIRED_ITEM_FIELDS = {"id", "weight"}
 
@@ -213,6 +241,23 @@ def parse_items(raw: object) -> ItemCatalog:
         if defense_dr_bonus < 0:
             raise ValueError(f"item[{idx}].defense_dr_bonus must be >= 0")
 
+        tool_category_raw = row.get("tool_category")
+        tool_category: Optional[str] = None
+        if tool_category_raw is not None:
+            tool_category = str(tool_category_raw).strip().lower()
+            if tool_category not in TOOL_CATEGORIES:
+                raise ValueError(
+                    f"item[{idx}].tool_category '{tool_category}' must be one of {sorted(TOOL_CATEGORIES)}"
+                )
+        tool_skill = str(row.get("tool_skill", "")).strip().lower()
+        tool_skill_bonus = int(row.get("tool_skill_bonus", 0))
+        if tool_skill_bonus < 0:
+            raise ValueError(f"item[{idx}].tool_skill_bonus must be >= 0")
+        if tool_skill and tool_skill_bonus <= 0:
+            raise ValueError(f"item[{idx}].tool_skill requires tool_skill_bonus > 0")
+        if tool_skill_bonus > 0 and not tool_skill:
+            raise ValueError(f"item[{idx}].tool_skill_bonus requires non-empty tool_skill")
+
         weapon_raw = row.get("weapon")
         weapon: Optional[WeaponDef] = None
         if weapon_raw is not None:
@@ -268,6 +313,9 @@ def parse_items(raw: object) -> ItemCatalog:
             dr_bonus_vs=dr_bonus_vs,
             defense_dr_bonus=defense_dr_bonus,
             weapon=weapon,
+            tool_category=tool_category,
+            tool_skill=tool_skill,
+            tool_skill_bonus=tool_skill_bonus,
         )
 
     if not items:
