@@ -64,6 +64,7 @@ from .spells import SpellDef, load_spells, parse_spells
 from .statuses import StatusDef, load_statuses, parse_statuses
 from .render import RenderWindow
 from .scenario import apply_scenario_to_env_config, load_scenario
+from .structures import load_structures_config, parse_structures_config
 from .tiles import load_tileset, parse_tileset
 
 MOVE_VALID_REWARD = 0.005
@@ -111,7 +112,7 @@ PROFILE_ALIASES: Dict[str, str] = {
     "orc": "reward_brawler_policy_v1",
 }
 WATER_TILE_IDS = {"water", "shallow_water", "deep_water"}
-MINABLE_WALL_TILE_IDS = {"stone_wall"}
+MINABLE_WALL_TILE_IDS = {"rock_wall", "stone_wall"}
 MINABLE_GROUND_TILE_IDS = {"stone_floor"}
 PLANT_TYPES: Dict[str, Dict[str, object]] = {
     "berry": {
@@ -152,6 +153,7 @@ class EnvConfig:
     animals_path: str = str(Path("data") / "base" / "animals.json")
     monster_spawns_path: str = str(Path("data") / "base" / "monster_spawns.json")
     mapgen_config_path: str = str(Path("data") / "base" / "mapgen_config.json")
+    map_structures_path: str = str(Path("data") / "base" / "structures.json")
     static_map_path: str = ""
     recipes_path: str = str(Path("data") / "base" / "recipes.json")
     statuses_path: str = str(Path("data") / "base" / "statuses.json")
@@ -165,6 +167,7 @@ class EnvConfig:
     animals_data: Dict[str, object] = field(default_factory=dict)
     monster_spawns_data: Dict[str, object] = field(default_factory=dict)
     mapgen_config_data: Dict[str, object] = field(default_factory=dict)
+    map_structures_data: Dict[str, object] = field(default_factory=dict)
     static_map_data: Dict[str, object] = field(default_factory=dict)
     recipes_data: Dict[str, object] = field(default_factory=dict)
     statuses_data: Dict[str, object] = field(default_factory=dict)
@@ -262,6 +265,9 @@ class EnvConfig:
         merged["mapgen_config_data"] = dict(
             merged.get("mapgen_config_data", {}) or {}
         )
+        merged["map_structures_data"] = dict(
+            merged.get("map_structures_data", {}) or {}
+        )
         merged["static_map_data"] = dict(merged.get("static_map_data", {}) or {})
         merged["recipes_data"] = dict(merged.get("recipes_data", {}) or {})
         merged["statuses_data"] = dict(merged.get("statuses_data", {}) or {})
@@ -344,6 +350,10 @@ class MultiAgentRLRLGym:
             self.mapgen_cfg = parse_mapgen_config(self.config.mapgen_config_data)
         else:
             self.mapgen_cfg = load_mapgen_config(self.config.mapgen_config_path)
+        if self.config.map_structures_data:
+            self.structure_defs = parse_structures_config(self.config.map_structures_data)
+        else:
+            self.structure_defs = load_structures_config(self.config.map_structures_path)
         self.static_map_layout: StaticMapLayout | None = None
         if self.config.static_map_data:
             self.static_map_layout = parse_map_layout(self.config.static_map_data)
@@ -3756,7 +3766,7 @@ class MultiAgentRLRLGym:
             wall_tile_id=self.mapgen_cfg.wall_tile_id,
             floor_fallback_id=self.mapgen_cfg.floor_fallback_id,
             worldgen=self.mapgen_cfg.worldgen,
-            structures_defs=self.mapgen_cfg.structures,
+            structures_defs=self.structure_defs if self.structure_defs else self.mapgen_cfg.structures,
             min_width=self.mapgen_cfg.min_width,
             min_height=self.mapgen_cfg.min_height,
         )

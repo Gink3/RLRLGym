@@ -3,6 +3,7 @@ import unittest
 
 from rlrlgym.mapgen import generate_biome_terrain
 from rlrlgym.mapgen_config import load_mapgen_config
+from rlrlgym.structures import load_structures_config
 from rlrlgym.tiles import load_tileset
 
 
@@ -10,6 +11,7 @@ class TestMapgenStructures(unittest.TestCase):
     def test_ruins_structures_are_painted(self):
         tiles = load_tileset("data/base/tiles.json")
         cfg = load_mapgen_config("data/base/mapgen_config.json")
+        structures = load_structures_config("data/base/structures.json")
         grid, biomes = generate_biome_terrain(
             width=64,
             height=64,
@@ -19,7 +21,7 @@ class TestMapgenStructures(unittest.TestCase):
             wall_tile_id=cfg.wall_tile_id,
             floor_fallback_id=cfg.floor_fallback_id,
             worldgen=cfg.worldgen,
-            structures_defs=cfg.structures,
+            structures_defs=structures,
             min_width=cfg.min_width,
             min_height=cfg.min_height,
         )

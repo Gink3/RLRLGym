@@ -14,6 +14,7 @@
     "animals_path": "data/base/animals.json",
     "monster_spawns_path": "data/base/monster_spawns.json",
     "mapgen_config_path": "data/base/mapgen_config.json",
+    "map_structures_path": "data/base/structures.json",
     "recipes_path": "data/base/recipes.json",
     "statuses_path": "data/base/statuses.json",
     "spells_path": "data/base/spells.json",

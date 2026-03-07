@@ -309,6 +309,8 @@ class ScenarioEditorWindow(QMainWindow):
             out["monster_spawns_data"] = self._read_json_file(out.get("monster_spawns_path"), "data/base/monster_spawns.json")
         if not out.get("mapgen_config_data"):
             out["mapgen_config_data"] = self._read_json_file(out.get("mapgen_config_path"), "data/base/mapgen_config.json")
+        if not out.get("map_structures_data"):
+            out["map_structures_data"] = self._read_json_file(out.get("map_structures_path"), "data/base/structures.json")
         if not out.get("recipes_data"):
             out["recipes_data"] = self._read_json_file(out.get("recipes_path"), "data/base/recipes.json")
         if not out.get("statuses_data"):
