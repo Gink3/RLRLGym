@@ -3756,6 +3756,7 @@ class MultiAgentRLRLGym:
             wall_tile_id=self.mapgen_cfg.wall_tile_id,
             floor_fallback_id=self.mapgen_cfg.floor_fallback_id,
             worldgen=self.mapgen_cfg.worldgen,
+            structures_defs=self.mapgen_cfg.structures,
             min_width=self.mapgen_cfg.min_width,
             min_height=self.mapgen_cfg.min_height,
         )

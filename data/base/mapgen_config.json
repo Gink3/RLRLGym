@@ -151,6 +151,21 @@
         "quality_tier": 1,
         "unlock_recipes": ["mint_copper_coin", "mint_silver_coin", "mint_gold_coin"]
       }
+    ],
+    "structures": [
+      {
+        "id": "ruins",
+        "density": 0.0035,
+        "min_count": 1,
+        "max_count": 6,
+        "min_width": 6,
+        "max_width": 12,
+        "min_height": 6,
+        "max_height": 12,
+        "wall_tile_id": "stone_wall",
+        "floor_tile_id": "stone_floor",
+        "biome_id": "ruins"
+      }
     ]
   }
 }

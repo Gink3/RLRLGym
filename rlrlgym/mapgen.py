@@ -318,6 +318,127 @@ def _paint_river(
             r = max(1, min(h - 2, r))
 
 
+def _can_place_rect(
+    grid: List[List[str]],
+    top: int,
+    left: int,
+    rect_h: int,
+    rect_w: int,
+    blocked_tiles: set[str],
+) -> bool:
+    h = len(grid)
+    w = len(grid[0]) if h > 0 else 0
+    if top <= 1 or left <= 1 or top + rect_h >= h - 1 or left + rect_w >= w - 1:
+        return False
+    for r in range(top - 1, top + rect_h + 1):
+        for c in range(left - 1, left + rect_w + 1):
+            if grid[r][c] in blocked_tiles:
+                return False
+    return True
+
+
+def _paint_ruin(
+    grid: List[List[str]],
+    biomes: Dict[Tuple[int, int], str],
+    rng: random.Random,
+    *,
+    top: int,
+    left: int,
+    rect_h: int,
+    rect_w: int,
+    wall_tile: str,
+    floor_tile: str,
+    biome_id: str,
+) -> None:
+    bottom = top + rect_h - 1
+    right = left + rect_w - 1
+    door_side = rng.choice(("n", "s", "e", "w"))
+
+    for r in range(top, bottom + 1):
+        for c in range(left, right + 1):
+            is_border = r in (top, bottom) or c in (left, right)
+            if is_border:
+                carve = False
+                if door_side == "n" and r == top and c == left + (rect_w // 2):
+                    carve = True
+                elif door_side == "s" and r == bottom and c == left + (rect_w // 2):
+                    carve = True
+                elif door_side == "w" and c == left and r == top + (rect_h // 2):
+                    carve = True
+                elif door_side == "e" and c == right and r == top + (rect_h // 2):
+                    carve = True
+                elif rng.random() < 0.2:
+                    carve = True
+                grid[r][c] = floor_tile if carve else wall_tile
+            else:
+                grid[r][c] = floor_tile
+            biomes[(r, c)] = biome_id
+
+
+def _place_structures(
+    grid: List[List[str]],
+    biomes: Dict[Tuple[int, int], str],
+    tiles: Dict[str, TileDef],
+    rng: random.Random,
+    structures: List[Dict[str, object]],
+    floor_fallback_id: str,
+) -> None:
+    if not structures:
+        return
+    height = len(grid)
+    width = len(grid[0]) if height > 0 else 0
+    if width < 8 or height < 8:
+        return
+
+    blocked_tiles = {"deep_water", "shallow_water", "water", "indestructible_wall"}
+    for row in structures:
+        kind = str(row.get("id", "ruins")).strip().lower()
+        if kind not in {"ruins", "ruin"}:
+            continue
+        density = max(0.0, float(row.get("density", 0.004)))
+        min_count = max(0, int(row.get("min_count", 0)))
+        max_count = max(min_count, int(row.get("max_count", 999999)))
+        est = max(min_count, int((width * height) * density))
+        target = min(max_count, est)
+        if target <= 0:
+            continue
+
+        min_w = max(5, int(row.get("min_width", 6)))
+        max_w = max(min_w, int(row.get("max_width", 12)))
+        min_h = max(5, int(row.get("min_height", 6)))
+        max_h = max(min_h, int(row.get("max_height", 12)))
+        wall_tile = _valid_tile(tiles, str(row.get("wall_tile_id", "stone_wall")), "stone_wall")
+        floor_tile = _valid_tile(tiles, str(row.get("floor_tile_id", floor_fallback_id)), floor_fallback_id)
+        biome_id = str(row.get("biome_id", "ruins")).strip() or "ruins"
+
+        placed = 0
+        attempts = 0
+        max_attempts = max(40, target * 60)
+        while placed < target and attempts < max_attempts:
+            attempts += 1
+            rect_w = rng.randint(min_w, max_w)
+            rect_h = rng.randint(min_h, max_h)
+            if rect_w >= width - 4 or rect_h >= height - 4:
+                continue
+            left = rng.randint(2, width - rect_w - 3)
+            top = rng.randint(2, height - rect_h - 3)
+            if not _can_place_rect(grid, top, left, rect_h, rect_w, blocked_tiles):
+                continue
+            _paint_ruin(
+                grid,
+                biomes,
+                rng,
+                top=top,
+                left=left,
+                rect_h=rect_h,
+                rect_w=rect_w,
+                wall_tile=wall_tile,
+                floor_tile=floor_tile,
+                biome_id=biome_id,
+            )
+            placed += 1
+
+
 def generate_biome_terrain(
     width: int,
     height: int,
@@ -327,6 +448,7 @@ def generate_biome_terrain(
     wall_tile_id: str,
     floor_fallback_id: str,
     worldgen: Dict[str, object] | None = None,
+    structures_defs: List[Dict[str, object]] | None = None,
     min_width: int = 4,
     min_height: int = 4,
 ) -> Tuple[List[List[str]], Dict[Tuple[int, int], str]]:
@@ -485,6 +607,18 @@ def generate_biome_terrain(
             noise_scale=float(worldgen.get("blob_noise_scale", 24.0)),
             roughness=float(worldgen.get("blob_noise_roughness", 0.35)),
         )
+
+    structure_defs = [dict(x) for x in list(structures_defs or []) if isinstance(x, dict)]
+    if not structure_defs:
+        structure_defs = [dict(x) for x in list(worldgen.get("structures", [])) if isinstance(x, dict)]
+    _place_structures(
+        grid=grid,
+        biomes=biomes,
+        tiles=tiles,
+        rng=rng,
+        structures=structure_defs,
+        floor_fallback_id=floor_id,
+    )
 
     fallback_tile = tiles.get(floor_id) or next(iter(tiles.values()))
     walkable = [

@@ -25,6 +25,14 @@ class TestMapgenConfigJson(unittest.TestCase):
                 "animal_density": 0.02,
                 "min_width": 6,
                 "min_height": 5,
+                "structures": [
+                    {
+                        "id": "ruins",
+                        "density": 0.01,
+                        "min_count": 1,
+                        "max_count": 2,
+                    }
+                ],
             },
         }
         with tempfile.TemporaryDirectory() as tmp:
@@ -37,6 +45,7 @@ class TestMapgenConfigJson(unittest.TestCase):
             self.assertEqual(cfg.animal_density, 0.02)
             self.assertEqual(cfg.min_width, 6)
             self.assertEqual(cfg.min_height, 5)
+            self.assertEqual(len(cfg.structures), 1)
 
 
 if __name__ == "__main__":

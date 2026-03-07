@@ -29,6 +29,7 @@ class MapGenConfig:
     biomes: List[Dict[str, object]] = field(default_factory=list)
     resource_nodes: List[Dict[str, object]] = field(default_factory=list)
     station_spawns: List[Dict[str, object]] = field(default_factory=list)
+    structures: List[Dict[str, object]] = field(default_factory=list)
     worldgen: Dict[str, object] = field(default_factory=dict)
 
 
@@ -75,6 +76,11 @@ def parse_mapgen_config(raw: object) -> MapGenConfig:
         station_spawns=[
             dict(x)
             for x in row.get("station_spawns", [])
+            if isinstance(x, dict)
+        ],
+        structures=[
+            dict(x)
+            for x in row.get("structures", [])
             if isinstance(x, dict)
         ],
         worldgen=worldgen,

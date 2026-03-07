@@ -26,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--num-gpus", type=float, default=0.0)
     p.add_argument("--num-rollout-workers", type=int, default=0)
     p.add_argument("--train-batch-size", type=int, default=4000)
+    p.add_argument("--sgd-minibatch-size", type=int, default=1024)
+    p.add_argument("--num-sgd-iter", type=int, default=10)
     p.add_argument("--replay-save-every", type=int, default=5000)
     p.add_argument("--env-config-path", type=str, default="data/env_config.json")
     p.add_argument("--scenario-path", type=str, default="")
@@ -87,6 +89,8 @@ def main() -> None:
     print(f"Output path: {Path(resolved_output_dir).resolve()}")
     print(f"Aim repo path: {Path(args.aim_repo).resolve()}")
     if args.backend == "custom":
+        if float(args.num_gpus) > 0:
+            print("Note: custom backend is CPU-only; --num-gpus is ignored.")
         config = TrainConfig(
             episodes=args.episodes,
             max_steps=args.max_steps,
@@ -128,6 +132,8 @@ def main() -> None:
         num_gpus=args.num_gpus,
         num_rollout_workers=args.num_rollout_workers,
         train_batch_size=args.train_batch_size,
+        sgd_minibatch_size=args.sgd_minibatch_size,
+        num_sgd_iter=args.num_sgd_iter,
         replay_save_every=args.replay_save_every,
         env_config_path=args.env_config_path,
         scenario_path=args.scenario_path,

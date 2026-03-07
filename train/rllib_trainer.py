@@ -33,6 +33,8 @@ class RLlibTrainConfig:
     num_gpus: int = 0
     num_rollout_workers: int = 0
     train_batch_size: int = 4000
+    sgd_minibatch_size: int = 1024
+    num_sgd_iter: int = 10
     replay_save_every: int = 5000
     env_config_path: str = "data/env_config.json"
     scenario_path: str = ""
@@ -94,6 +96,8 @@ class RLlibTrainer:
                 "num_gpus": float(config.num_gpus),
                 "num_rollout_workers": int(config.num_rollout_workers),
                 "train_batch_size": int(config.train_batch_size),
+                "sgd_minibatch_size": int(config.sgd_minibatch_size),
+                "num_sgd_iter": int(config.num_sgd_iter),
                 "replay_save_every": int(config.replay_save_every),
                 "env_config_path": str(config.env_config_path),
                 "scenario_path": str(config.scenario_path or ""),
@@ -606,6 +610,13 @@ class RLlibTrainer:
             def policy_mapping_fn(agent_id, *args, **kwargs):
                 return "human_policy" if agent_id == "agent_0" else "orc_policy"
 
+        train_batch_size = int(self.config.train_batch_size)
+        sgd_minibatch_size = int(self.config.sgd_minibatch_size)
+        if self.config.num_gpus > 0 and train_batch_size < 8192:
+            # Keep GPUs fed with a larger on-policy batch when acceleration is enabled.
+            train_batch_size = 8192
+            sgd_minibatch_size = max(sgd_minibatch_size, 1024)
+
         ppo = (
             self._PPOConfig()
             .environment(env=env_name, env_config=env_config)
@@ -616,7 +627,11 @@ class RLlibTrainer:
             .framework(self.config.framework)
             .resources(num_gpus=self.config.num_gpus)
             .env_runners(num_env_runners=self.config.num_rollout_workers)
-            .training(train_batch_size=self.config.train_batch_size)
+            .training(
+                train_batch_size=train_batch_size,
+                sgd_minibatch_size=sgd_minibatch_size,
+                num_sgd_iter=int(self.config.num_sgd_iter),
+            )
             .rl_module(rl_module_spec=rl_module_spec)
             .callbacks(MetricsCallbacks)
             .multi_agent(
