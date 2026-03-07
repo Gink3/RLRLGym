@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "mapgen": {
-    "wall_tile_id": "wall",
-    "floor_fallback_id": "floor",
+    "wall_tile_id": "stone_wall",
+    "floor_fallback_id": "grass",
     "chest_density": 0.06,
     "monster_density": 0.05,
     "animal_density": 0.0,
@@ -13,39 +13,66 @@
         "id": "plains",
         "weight": 0.45,
         "tile_weights": {
-          "floor": 0.58,
-          "grass": 0.2,
-          "bush": 0.08,
-          "food_cache": 0.12,
-          "water": 0.06,
-          "shrine": 0.04
+          "grass": 0.62,
+          "stone_floor": 0.18,
+          "bush": 0.09,
+          "berry_plant": 0.05,
+          "grain_plant": 0.04,
+          "shallow_water": 0.03,
+          "deep_water": 0.01,
+          "shrine": 0.0002
         }
       },
       {
         "id": "forest",
         "weight": 0.35,
         "tile_weights": {
-          "floor": 0.44,
-          "grass": 0.14,
-          "bush": 0.18,
-          "tree": 0.14,
-          "food_cache": 0.12,
-          "water": 0.07,
-          "shrine": 0.03
+          "grass": 0.34,
+          "stone_floor": 0.06,
+          "bush": 0.2,
+          "tree": 0.2,
+          "berry_plant": 0.05,
+          "herb_plant": 0.05,
+          "shallow_water": 0.03,
+          "deep_water": 0.01,
+          "shrine": 0.0001
         }
       },
       {
         "id": "rocky",
         "weight": 0.2,
         "tile_weights": {
-          "floor": 0.62,
-          "wall": 0.18,
-          "bush": 0.05,
-          "water": 0.06,
-          "shrine": 0.04
+          "stone_floor": 0.62,
+          "stone_wall": 0.22,
+          "grass": 0.05,
+          "herb_plant": 0.05,
+          "shallow_water": 0.02,
+          "deep_water": 0.01,
+          "shrine": 0.0001
         }
       }
     ],
+    "worldgen": {
+      "biome_patch_size": 28,
+      "biome_smooth_passes": 2,
+      "shallow_water_tile_id": "shallow_water",
+      "deep_water_tile_id": "deep_water",
+      "tree_tile_id": "tree",
+      "stone_tile_id": "stone_wall",
+      "lake_scale": 170,
+      "min_lakes": 3,
+      "max_lakes": 24,
+      "lake_min_radius": 8,
+      "lake_max_radius": 30,
+      "min_rivers": 2,
+      "max_rivers": 6,
+      "river_min_width": 2,
+      "river_max_width": 5,
+      "forest_cluster_scale": 16900,
+      "forest_cluster_radius": 24,
+      "stone_cluster_scale": 32400,
+      "stone_cluster_radius": 20
+    },
     "resource_nodes": [
       {
         "id": "stone_vein",

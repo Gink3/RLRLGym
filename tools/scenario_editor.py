@@ -1,4 +1,5 @@
-"""Tkinter Scenario Editor for race/class agent roster scenarios."""
+#!/usr/bin/env python3
+"""PyQt6 Scenario Editor for race/class agent roster scenarios."""
 
 from __future__ import annotations
 
@@ -7,21 +8,34 @@ import copy
 import json
 from pathlib import Path
 import sys
-from typing import Dict, List
+from typing import Dict
 
-try:
-    import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
-except Exception as exc:  # pragma: no cover
-    raise RuntimeError("Tkinter is required for Scenario Editor") from exc
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction, QFont
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QPlainTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rlrlgym.classes import load_classes
-from rlrlgym.env import EnvConfig
-from rlrlgym.profiles import load_profiles
-from rlrlgym.races import load_races
-from rlrlgym.scenario import (
+from rlrlgym.classes import load_classes  # noqa: E402
+from rlrlgym.env import EnvConfig  # noqa: E402
+from rlrlgym.profiles import load_profiles  # noqa: E402
+from rlrlgym.races import load_races  # noqa: E402
+from rlrlgym.scenario import (  # noqa: E402
     SCENARIO_AGENTS_FILE,
     SCENARIO_ENV_FILE,
     Scenario,
@@ -31,30 +45,156 @@ from rlrlgym.scenario import (
     make_all_race_class_combinations,
     save_scenario,
 )
-from rlrlgym.themes import (
-    get_theme,
-    list_theme_names,
-    load_selected_theme,
-    save_selected_theme,
-    theme_label,
-)
-from train.network_config import load_network_configs
+from train.network_config import load_network_configs  # noqa: E402
 
 
-class ScenarioEditorApp:
-    def __init__(self, root: tk.Tk, initial_path: Path | None = None) -> None:
-        self.root = root
-        self.root.title("RLRLGym Scenario Editor")
+class AgentDialog(QDialog):
+    def __init__(
+        self,
+        *,
+        index: int,
+        races: Dict[str, object],
+        classes: Dict[str, object],
+        profiles: Dict[str, object],
+        networks: Dict[str, object],
+        existing: ScenarioAgent | None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Agent Editor: agent_{index}")
+        self.resize(920, 680)
+        self._index = index
+        self._races = races
+        self._classes = classes
+        self._profiles = profiles
+        self._networks = networks
+        self._existing = existing
+        self.result_agent: ScenarioAgent | None = None
+
+        layout = QVBoxLayout(self)
+
+        top = QHBoxLayout()
+        layout.addLayout(top)
+
+        top.addWidget(QLabel("Name"))
+        self.name_edit = QLineEdit((existing.name if existing and existing.name else ""))
+        self.name_edit.setMaximumWidth(180)
+        top.addWidget(self.name_edit)
+
+        top.addWidget(QLabel("Race"))
+        self.race_combo = QComboBox()
+        self.race_combo.addItems(sorted(self._races.keys()))
+        top.addWidget(self.race_combo)
+
+        top.addWidget(QLabel("Class"))
+        self.class_combo = QComboBox()
+        self.class_combo.addItems(sorted(self._classes.keys()))
+        top.addWidget(self.class_combo)
+
+        top.addWidget(QLabel("Profile"))
+        self.profile_combo = QComboBox()
+        self.profile_combo.addItems(["<none>"] + sorted(self._profiles.keys()))
+        top.addWidget(self.profile_combo)
+
+        top.addWidget(QLabel("Network"))
+        self.network_combo = QComboBox()
+        self.network_combo.addItems(["<none>"] + sorted(self._networks.keys()))
+        top.addWidget(self.network_combo)
+
+        self.json_edit = QPlainTextEdit()
+        self.json_edit.setFont(QFont("DejaVu Sans Mono", 10))
+        layout.addWidget(self.json_edit, stretch=1)
+
+        btn_row = QHBoxLayout()
+        layout.addLayout(btn_row)
+        save_btn = QPushButton("Save Agent")
+        cancel_btn = QPushButton("Cancel")
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(cancel_btn)
+
+        seed_race = existing.race if existing and existing.race in self._races else (sorted(self._races.keys())[0] if self._races else "")
+        seed_class = existing.class_name if existing and existing.class_name in self._classes else (sorted(self._classes.keys())[0] if self._classes else "")
+        self.race_combo.setCurrentText(seed_race)
+        self.class_combo.setCurrentText(seed_class)
+        if existing and existing.profile:
+            self.profile_combo.setCurrentText(existing.profile)
+        if existing and existing.network:
+            self.network_combo.setCurrentText(existing.network)
+
+        self.race_combo.currentTextChanged.connect(self._write_template)
+        self.class_combo.currentTextChanged.connect(self._write_template)
+        self.profile_combo.currentTextChanged.connect(self._write_template)
+        self.network_combo.currentTextChanged.connect(self._write_template)
+        self.name_edit.textChanged.connect(self._write_template)
+        save_btn.clicked.connect(self._on_save)
+        cancel_btn.clicked.connect(self.reject)
+
+        self._write_template()
+
+    def _write_template(self) -> None:
+        race = self.race_combo.currentText().strip()
+        class_name = self.class_combo.currentText().strip()
+        obs = dict(self._existing.observation_config) if self._existing else {}
+        payload = agent_combined_payload(
+            agent_id=f"agent_{self._index}",
+            race=race,
+            class_name=class_name,
+            name=(self.name_edit.text().strip() or None),
+            profile=None if self.profile_combo.currentText() == "<none>" else self.profile_combo.currentText(),
+            network=None if self.network_combo.currentText() == "<none>" else self.network_combo.currentText(),
+            observation_config=obs,
+            race_row=getattr(self._races.get(race), "__dict__", {}),
+            class_row=getattr(self._classes.get(class_name), "__dict__", {}),
+        )
+        self.json_edit.setPlainText(json.dumps(payload, indent=2))
+
+    def _on_save(self) -> None:
+        try:
+            payload = json.loads(self.json_edit.toPlainText().strip() or "{}")
+            if not isinstance(payload, dict):
+                raise ValueError("Agent payload must be a JSON object")
+            race = str(payload.get("race", "")).strip()
+            class_name = str(payload.get("class", payload.get("class_name", ""))).strip()
+            if race not in self._races:
+                raise ValueError(f"Unknown race '{race}'")
+            if class_name not in self._classes:
+                raise ValueError(f"Unknown class '{class_name}'")
+            obs = payload.get("observation_config", {}) or {}
+            if not isinstance(obs, dict):
+                raise ValueError("observation_config must be an object")
+            profile = payload.get("profile")
+            profile = None if profile in (None, "") else str(profile)
+            network = payload.get("network")
+            network = None if network in (None, "") else str(network)
+            name = payload.get("name")
+            name = None if name in (None, "") else str(name)
+            self.result_agent = ScenarioAgent(
+                agent_id=f"agent_{self._index}",
+                race=race,
+                class_name=class_name,
+                name=name,
+                profile=profile,
+                network=network,
+                observation_config=dict(obs),
+            )
+            self.accept()
+        except Exception as exc:
+            QMessageBox.critical(self, "Invalid agent", str(exc))
+
+
+class ScenarioEditorWindow(QMainWindow):
+    def __init__(self, initial_path: Path | None = None) -> None:
+        super().__init__()
+        self.setWindowTitle("RLRLGym Scenario Editor (PyQt6)")
+        self.resize(1300, 850)
 
         self.races = load_races("data/base/agent_races.json")
         self.classes = load_classes("data/base/agent_classes.json")
         self.profiles = load_profiles("data/base/agent_profiles.json")
         self.networks = load_network_configs("data/base/agent_networks.json")
         self.default_env_config = self._load_default_env_config()
-        self._theme_name = load_selected_theme()
-        self._theme = get_theme(self._theme_name)
 
-        self.scenario_path = initial_path
+        self.scenario_path: Path | None = initial_path
         self.scenario = Scenario(
             name="new_scenario",
             env_config=copy.deepcopy(self.default_env_config),
@@ -68,61 +208,65 @@ class ScenarioEditorApp:
             self._refresh_list()
 
     def _build_ui(self) -> None:
-        top = ttk.Frame(self.root)
-        top.pack(fill="x", padx=8, pady=8)
+        root = QWidget(self)
+        self.setCentralWidget(root)
+        layout = QVBoxLayout(root)
 
-        ttk.Button(top, text="New", command=self._new).pack(side="left")
-        ttk.Button(top, text="Load", command=self._load_dialog).pack(side="left", padx=(4, 0))
-        ttk.Button(top, text="Save", command=self._save).pack(side="left", padx=(4, 0))
-        ttk.Button(top, text="Save As", command=self._save_as).pack(side="left", padx=(4, 0))
-        ttk.Button(top, text="Generate Race x Class", command=self._generate_combos).pack(
-            side="left", padx=(10, 0)
-        )
-        self.theme_var = tk.StringVar(value=self._theme_name)
-        self.settings_button = ttk.Menubutton(top, text="Settings")
-        self.settings_menu = tk.Menu(self.settings_button, tearoff=0)
-        self.theme_menu = tk.Menu(self.settings_menu, tearoff=0)
-        for name in list_theme_names():
-            self.theme_menu.add_radiobutton(
-                label=theme_label(name),
-                value=name,
-                variable=self.theme_var,
-                command=self._on_theme_change,
-            )
-        self.settings_menu.add_cascade(label="Theme", menu=self.theme_menu)
-        self.settings_button["menu"] = self.settings_menu
-        self.settings_button.pack(side="right")
+        toolbar = self.menuBar().addMenu("File")
+        new_act = QAction("New", self)
+        load_act = QAction("Load", self)
+        save_act = QAction("Save", self)
+        save_as_act = QAction("Save As", self)
+        toolbar.addAction(new_act)
+        toolbar.addAction(load_act)
+        toolbar.addAction(save_act)
+        toolbar.addAction(save_as_act)
+        new_act.triggered.connect(self._new)
+        load_act.triggered.connect(self._load_dialog)
+        save_act.triggered.connect(self._save)
+        save_as_act.triggered.connect(self._save_as)
 
-        name_row = ttk.Frame(self.root)
-        name_row.pack(fill="x", padx=8, pady=(0, 8))
-        ttk.Label(name_row, text="Scenario Name").pack(side="left")
-        self.name_var = tk.StringVar(value=self.scenario.name)
-        ttk.Entry(name_row, textvariable=self.name_var, width=40).pack(side="left", padx=(8, 0))
+        top = QHBoxLayout()
+        layout.addLayout(top)
 
-        body = ttk.Frame(self.root)
-        body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        top.addWidget(QLabel("Scenario Name"))
+        self.name_edit = QLineEdit(self.scenario.name)
+        self.name_edit.setMaximumWidth(420)
+        top.addWidget(self.name_edit)
 
-        left = ttk.Frame(body)
-        left.pack(side="left", fill="both", expand=True)
+        self.generate_btn = QPushButton("Generate Race x Class")
+        self.generate_btn.clicked.connect(self._generate_combos)
+        top.addWidget(self.generate_btn)
+        top.addStretch(1)
 
-        self.agent_list = tk.Listbox(left, height=18)
-        self.agent_list.pack(fill="both", expand=True)
+        body = QHBoxLayout()
+        layout.addLayout(body, stretch=1)
 
-        btns = ttk.Frame(left)
-        btns.pack(fill="x", pady=(6, 0))
-        ttk.Button(btns, text="Add Agent", command=self._add_agent).pack(side="left")
-        ttk.Button(btns, text="Edit Agent", command=self._edit_selected).pack(side="left", padx=(4, 0))
-        ttk.Button(btns, text="Remove Agent", command=self._remove_selected).pack(
-            side="left", padx=(4, 0)
-        )
+        left = QVBoxLayout()
+        body.addLayout(left, stretch=2)
 
-        right = ttk.Frame(body)
-        right.pack(side="left", fill="both", expand=True, padx=(8, 0))
-        ttk.Label(right, text="Scenario env_config (full editable config)").pack(anchor="w")
-        self.env_text = tk.Text(right, width=64, height=12, font=("Courier", 10))
-        self.env_text.pack(fill="both", expand=True)
-        self.env_text.insert("1.0", json.dumps(self.scenario.env_config, indent=2))
-        self._apply_theme()
+        self.agent_list = QListWidget()
+        left.addWidget(self.agent_list, stretch=1)
+
+        left_btns = QHBoxLayout()
+        left.addLayout(left_btns)
+        self.add_agent_btn = QPushButton("Add Agent")
+        self.edit_agent_btn = QPushButton("Edit Agent")
+        self.remove_agent_btn = QPushButton("Remove Agent")
+        left_btns.addWidget(self.add_agent_btn)
+        left_btns.addWidget(self.edit_agent_btn)
+        left_btns.addWidget(self.remove_agent_btn)
+        self.add_agent_btn.clicked.connect(self._add_agent)
+        self.edit_agent_btn.clicked.connect(self._edit_selected)
+        self.remove_agent_btn.clicked.connect(self._remove_selected)
+
+        right = QVBoxLayout()
+        body.addLayout(right, stretch=3)
+        right.addWidget(QLabel("Scenario env_config (full editable config)"))
+        self.env_edit = QPlainTextEdit()
+        self.env_edit.setFont(QFont("DejaVu Sans Mono", 10))
+        right.addWidget(self.env_edit, stretch=1)
+        self.env_edit.setPlainText(json.dumps(self.scenario.env_config, indent=2))
 
     def _load_default_env_config(self) -> Dict[str, object]:
         try:
@@ -143,140 +287,36 @@ class ScenarioEditorApp:
     def _expand_embedded_spawn_data(self, env_cfg: Dict[str, object]) -> Dict[str, object]:
         out = dict(env_cfg)
         if not out.get("structures_data"):
-            out["structures_data"] = self._read_json_file(
-                out.get("tiles_path"), "data/base/tiles.json"
-            )
+            out["structures_data"] = self._read_json_file(out.get("tiles_path"), "data/base/tiles.json")
         if not out.get("items_data"):
-            out["items_data"] = self._read_json_file(
-                out.get("items_path"), "data/base/items.json"
-            )
+            out["items_data"] = self._read_json_file(out.get("items_path"), "data/base/items.json")
         if not out.get("monsters_data"):
-            out["monsters_data"] = self._read_json_file(
-                out.get("monsters_path"), "data/base/monsters.json"
-            )
+            out["monsters_data"] = self._read_json_file(out.get("monsters_path"), "data/base/monsters.json")
         if not out.get("animals_data"):
-            out["animals_data"] = self._read_json_file(
-                out.get("animals_path"), "data/base/animals.json"
-            )
+            out["animals_data"] = self._read_json_file(out.get("animals_path"), "data/base/animals.json")
         if not out.get("monster_spawns_data"):
-            out["monster_spawns_data"] = self._read_json_file(
-                out.get("monster_spawns_path"), "data/base/monster_spawns.json"
-            )
+            out["monster_spawns_data"] = self._read_json_file(out.get("monster_spawns_path"), "data/base/monster_spawns.json")
         if not out.get("mapgen_config_data"):
-            out["mapgen_config_data"] = self._read_json_file(
-                out.get("mapgen_config_path"), "data/base/mapgen_config.json"
-            )
+            out["mapgen_config_data"] = self._read_json_file(out.get("mapgen_config_path"), "data/base/mapgen_config.json")
         if not out.get("recipes_data"):
-            out["recipes_data"] = self._read_json_file(
-                out.get("recipes_path"), "data/base/recipes.json"
-            )
+            out["recipes_data"] = self._read_json_file(out.get("recipes_path"), "data/base/recipes.json")
         if not out.get("statuses_data"):
-            out["statuses_data"] = self._read_json_file(
-                out.get("statuses_path"), "data/base/statuses.json"
-            )
+            out["statuses_data"] = self._read_json_file(out.get("statuses_path"), "data/base/statuses.json")
         if not out.get("spells_data"):
-            out["spells_data"] = self._read_json_file(
-                out.get("spells_path"), "data/base/spells.json"
-            )
+            out["spells_data"] = self._read_json_file(out.get("spells_path"), "data/base/spells.json")
         if not out.get("enchantments_data"):
-            out["enchantments_data"] = self._read_json_file(
-                out.get("enchantments_path"), "data/base/enchantments.json"
-            )
+            out["enchantments_data"] = self._read_json_file(out.get("enchantments_path"), "data/base/enchantments.json")
         return out
-
-    def _on_theme_change(self) -> None:
-        name = save_selected_theme(self.theme_var.get())
-        self.theme_var.set(name)
-        self._theme_name = name
-        self._theme = get_theme(name)
-        self._apply_theme()
-
-    def _apply_theme(self) -> None:
-        t = self._theme
-        self.root.configure(bg=t["bg"])
-        style = ttk.Style(self.root)
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        style.configure(".", background=t["panel"], foreground=t["text"])
-        style.configure("TFrame", background=t["panel"])
-        style.configure("TLabel", background=t["panel"], foreground=t["text"])
-        style.configure("TButton", background=t["panel_alt"], foreground=t["text"])
-        style.map("TButton", background=[("active", t["primary_hover"])])
-        style.configure("TMenubutton", background=t["panel_alt"], foreground=t["text"])
-        style.configure(
-            "TEntry",
-            fieldbackground=t["panel_alt"],
-            background=t["panel_alt"],
-            foreground=t["text"],
-            insertcolor=t["text"],
-        )
-        style.configure(
-            "TCombobox",
-            fieldbackground=t["panel_alt"],
-            background=t["panel_alt"],
-            foreground=t["text"],
-        )
-        style.map(
-            "TCombobox",
-            fieldbackground=[("readonly", t["panel_alt"])],
-            foreground=[("readonly", t["text"])],
-            selectforeground=[("readonly", t["text"])],
-            selectbackground=[("readonly", t["primary"])],
-        )
-        self.root.option_add("*TCombobox*Listbox.background", t["panel_alt"])
-        self.root.option_add("*TCombobox*Listbox.foreground", t["text"])
-        self.root.option_add("*TCombobox*Listbox.selectBackground", t["primary"])
-        self.root.option_add("*TCombobox*Listbox.selectForeground", t["text"])
-        self.settings_menu.configure(
-            background=t["panel"],
-            foreground=t["text"],
-            activebackground=t["primary"],
-            activeforeground=t["text"],
-            tearoff=False,
-        )
-        self.theme_menu.configure(
-            background=t["panel"],
-            foreground=t["text"],
-            activebackground=t["primary"],
-            activeforeground=t["text"],
-            tearoff=False,
-        )
-        self.agent_list.configure(
-            bg=t["panel_alt"],
-            fg=t["text"],
-            selectbackground=t["primary"],
-            selectforeground=t["text"],
-            highlightbackground=t["border"],
-            highlightcolor=t["primary"],
-        )
-        self.env_text.configure(
-            bg=t["panel_alt"],
-            fg=t["text"],
-            insertbackground=t["text"],
-            highlightbackground=t["border"],
-            highlightcolor=t["primary"],
-        )
 
     def _new(self) -> None:
         self.scenario_path = None
-        self.scenario = Scenario(
-            name="new_scenario",
-            env_config=copy.deepcopy(self.default_env_config),
-            agents=[],
-        )
-        self.name_var.set(self.scenario.name)
-        self.env_text.delete("1.0", tk.END)
-        self.env_text.insert("1.0", json.dumps(self.scenario.env_config, indent=2))
+        self.scenario = Scenario(name="new_scenario", env_config=copy.deepcopy(self.default_env_config), agents=[])
+        self.name_edit.setText(self.scenario.name)
+        self.env_edit.setPlainText(json.dumps(self.scenario.env_config, indent=2))
         self._refresh_list()
 
     def _load_dialog(self) -> None:
-        chosen = filedialog.askdirectory(
-            title="Load scenario directory",
-            initialdir="data/scenarios",
-            mustexist=True,
-        )
+        chosen = QFileDialog.getExistingDirectory(self, "Load scenario directory", "data/scenarios")
         if not chosen:
             return
         self._load(Path(chosen))
@@ -284,28 +324,22 @@ class ScenarioEditorApp:
     def _load(self, path: Path) -> None:
         try:
             self.scenario = load_scenario(path)
+            self.scenario_path = path
+            merged_env = copy.deepcopy(self.default_env_config)
+            for k, v in dict(self.scenario.env_config).items():
+                merged_env[k] = v
+            self.scenario.env_config = self._expand_embedded_spawn_data(merged_env)
+            self.name_edit.setText(self.scenario.name)
+            self.env_edit.setPlainText(json.dumps(self.scenario.env_config, indent=2))
+            self._refresh_list()
         except Exception as exc:
-            messagebox.showerror("Load failed", str(exc))
-            return
-        self.scenario_path = path
-        self.name_var.set(self.scenario.name)
-        merged_env = copy.deepcopy(self.default_env_config)
-        for key, value in dict(self.scenario.env_config).items():
-            merged_env[key] = value
-        self.scenario.env_config = self._expand_embedded_spawn_data(merged_env)
-        self.env_text.delete("1.0", tk.END)
-        self.env_text.insert("1.0", json.dumps(self.scenario.env_config, indent=2))
-        self._refresh_list()
+            QMessageBox.critical(self, "Load failed", str(exc))
 
     def _save_as(self) -> None:
-        chosen = filedialog.askdirectory(
-            title="Select scenario save directory",
-            initialdir="data/scenarios",
-            mustexist=True,
-        )
+        chosen = QFileDialog.getExistingDirectory(self, "Select scenario save directory", "data/scenarios")
         if not chosen:
             return
-        name = self.name_var.get().strip() or "scenario"
+        name = self.name_edit.text().strip() or "scenario"
         safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in name)
         self.scenario_path = Path(chosen) / safe
         self._save()
@@ -315,21 +349,19 @@ class ScenarioEditorApp:
             self._save_as()
             return
         try:
-            env_payload = json.loads(self.env_text.get("1.0", tk.END).strip() or "{}")
+            env_payload = json.loads(self.env_edit.toPlainText().strip() or "{}")
             if not isinstance(env_payload, dict):
                 raise ValueError("env_config must be a JSON object")
             clean_env: Dict[str, object] = {}
             for key in self.default_env_config.keys():
-                if key in env_payload:
-                    clean_env[key] = env_payload[key]
-                else:
-                    clean_env[key] = self.default_env_config[key]
+                clean_env[key] = env_payload[key] if key in env_payload else self.default_env_config[key]
             clean_env = self._expand_embedded_spawn_data(clean_env)
-            self.scenario.name = self.name_var.get().strip() or "scenario"
+            self.scenario.name = self.name_edit.text().strip() or "scenario"
             self.scenario.env_config = clean_env
             out_dir = save_scenario(self.scenario_path, self.scenario)
             self.scenario_path = out_dir
-            messagebox.showinfo(
+            QMessageBox.information(
+                self,
                 "Saved",
                 (
                     f"Saved scenario directory: {out_dir}\n"
@@ -338,15 +370,13 @@ class ScenarioEditorApp:
                 ),
             )
         except Exception as exc:
-            messagebox.showerror("Save failed", str(exc))
+            QMessageBox.critical(self, "Save failed", str(exc))
 
     def _refresh_list(self) -> None:
-        self.agent_list.delete(0, tk.END)
+        self.agent_list.clear()
         for a in self.scenario.agents:
-            display_name = (a.name or "").strip()
-            if not display_name:
-                display_name = f"{a.race}/{a.class_name}"
-            self.agent_list.insert(tk.END, display_name)
+            display_name = (a.name or "").strip() or f"{a.race}/{a.class_name}"
+            self.agent_list.addItem(display_name)
 
     def _generate_combos(self) -> None:
         default_profile_by_race = {name: name for name in self.races.keys() if name in self.profiles}
@@ -360,181 +390,52 @@ class ScenarioEditorApp:
         self._refresh_list()
 
     def _selected_index(self) -> int:
-        selected = list(self.agent_list.curselection())
-        if not selected:
-            return -1
-        return int(selected[0])
+        return int(self.agent_list.currentRow())
 
     def _add_agent(self) -> None:
         idx = len(self.scenario.agents)
-        agent = self._open_agent_editor(index=idx, existing=None)
-        if agent is None:
-            return
-        self.scenario.agents.append(agent)
-        self._refresh_list()
+        dlg = AgentDialog(
+            index=idx,
+            races=self.races,
+            classes=self.classes,
+            profiles=self.profiles,
+            networks=self.networks,
+            existing=None,
+            parent=self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result_agent is not None:
+            self.scenario.agents.append(dlg.result_agent)
+            self._refresh_list()
 
     def _edit_selected(self) -> None:
         idx = self._selected_index()
-        if idx < 0:
+        if idx < 0 or idx >= len(self.scenario.agents):
             return
-        existing = self.scenario.agents[idx]
-        edited = self._open_agent_editor(index=idx, existing=existing)
-        if edited is None:
-            return
-        self.scenario.agents[idx] = edited
-        self._refresh_list()
+        dlg = AgentDialog(
+            index=idx,
+            races=self.races,
+            classes=self.classes,
+            profiles=self.profiles,
+            networks=self.networks,
+            existing=self.scenario.agents[idx],
+            parent=self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result_agent is not None:
+            self.scenario.agents[idx] = dlg.result_agent
+            self._refresh_list()
 
     def _remove_selected(self) -> None:
         idx = self._selected_index()
-        if idx < 0:
+        if idx < 0 or idx >= len(self.scenario.agents):
             return
         del self.scenario.agents[idx]
         for i, agent in enumerate(self.scenario.agents):
             agent.agent_id = f"agent_{i}"
         self._refresh_list()
 
-    def _open_agent_editor(self, index: int, existing: ScenarioAgent | None) -> ScenarioAgent | None:
-        dialog = tk.Toplevel(self.root)
-        dialog.title(f"Agent Editor: agent_{index}")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        race_names = sorted(self.races.keys())
-        class_names = sorted(self.classes.keys())
-        profile_names = ["<none>"] + sorted(self.profiles.keys())
-        network_names = ["<none>"] + sorted(self.networks.keys())
-
-        seed_race = existing.race if existing else (race_names[0] if race_names else "")
-        seed_class = existing.class_name if existing else (class_names[0] if class_names else "")
-        seed_profile = existing.profile if existing and existing.profile else "<none>"
-        seed_network = existing.network if existing and existing.network else "<none>"
-        seed_name = existing.name if existing and existing.name else ""
-
-        row = ttk.Frame(dialog)
-        row.pack(fill="x", padx=8, pady=8)
-        ttk.Label(row, text="Name").pack(side="left")
-        name_var = tk.StringVar(value=seed_name)
-        ttk.Entry(row, textvariable=name_var, width=16).pack(side="left", padx=(6, 12))
-        ttk.Label(row, text="Race").pack(side="left")
-        race_var = tk.StringVar(value=seed_race)
-        race_box = ttk.Combobox(row, textvariable=race_var, values=race_names, width=16, state="readonly")
-        race_box.pack(side="left", padx=(6, 12))
-        ttk.Label(row, text="Class").pack(side="left")
-        class_var = tk.StringVar(value=seed_class)
-        class_box = ttk.Combobox(row, textvariable=class_var, values=class_names, width=16, state="readonly")
-        class_box.pack(side="left", padx=(6, 12))
-        ttk.Label(row, text="Profile").pack(side="left")
-        profile_var = tk.StringVar(value=seed_profile)
-        profile_box = ttk.Combobox(
-            row,
-            textvariable=profile_var,
-            values=profile_names,
-            width=14,
-            state="readonly",
-        )
-        profile_box.pack(side="left", padx=(6, 12))
-        ttk.Label(row, text="Network").pack(side="left")
-        network_var = tk.StringVar(value=seed_network)
-        network_box = ttk.Combobox(
-            row,
-            textvariable=network_var,
-            values=network_names,
-            width=14,
-            state="readonly",
-        )
-        network_box.pack(side="left", padx=(6, 0))
-
-        ttk.Label(dialog, text="Combined JSON (final manual edit)").pack(anchor="w", padx=8)
-        editor = tk.Text(dialog, width=96, height=22, font=("Courier", 10))
-        editor.pack(fill="both", expand=True, padx=8, pady=(2, 8))
-
-        existing_obs = dict(existing.observation_config) if existing else {}
-
-        def write_template(*_args):
-            race = race_var.get().strip()
-            class_name = class_var.get().strip()
-            payload = agent_combined_payload(
-                agent_id=f"agent_{index}",
-                race=race,
-                class_name=class_name,
-                name=(name_var.get().strip() or None),
-                profile=None if profile_var.get() == "<none>" else profile_var.get(),
-                network=None if network_var.get() == "<none>" else network_var.get(),
-                observation_config=existing_obs,
-                race_row=self.races[race].__dict__ if race in self.races else {},
-                class_row=self.classes[class_name].__dict__ if class_name in self.classes else {},
-            )
-            editor.delete("1.0", tk.END)
-            editor.insert("1.0", json.dumps(payload, indent=2))
-
-        race_box.bind("<<ComboboxSelected>>", write_template)
-        class_box.bind("<<ComboboxSelected>>", write_template)
-        profile_box.bind("<<ComboboxSelected>>", write_template)
-        network_box.bind("<<ComboboxSelected>>", write_template)
-        write_template()
-
-        out: Dict[str, ScenarioAgent] = {}
-
-        def on_save() -> None:
-            try:
-                payload = json.loads(editor.get("1.0", tk.END).strip())
-                if not isinstance(payload, dict):
-                    raise ValueError("Agent payload must be a JSON object")
-                race = str(payload.get("race", "")).strip()
-                class_name = str(payload.get("class", payload.get("class_name", "")).strip())
-                if race not in self.races:
-                    raise ValueError(f"Unknown race '{race}'")
-                if class_name not in self.classes:
-                    raise ValueError(f"Unknown class '{class_name}'")
-                obs = payload.get("observation_config", {})
-                if obs is None:
-                    obs = {}
-                if not isinstance(obs, dict):
-                    raise ValueError("observation_config must be an object")
-                profile = payload.get("profile")
-                if profile in ("", None):
-                    profile = None
-                name = payload.get("name")
-                if name in ("", None):
-                    name = None
-                network = payload.get("network")
-                if network in ("", None):
-                    network = None
-                out["agent"] = ScenarioAgent(
-                    agent_id=f"agent_{index}",
-                    race=race,
-                    class_name=class_name,
-                    name=(str(name) if name is not None else None),
-                    profile=(str(profile) if profile is not None else None),
-                    network=(str(network) if network is not None else None),
-                    observation_config=dict(obs),
-                )
-                dialog.destroy()
-            except Exception as exc:
-                messagebox.showerror("Invalid agent", str(exc), parent=dialog)
-
-        btn_row = ttk.Frame(dialog)
-        btn_row.pack(fill="x", padx=8, pady=(0, 8))
-        ttk.Button(btn_row, text="Save Agent", command=on_save).pack(side="left")
-        ttk.Button(btn_row, text="Cancel", command=dialog.destroy).pack(side="left", padx=(4, 0))
-
-        # Apply global tool theme to dialog-local tk widgets for consistency.
-        t = self._theme
-        dialog.configure(bg=t["panel"])
-        editor.configure(
-            bg=t["panel_alt"],
-            fg=t["text"],
-            insertbackground=t["text"],
-            highlightbackground=t["border"],
-            highlightcolor=t["primary"],
-        )
-
-        self.root.wait_window(dialog)
-        return out.get("agent")
-
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Open Scenario Editor")
+    p = argparse.ArgumentParser(description="Open Scenario Editor (PyQt6)")
     p.add_argument("--scenario", type=str, default="", help="Optional scenario directory path")
     return p
 
@@ -542,10 +443,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     initial = Path(args.scenario).resolve() if args.scenario else None
-    root = tk.Tk()
-    app = ScenarioEditorApp(root, initial_path=initial)
-    _ = app
-    root.mainloop()
+    app = QApplication(sys.argv)
+    win = ScenarioEditorWindow(initial_path=initial)
+    win.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

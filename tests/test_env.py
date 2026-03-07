@@ -124,6 +124,35 @@ class TestEnv(unittest.TestCase):
             any(evt.startswith("chest_open:") for evt in info["agent_0"]["events"])
         )
 
+    def test_reset_uses_static_map_data_when_provided(self):
+        static_map_data = {
+            "schema_version": 1,
+            "map": {
+                "name": "tiny_test",
+                "grid": [
+                    ["wall", "wall", "wall", "wall", "wall"],
+                    ["wall", "floor", "floor", "floor", "wall"],
+                    ["wall", "floor", "water", "floor", "wall"],
+                    ["wall", "floor", "floor", "floor", "wall"],
+                    ["wall", "wall", "wall", "wall", "wall"],
+                ],
+                "biomes": [{"position": [1, 1], "biome": "test_biome"}],
+            },
+        }
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(
+                width=12,
+                height=10,
+                n_agents=1,
+                max_steps=5,
+                render_enabled=False,
+                static_map_data=static_map_data,
+            )
+        )
+        env.reset(seed=211)
+        self.assertEqual(env.state.grid[2][2], "water")
+        self.assertEqual(env.state.biomes.get((1, 1)), "test_biome")
+
     def test_class_starting_items_and_skill_modifiers(self):
         env = PettingZooParallelRLRLGym(
             EnvConfig(
@@ -831,14 +860,51 @@ class TestEnv(unittest.TestCase):
         agent = env.state.agents[aid]
         agent.position = (5, 5)
         env.state.grid[5][5] = "floor"
-        agent.inventory.append("seed_packet")
+        agent.inventory.append("berry_seed")
         start_xp = int(agent.skill_xp.get("farming", 0))
         _, _, _, _, info = env.step({aid: ACTION_INTERACT})
-        self.assertEqual(env.state.grid[5][5], "food_cache")
+        self.assertEqual(env.state.grid[5][5], "berry_plant")
         self.assertTrue(
-            any(str(evt).startswith("plant:food_cache:") for evt in info[aid]["events"])
+            any(str(evt).startswith("plant:berry:") for evt in info[aid]["events"])
         )
         self.assertGreater(int(agent.skill_xp.get("farming", 0)), start_xp)
+
+    def test_harvest_plant_gives_food_and_seed_reward(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=1, max_steps=6, render_enabled=False)
+        )
+        env.reset(seed=133)
+        aid = "agent_0"
+        agent = env.state.agents[aid]
+        agent.position = (5, 5)
+        env.state.grid[5][5] = "berry_plant"
+        _, rewards, _, _, info = env.step({aid: ACTION_INTERACT})
+        self.assertTrue(any("berries" in x for x in agent.inventory + env.state.ground_items.get((5, 5), [])))
+        self.assertTrue(any("berry_seed" in x for x in agent.inventory + env.state.ground_items.get((5, 5), [])))
+        self.assertTrue(
+            any(str(evt).startswith("harvest:berry:") for evt in info[aid]["events"])
+        )
+        self.assertGreater(rewards[aid], 0.0)
+
+    def test_harvest_same_faction_planted_bonus(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=2, max_steps=8, render_enabled=False)
+        )
+        env.reset(seed=135)
+        a0 = env.state.agents["agent_0"]
+        a1 = env.state.agents["agent_1"]
+        a0.faction_id = 7
+        a1.faction_id = 7
+        a0.position = (5, 5)
+        a1.position = (6, 6)
+        a0.inventory.extend(["berry_seed"])
+        env.step({"agent_0": ACTION_INTERACT, "agent_1": ACTION_WAIT})
+        a1.position = (5, 5)
+        _, rewards, _, _, info = env.step({"agent_0": ACTION_WAIT, "agent_1": ACTION_INTERACT})
+        self.assertTrue(
+            any(str(evt).startswith("harvest:faction_bonus:berry:") for evt in info["agent_1"]["events"])
+        )
+        self.assertGreater(rewards["agent_1"], 0.12)
 
     def test_monster_attacks_when_adjacent(self):
         env = PettingZooParallelRLRLGym(

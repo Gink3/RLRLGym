@@ -971,6 +971,15 @@ class MultiAgentTrainer:
                 }
                 for _, animal in sorted(state.animals.items())
             ],
+            "plant_plots": [
+                {
+                    "position": [r, c],
+                    "crop_id": str(plot.crop_id),
+                    "planter_id": str(plot.planter_id),
+                    "planter_faction_id": int(plot.planter_faction_id),
+                }
+                for (r, c), plot in sorted(state.plant_plots.items())
+            ],
             "agents": {
                 aid: {
                     "agent_id": agent.agent_id,

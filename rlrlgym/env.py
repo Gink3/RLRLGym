@@ -34,8 +34,9 @@ from .constants import (
 from .classes import AgentClass, load_classes
 from .animals import AnimalDef, load_animals, parse_animals
 from .items import ItemCatalog, load_items, parse_items
-from .mapgen import generate_map, sample_walkable_positions
+from .mapgen import generate_biome_terrain, generate_map, sample_walkable_positions
 from .mapgen_config import MapGenConfig, load_mapgen_config, parse_mapgen_config
+from .map_layout import StaticMapLayout, load_map_layout, parse_map_layout
 from .models import (
     ActiveStatus,
     AgentState,
@@ -43,6 +44,7 @@ from .models import (
     ChestState,
     EnvState,
     MonsterState,
+    PlantPlotState,
     ResourceNodeState,
     StationState,
 )
@@ -62,7 +64,7 @@ from .spells import SpellDef, load_spells, parse_spells
 from .statuses import StatusDef, load_statuses, parse_statuses
 from .render import RenderWindow
 from .scenario import apply_scenario_to_env_config, load_scenario
-from .tiles import load_tileset, parse_tileset, weighted_tile_ids, weighted_tile_weights
+from .tiles import load_tileset, parse_tileset
 
 MOVE_VALID_REWARD = 0.005
 MOVE_STEP_COST = 0.002
@@ -108,6 +110,32 @@ PROFILE_ALIASES: Dict[str, str] = {
     "human": "reward_explorer_policy_v1",
     "orc": "reward_brawler_policy_v1",
 }
+WATER_TILE_IDS = {"water", "shallow_water", "deep_water"}
+MINABLE_WALL_TILE_IDS = {"stone_wall"}
+MINABLE_GROUND_TILE_IDS = {"stone_floor"}
+PLANT_TYPES: Dict[str, Dict[str, object]] = {
+    "berry": {
+        "seed_item": "berry_seed",
+        "crop_tile": "berry_plant",
+        "food_item": "berries",
+        "food_qty": (1, 3),
+        "seed_qty": (1, 2),
+    },
+    "grain": {
+        "seed_item": "grain_seed",
+        "crop_tile": "grain_plant",
+        "food_item": "grain_bundle",
+        "food_qty": (1, 2),
+        "seed_qty": (1, 3),
+    },
+    "herb": {
+        "seed_item": "herb_seed",
+        "crop_tile": "herb_plant",
+        "food_item": "herb_leaf",
+        "food_qty": (1, 2),
+        "seed_qty": (1, 2),
+    },
+}
 
 @dataclass
 class EnvConfig:
@@ -124,6 +152,7 @@ class EnvConfig:
     animals_path: str = str(Path("data") / "base" / "animals.json")
     monster_spawns_path: str = str(Path("data") / "base" / "monster_spawns.json")
     mapgen_config_path: str = str(Path("data") / "base" / "mapgen_config.json")
+    static_map_path: str = ""
     recipes_path: str = str(Path("data") / "base" / "recipes.json")
     statuses_path: str = str(Path("data") / "base" / "statuses.json")
     spells_path: str = str(Path("data") / "base" / "spells.json")
@@ -136,6 +165,7 @@ class EnvConfig:
     animals_data: Dict[str, object] = field(default_factory=dict)
     monster_spawns_data: Dict[str, object] = field(default_factory=dict)
     mapgen_config_data: Dict[str, object] = field(default_factory=dict)
+    static_map_data: Dict[str, object] = field(default_factory=dict)
     recipes_data: Dict[str, object] = field(default_factory=dict)
     statuses_data: Dict[str, object] = field(default_factory=dict)
     spells_data: Dict[str, object] = field(default_factory=dict)
@@ -232,6 +262,7 @@ class EnvConfig:
         merged["mapgen_config_data"] = dict(
             merged.get("mapgen_config_data", {}) or {}
         )
+        merged["static_map_data"] = dict(merged.get("static_map_data", {}) or {})
         merged["recipes_data"] = dict(merged.get("recipes_data", {}) or {})
         merged["statuses_data"] = dict(merged.get("statuses_data", {}) or {})
         merged["spells_data"] = dict(merged.get("spells_data", {}) or {})
@@ -313,6 +344,12 @@ class MultiAgentRLRLGym:
             self.mapgen_cfg = parse_mapgen_config(self.config.mapgen_config_data)
         else:
             self.mapgen_cfg = load_mapgen_config(self.config.mapgen_config_path)
+        self.static_map_layout: StaticMapLayout | None = None
+        if self.config.static_map_data:
+            self.static_map_layout = parse_map_layout(self.config.static_map_data)
+        elif str(self.config.static_map_path).strip():
+            self.static_map_layout = load_map_layout(self.config.static_map_path)
+        self._validate_static_map_references()
         if self.config.recipes_data:
             self.recipes = parse_recipes(self.config.recipes_data)
         else:
@@ -383,7 +420,11 @@ class MultiAgentRLRLGym:
         if seed is not None:
             self._rng.seed(seed)
 
-        grid, biome_map = self._generate_world_terrain()
+        if self.static_map_layout is not None:
+            grid = [list(row) for row in self.static_map_layout.grid]
+            biome_map = dict(self.static_map_layout.biomes)
+        else:
+            grid, biome_map = self._generate_world_terrain()
         starts = sample_walkable_positions(
             grid, self.tiles, self.config.n_agents, self._rng
         )
@@ -428,6 +469,7 @@ class MultiAgentRLRLGym:
             ground_items={},
             agents=agents,
             chests={},
+            plant_plots={},
             agent_statuses={aid: [] for aid in self.possible_agents},
             item_metadata={},
             faction_leaders={},
@@ -1036,6 +1078,21 @@ class MultiAgentRLRLGym:
         shear_reward, shear_handled = self._interact_shear(actor=actor, actor_id=actor_id, events=events)
         if shear_handled:
             return reward + shear_reward
+        harvest_reward, harvest_handled = self._interact_harvest_plant(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if harvest_handled:
+            return reward + harvest_reward
+        mine_reward, mine_handled = self._interact_mine_tile(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if mine_handled:
+            return reward + mine_reward
+        forage_reward, forage_handled = self._interact_forage_tile(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if forage_handled:
+            return reward + forage_reward
         plant_reward, plant_handled = self._interact_plant(
             actor=actor, actor_id=actor_id, events=events
         )
@@ -1064,7 +1121,7 @@ class MultiAgentRLRLGym:
                 actor.hp = min(actor.max_hp, actor.hp + 1)
                 reward += 0.1
                 events.append("interact:shrine")
-            elif tile_id == "water":
+            elif tile_id in WATER_TILE_IDS:
                 actor.hunger = min(actor.max_hunger, actor.hunger + 1)
                 reward += 0.04
                 events.append("interact:water")
@@ -1075,6 +1132,105 @@ class MultiAgentRLRLGym:
             events.append("interact_exhausted")
             reward -= 0.02
         return reward
+
+    def _is_unbreakable_edge(self, pos: Tuple[int, int]) -> bool:
+        assert self.state is not None
+        r, c = pos
+        return (
+            r <= 0
+            or c <= 0
+            or r >= len(self.state.grid) - 1
+            or c >= len(self.state.grid[0]) - 1
+        )
+
+    def _interact_mine_tile(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        r, c = actor.position
+        mining = self._skill_level(actor, "mining")
+
+        # Mine adjacent stone walls; interior walls break into stone floor after 5 mines.
+        for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
+            if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
+                continue
+            adj_tile = self.state.grid[nr][nc]
+            if adj_tile not in MINABLE_WALL_TILE_IDS:
+                continue
+            if self._is_unbreakable_edge((nr, nc)):
+                events.append("mine_wall_unbreakable_edge")
+                return -0.01, True
+            used = int(self.state.tile_interactions.get((nr, nc), 0)) + 1
+            self.state.tile_interactions[(nr, nc)] = used
+            qty = 1 + (mining // 3)
+            added = self._add_item_or_drop(actor, "stone", max(1, qty), events)
+            self._gain_skill_xp(actor, "mining", max(1, qty * 2), events)
+            if used >= 5:
+                self.state.grid[nr][nc] = "stone_floor" if "stone_floor" in self.tiles else (
+                    self.mapgen_cfg.floor_fallback_id if self.mapgen_cfg.floor_fallback_id in self.tiles else "floor"
+                )
+                self.state.tile_interactions.pop((nr, nc), None)
+                events.append(f"mine_wall_broken:{nr}:{nc}")
+            else:
+                events.append(f"mine_wall:{nr}:{nc}:used={used}/5")
+            reward = 0.06 + (0.01 * float(max(1, qty)))
+            if added <= 0:
+                reward -= 0.02
+                events.append("carry_blocked")
+            return reward, True
+
+        # Mine stone floor underfoot. It depletes after 5 interactions but remains stone.
+        tile_id = self.state.grid[r][c]
+        if tile_id in MINABLE_GROUND_TILE_IDS:
+            used = int(self.state.tile_interactions.get((r, c), 0))
+            max_uses = 5
+            if used >= max_uses:
+                events.append("mine_ground_depleted")
+                return -0.01, True
+            used += 1
+            self.state.tile_interactions[(r, c)] = used
+            qty = 1 + (mining // 4)
+            added = self._add_item_or_drop(actor, "stone", max(1, qty), events)
+            self._gain_skill_xp(actor, "mining", max(1, qty * 2), events)
+            events.append(f"mine_ground:{tile_id}:yield={qty}:added={added}:used={used}/5")
+            reward = 0.05 + (0.01 * float(max(1, qty)))
+            if added <= 0:
+                reward -= 0.02
+                events.append("carry_blocked")
+            return reward, True
+        return 0.0, False
+
+    def _interact_forage_tile(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        pos = actor.position
+        tile_id = self.state.grid[pos[0]][pos[1]]
+        forage_tiles = {"grass", "bush"}
+        if tile_id not in forage_tiles:
+            return 0.0, False
+        tile = self.tiles.get(tile_id)
+        if tile is None or not tile.loot_table:
+            return 0.0, False
+        used = int(self.state.tile_interactions.get(pos, 0))
+        max_uses = max(1, int(tile.max_interactions))
+        if used >= max_uses:
+            events.append(f"forage_depleted:{tile_id}")
+            return -0.01, True
+        self.state.tile_interactions[pos] = used + 1
+        foraging = self._skill_level(actor, "foraging")
+        qty = 1 + (foraging // 5)
+        added_total = 0
+        for _ in range(max(1, qty)):
+            item = str(self._rng.choice(tile.loot_table))
+            added_total += int(self._add_item_or_drop(actor, item, 1, events))
+            events.append(f"forage:{tile_id}:{item}")
+        self._gain_skill_xp(actor, "foraging", max(1, 2 + qty), events)
+        reward = 0.05 + (0.01 * float(max(1, qty)))
+        if added_total <= 0:
+            reward -= 0.02
+            events.append("carry_blocked")
+        return reward, True
 
     def _interact_shear(
         self, actor: AgentState, actor_id: str, events: List[str]
@@ -1104,28 +1260,92 @@ class MultiAgentRLRLGym:
         self, actor: AgentState, actor_id: str, events: List[str]
     ) -> Tuple[float, bool]:
         assert self.state is not None
-        del actor_id
         r, c = actor.position
         tile_id = self.state.grid[r][c]
-        if tile_id not in {"floor", "grass", "bush"}:
+        if tile_id not in {"stone_floor", "grass", "bush"}:
             return 0.0, False
-        seed = self._pop_first_base_item(actor.inventory, "seed_packet")
-        if seed is None:
+        if (r, c) in self.state.plant_plots:
             return 0.0, False
-        self.state.grid[r][c] = "food_cache"
+        crop_id = self._first_plantable_crop(actor.inventory)
+        if not crop_id:
+            return 0.0, False
+        crop = PLANT_TYPES[crop_id]
+        seed_item = str(crop["seed_item"])
+        if self._pop_first_base_item(actor.inventory, seed_item) is None:
+            return 0.0, False
+        self.state.grid[r][c] = str(crop["crop_tile"])
         self.state.tile_interactions[(r, c)] = 0
+        self.state.plant_plots[(r, c)] = PlantPlotState(
+            crop_id=crop_id,
+            planter_id=actor_id,
+            planter_faction_id=int(actor.faction_id),
+        )
         farming = self._skill_level(actor, "farming")
         preserve_chance = min(0.5, 0.05 * float(farming))
         if self._rng.random() < preserve_chance:
-            actor.inventory.append("seed_packet")
-            events.append("plant:seed_preserved")
-        bonus_chance = min(0.6, 0.08 * float(farming))
-        if self._rng.random() < bonus_chance:
-            self.state.ground_items.setdefault((r, c), []).append("fruit")
-            events.append("plant:bonus_yield:fruit")
+            actor.inventory.append(seed_item)
+            events.append(f"plant:seed_preserved:{seed_item}")
         self._gain_skill_xp(actor, "farming", 2, events)
-        events.append(f"plant:food_cache:{r}:{c}")
+        events.append(f"plant:{crop_id}:{r}:{c}")
         return 0.08 + min(0.08, 0.01 * float(farming)), True
+
+    def _interact_harvest_plant(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        pos = actor.position
+        plot = self.state.plant_plots.get(pos)
+        crop_id = plot.crop_id if plot is not None else self._crop_from_tile(self.state.grid[pos[0]][pos[1]])
+        if not crop_id or crop_id not in PLANT_TYPES:
+            return 0.0, False
+        crop = PLANT_TYPES[crop_id]
+        food_item = str(crop["food_item"])
+        seed_item = str(crop["seed_item"])
+        food_min, food_max = tuple(crop["food_qty"])
+        seed_min, seed_max = tuple(crop["seed_qty"])
+        farming = self._skill_level(actor, "farming")
+        food_qty = self._rng.randint(int(food_min), int(food_max)) + (farming // 4)
+        seed_qty = self._rng.randint(int(seed_min), int(seed_max)) + (farming // 5)
+        food_added = self._add_item_or_drop(actor, food_item, max(1, int(food_qty)), events)
+        seed_added = self._add_item_or_drop(actor, seed_item, max(1, int(seed_qty)), events)
+        self.state.grid[pos[0]][pos[1]] = (
+            self.mapgen_cfg.floor_fallback_id
+            if self.mapgen_cfg.floor_fallback_id in self.tiles
+            else "floor"
+        )
+        self.state.plant_plots.pop(pos, None)
+        self.state.tile_interactions.pop(pos, None)
+        same_faction_bonus = 0.0
+        if (
+            plot is not None
+            and int(actor.faction_id) >= 0
+            and int(plot.planter_faction_id) >= 0
+            and int(actor.faction_id) == int(plot.planter_faction_id)
+        ):
+            same_faction_bonus = 0.12
+            events.append(
+                f"harvest:faction_bonus:{crop_id}:planter={plot.planter_id}:faction={plot.planter_faction_id}"
+            )
+        self._gain_skill_xp(actor, "farming", max(1, 2 + int(food_qty) + int(seed_qty)), events)
+        events.append(
+            f"harvest:{crop_id}:food={food_item}:{food_qty}:{food_added}:seed={seed_item}:{seed_qty}:{seed_added}"
+        )
+        base = 0.08 + 0.02 * float(max(1, int(food_qty)))
+        return base + same_faction_bonus, True
+
+    def _first_plantable_crop(self, inventory: List[str]) -> str:
+        counts = self._count_base_items(inventory)
+        for crop_id, row in sorted(PLANT_TYPES.items()):
+            seed_item = str(row.get("seed_item", "")).strip()
+            if seed_item and int(counts.get(seed_item, 0)) > 0:
+                return crop_id
+        return ""
+
+    def _crop_from_tile(self, tile_id: str) -> str:
+        for crop_id, row in PLANT_TYPES.items():
+            if str(row.get("crop_tile", "")).strip() == str(tile_id):
+                return crop_id
+        return ""
 
     def _can_carry_item(self, agent: AgentState, item_id: str, qty: int = 1) -> bool:
         base_id = self._item_base_id(item_id)
@@ -2677,26 +2897,8 @@ class MultiAgentRLRLGym:
                 reward -= 0.01
             return reward
 
-        tile_id = self.state.grid[r][c]
-        tile = self.tiles[tile_id]
-        used = self.state.tile_interactions.get((r, c), 0)
-        if (
-            tile_id == "food_cache"
-            and tile.loot_table
-            and used < max(1, tile.max_interactions)
-        ):
-            self.state.tile_interactions[(r, c)] = used + 1
-            item = self._rng.choice(tile.loot_table)
-            added = self._add_item_or_drop(agent, item, 1, events)
-            if added > 0:
-                reward += 0.2
-                events.append(f"loot:{tile_id}:{item}")
-            else:
-                reward -= 0.01
-                events.append("loot_blocked")
-        else:
-            reward -= 0.02
-            events.append("loot_fail")
+        reward -= 0.02
+        events.append("loot_fail")
 
         return reward
 
@@ -3359,6 +3561,26 @@ class MultiAgentRLRLGym:
                 self._assert_item_known(
                     animal.shear_item, f"animal '{animal_id}' shear_item"
                 )
+        for crop_id, row in sorted(PLANT_TYPES.items()):
+            seed_item = str(row.get("seed_item", "")).strip()
+            food_item = str(row.get("food_item", "")).strip()
+            crop_tile = str(row.get("crop_tile", "")).strip()
+            if seed_item:
+                self._assert_item_known(seed_item, f"plant '{crop_id}' seed_item")
+            if food_item:
+                self._assert_item_known(food_item, f"plant '{crop_id}' food_item")
+            if crop_tile and crop_tile not in self.tiles:
+                raise ValueError(f"plant '{crop_id}' crop_tile '{crop_tile}' is unknown")
+
+    def _validate_static_map_references(self) -> None:
+        if self.static_map_layout is None:
+            return
+        for r, row in enumerate(self.static_map_layout.grid):
+            for c, tile_id in enumerate(row):
+                if tile_id not in self.tiles:
+                    raise ValueError(
+                        f"static map grid references unknown tile '{tile_id}' at ({r}, {c})"
+                    )
 
     def _validate_recipe_references(self) -> None:
         for recipe_id, recipe in sorted(self.recipes.items()):
@@ -3525,89 +3747,18 @@ class MultiAgentRLRLGym:
             )
             return grid, {}
 
-        width = int(self.config.width)
-        height = int(self.config.height)
-        min_width = max(1, int(self.mapgen_cfg.min_width))
-        min_height = max(1, int(self.mapgen_cfg.min_height))
-        if width < min_width or height < min_height:
-            raise ValueError(f"Map must be at least {min_width}x{min_height}")
-
-        global_tile_ids = weighted_tile_ids(self.tiles)
-        global_tile_weights = weighted_tile_weights(self.tiles)
-        if not global_tile_ids:
-            raise ValueError("No tiles available for map generation")
-
-        biome_ids: List[str] = []
-        biome_weights: List[float] = []
-        for row in biome_defs:
-            bid = str(row.get("id", "")).strip()
-            if not bid:
-                continue
-            biome_ids.append(bid)
-            biome_weights.append(max(0.0, float(row.get("weight", 1.0))))
-        if not biome_ids or sum(biome_weights) <= 0.0:
-            grid = generate_map(
-                self.config.width,
-                self.config.height,
-                self.tiles,
-                self._rng,
-                wall_tile_id=self.mapgen_cfg.wall_tile_id,
-                floor_fallback_id=self.mapgen_cfg.floor_fallback_id,
-                min_width=self.mapgen_cfg.min_width,
-                min_height=self.mapgen_cfg.min_height,
-            )
-            return grid, {}
-
-        defs_by_biome = {str(row.get("id", "")): row for row in biome_defs}
-        grid: List[List[str]] = []
-        biomes: Dict[Tuple[int, int], str] = {}
-        wall_id = (
-            self.mapgen_cfg.wall_tile_id
-            if self.mapgen_cfg.wall_tile_id in self.tiles
-            else self.mapgen_cfg.floor_fallback_id
+        return generate_biome_terrain(
+            width=int(self.config.width),
+            height=int(self.config.height),
+            tiles=self.tiles,
+            rng=self._rng,
+            biome_defs=biome_defs,
+            wall_tile_id=self.mapgen_cfg.wall_tile_id,
+            floor_fallback_id=self.mapgen_cfg.floor_fallback_id,
+            worldgen=self.mapgen_cfg.worldgen,
+            min_width=self.mapgen_cfg.min_width,
+            min_height=self.mapgen_cfg.min_height,
         )
-        floor_id = (
-            self.mapgen_cfg.floor_fallback_id
-            if self.mapgen_cfg.floor_fallback_id in self.tiles
-            else "floor"
-        )
-        for r in range(height):
-            row_tiles: List[str] = []
-            for c in range(width):
-                if r in (0, height - 1) or c in (0, width - 1):
-                    row_tiles.append(wall_id)
-                    continue
-                biome_id = str(self._rng.choices(biome_ids, weights=biome_weights, k=1)[0])
-                biomes[(r, c)] = biome_id
-                bdef = defs_by_biome.get(biome_id, {})
-                tile_weights_raw = dict(bdef.get("tile_weights", {}))
-                tile_ids: List[str] = []
-                tile_weights: List[float] = []
-                for tid, weight in tile_weights_raw.items():
-                    if str(tid) not in self.tiles:
-                        continue
-                    tile_ids.append(str(tid))
-                    tile_weights.append(max(0.0, float(weight)))
-                if not tile_ids or sum(tile_weights) <= 0.0:
-                    tile_ids = list(global_tile_ids)
-                    tile_weights = list(global_tile_weights)
-                chosen = str(self._rng.choices(tile_ids, weights=tile_weights, k=1)[0])
-                if chosen not in self.tiles:
-                    chosen = floor_id
-                row_tiles.append(chosen)
-            grid.append(row_tiles)
-
-        walkable = [
-            (r, c)
-            for r in range(height)
-            for c in range(width)
-            if self.tiles[grid[r][c]].walkable
-        ]
-        if len(walkable) < 2:
-            for r in range(1, height - 1):
-                for c in range(1, width - 1):
-                    grid[r][c] = floor_id
-        return grid, biomes
 
     def _spawn_resource_nodes(
         self, occupied: List[Tuple[int, int]]
@@ -4239,12 +4390,12 @@ class MultiAgentRLRLGym:
     def _animal_can_drink(self, pos: Tuple[int, int]) -> bool:
         assert self.state is not None
         r, c = pos
-        if self.state.grid[r][c] == "water":
+        if self.state.grid[r][c] in WATER_TILE_IDS:
             return True
         for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
             if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
                 continue
-            if self.state.grid[nr][nc] == "water":
+            if self.state.grid[nr][nc] in WATER_TILE_IDS:
                 return True
         return False
 

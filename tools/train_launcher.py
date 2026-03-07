@@ -1,21 +1,35 @@
-"""GUI launcher for training with live metric updates."""
+#!/usr/bin/env python3
+"""PyQt6 launcher for training with live metric updates."""
 
 from __future__ import annotations
 
 import argparse
 import os
-import queue
 import re
-import subprocess
+import shlex
 import sys
-import threading
 from pathlib import Path
 
-try:
-    import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
-except Exception as exc:  # pragma: no cover
-    raise RuntimeError("Tkinter is required for Training Launcher") from exc
+from PyQt6.QtCore import QProcess, Qt
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QTextEdit,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -37,291 +51,306 @@ CUSTOM_PROGRESS_RE = re.compile(
 )
 
 
-class TrainLauncherApp:
-    def __init__(self, root: tk.Tk) -> None:
-        self.root = root
-        self.root.title("RLRLGym Training Launcher")
+class TrainLauncherWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("RLRLGym Training Launcher (PyQt6)")
+        self.resize(1200, 800)
 
         self._theme_name = load_selected_theme()
         self._theme = get_theme(self._theme_name)
 
-        self.proc: subprocess.Popen[str] | None = None
-        self._reader_thread: threading.Thread | None = None
-        self._queue: queue.Queue[str] = queue.Queue()
+        self.proc: QProcess | None = None
+        self._stdout_buf = ""
 
         self._build_ui()
         self._apply_theme()
-        self._tick_queue()
 
     def _build_ui(self) -> None:
-        top = ttk.Frame(self.root)
-        top.pack(fill="x", padx=8, pady=8)
+        root = QWidget(self)
+        self.setCentralWidget(root)
+        layout = QVBoxLayout(root)
 
-        self.backend_var = tk.StringVar(value="custom")
-        self.seed_var = tk.StringVar(value="0")
-        self.output_var = tk.StringVar(value="outputs/train/gui_run")
-        self.scenario_var = tk.StringVar(value="")
-        self.episodes_var = tk.StringVar(value="100")
-        self.iterations_var = tk.StringVar(value="50")
-        self.max_steps_var = tk.StringVar(value="120")
+        form = QFormLayout()
+        layout.addLayout(form)
 
-        ttk.Label(top, text="Backend").grid(row=0, column=0, sticky="w")
-        ttk.Combobox(
-            top,
-            textvariable=self.backend_var,
-            values=["custom", "rllib"],
-            state="readonly",
-            width=10,
-        ).grid(row=0, column=1, padx=(6, 12), sticky="w")
+        line1 = QHBoxLayout()
+        self.backend_combo = QComboBox()
+        self.backend_combo.addItems(["custom", "rllib"])
+        self.seed_edit = QLineEdit("0")
+        self.seed_edit.setMaximumWidth(110)
+        self.episodes_edit = QLineEdit("100")
+        self.episodes_edit.setMaximumWidth(110)
+        self.iterations_edit = QLineEdit("50")
+        self.iterations_edit.setMaximumWidth(110)
+        self.max_steps_edit = QLineEdit("120")
+        self.max_steps_edit.setMaximumWidth(110)
 
-        ttk.Label(top, text="Seed").grid(row=0, column=2, sticky="w")
-        ttk.Entry(top, textvariable=self.seed_var, width=8).grid(row=0, column=3, padx=(6, 12), sticky="w")
+        line1.addWidget(QLabel("Backend"))
+        line1.addWidget(self.backend_combo)
+        line1.addSpacing(10)
+        line1.addWidget(QLabel("Seed"))
+        line1.addWidget(self.seed_edit)
+        line1.addSpacing(10)
+        line1.addWidget(QLabel("Episodes"))
+        line1.addWidget(self.episodes_edit)
+        line1.addSpacing(10)
+        line1.addWidget(QLabel("Iterations"))
+        line1.addWidget(self.iterations_edit)
+        line1.addSpacing(10)
+        line1.addWidget(QLabel("Max Steps"))
+        line1.addWidget(self.max_steps_edit)
+        line1.addStretch(1)
+        form.addRow(line1)
 
-        ttk.Label(top, text="Episodes").grid(row=0, column=4, sticky="w")
-        ttk.Entry(top, textvariable=self.episodes_var, width=8).grid(row=0, column=5, padx=(6, 12), sticky="w")
+        out_row = QHBoxLayout()
+        self.output_edit = QLineEdit("outputs/train/gui_run")
+        self.output_btn = QPushButton("Browse")
+        out_row.addWidget(QLabel("Output Dir"))
+        out_row.addWidget(self.output_edit, stretch=1)
+        out_row.addWidget(self.output_btn)
+        form.addRow(out_row)
 
-        ttk.Label(top, text="Iterations").grid(row=0, column=6, sticky="w")
-        ttk.Entry(top, textvariable=self.iterations_var, width=8).grid(row=0, column=7, padx=(6, 12), sticky="w")
+        scenario_row = QHBoxLayout()
+        self.scenario_edit = QLineEdit("")
+        self.scenario_btn = QPushButton("Browse")
+        scenario_row.addWidget(QLabel("Scenario Path"))
+        scenario_row.addWidget(self.scenario_edit, stretch=1)
+        scenario_row.addWidget(self.scenario_btn)
+        form.addRow(scenario_row)
 
-        ttk.Label(top, text="Max Steps").grid(row=0, column=8, sticky="w")
-        ttk.Entry(top, textvariable=self.max_steps_var, width=8).grid(row=0, column=9, padx=(6, 0), sticky="w")
+        controls = QHBoxLayout()
+        self.start_btn = QPushButton("Start Training")
+        self.stop_btn = QPushButton("Stop")
+        controls.addWidget(self.start_btn)
+        controls.addWidget(self.stop_btn)
+        controls.addStretch(1)
 
-        row2 = ttk.Frame(self.root)
-        row2.pack(fill="x", padx=8, pady=(0, 8))
-
-        ttk.Label(row2, text="Output Dir").pack(side="left")
-        ttk.Entry(row2, textvariable=self.output_var, width=46).pack(side="left", padx=(6, 6))
-        ttk.Button(row2, text="Browse", command=self._pick_output_dir).pack(side="left")
-
-        row3 = ttk.Frame(self.root)
-        row3.pack(fill="x", padx=8, pady=(0, 8))
-
-        ttk.Label(row3, text="Scenario Path").pack(side="left")
-        ttk.Entry(row3, textvariable=self.scenario_var, width=46).pack(side="left", padx=(6, 6))
-        ttk.Button(row3, text="Browse", command=self._pick_scenario).pack(side="left")
-
-        row4 = ttk.Frame(self.root)
-        row4.pack(fill="x", padx=8, pady=(0, 8))
-
-        self.start_btn = ttk.Button(row4, text="Start Training", command=self._start)
-        self.start_btn.pack(side="left")
-        self.stop_btn = ttk.Button(row4, text="Stop", command=self._stop)
-        self.stop_btn.pack(side="left", padx=(6, 0))
-
-        self.theme_var = tk.StringVar(value=self._theme_name)
-        self.settings_button = ttk.Menubutton(row4, text="Settings")
-        self.settings_menu = tk.Menu(self.settings_button, tearoff=0)
-        self.theme_menu = tk.Menu(self.settings_menu, tearoff=0)
+        self.settings_btn = QToolButton()
+        self.settings_btn.setText("Settings")
+        self.settings_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.settings_menu = QMenu(self)
+        self.theme_menu = self.settings_menu.addMenu("Theme")
+        self.theme_actions: dict[str, QAction] = {}
         for name in list_theme_names():
-            self.theme_menu.add_radiobutton(
-                label=theme_label(name),
-                value=name,
-                variable=self.theme_var,
-                command=self._on_theme_change,
-            )
-        self.settings_menu.add_cascade(label="Theme", menu=self.theme_menu)
-        self.settings_button["menu"] = self.settings_menu
-        self.settings_button.pack(side="right")
+            act = QAction(theme_label(name), self)
+            act.setCheckable(True)
+            act.triggered.connect(lambda checked, n=name: self._on_theme_change(n, checked))
+            self.theme_menu.addAction(act)
+            self.theme_actions[name] = act
+        self.settings_btn.setMenu(self.settings_menu)
+        controls.addWidget(self.settings_btn)
+        layout.addLayout(controls)
 
-        metrics = ttk.LabelFrame(self.root, text="Live Metrics")
-        metrics.pack(fill="x", padx=8, pady=(0, 8))
+        metrics_box = QWidget(self)
+        metrics_layout = QGridLayout(metrics_box)
+        layout.addWidget(metrics_box)
 
-        self.metric_vars = {
-            "ret": tk.StringVar(value="-"),
-            "win": tk.StringVar(value="-"),
-            "surv": tk.StringVar(value="-"),
-            "starve": tk.StringVar(value="-"),
-            "loss": tk.StringVar(value="-"),
-            "eps": tk.StringVar(value="-"),
-            "status": tk.StringVar(value="idle"),
-        }
-        col = 0
-        for key, label in [
+        self.metric_labels: dict[str, QLabel] = {}
+        metric_order = [
             ("ret", "Return"),
             ("win", "Win"),
             ("surv", "Survival"),
             ("starve", "Starve"),
             ("loss", "Loss"),
             ("eps", "Epsilon"),
-        ]:
-            ttk.Label(metrics, text=label).grid(row=0, column=col, sticky="w", padx=6, pady=4)
-            ttk.Label(metrics, textvariable=self.metric_vars[key]).grid(
-                row=1, column=col, sticky="w", padx=6, pady=(0, 6)
-            )
-            col += 1
-        ttk.Label(metrics, text="Status").grid(row=0, column=col, sticky="w", padx=6, pady=4)
-        ttk.Label(metrics, textvariable=self.metric_vars["status"]).grid(
-            row=1, column=col, sticky="w", padx=6, pady=(0, 6)
-        )
+            ("status", "Status"),
+        ]
+        for col, (key, label) in enumerate(metric_order):
+            metrics_layout.addWidget(QLabel(label), 0, col)
+            value = QLabel("idle" if key == "status" else "-")
+            self.metric_labels[key] = value
+            metrics_layout.addWidget(value, 1, col)
 
-        self.log_text = tk.Text(self.root, height=24, font=("Courier", 10), wrap="none")
-        self.log_text.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        self.log_text.configure(state="disabled")
+        self.log_text = QTextEdit(self)
+        self.log_text.setReadOnly(True)
+        self.log_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(self.log_text, stretch=1)
 
-    def _on_theme_change(self) -> None:
-        name = save_selected_theme(self.theme_var.get())
-        self.theme_var.set(name)
-        self._theme_name = name
-        self._theme = get_theme(name)
+        self.output_btn.clicked.connect(self._pick_output_dir)
+        self.scenario_btn.clicked.connect(self._pick_scenario)
+        self.start_btn.clicked.connect(self._start)
+        self.stop_btn.clicked.connect(self._stop)
+        self.backend_combo.currentTextChanged.connect(self._on_backend_changed)
+        self._on_backend_changed(self.backend_combo.currentText())
+
+        current = self._theme_name if self._theme_name in self.theme_actions else next(iter(self.theme_actions.keys()), "")
+        if current:
+            self.theme_actions[current].setChecked(True)
+
+    def _on_backend_changed(self, backend: str) -> None:
+        is_custom = backend == "custom"
+        self.episodes_edit.setEnabled(is_custom)
+        self.iterations_edit.setEnabled(not is_custom)
+
+    def _on_theme_change(self, name: str, checked: bool) -> None:
+        if not checked:
+            return
+        saved = save_selected_theme(name)
+        self._theme_name = saved
+        self._theme = get_theme(saved)
+        for key, action in self.theme_actions.items():
+            action.setChecked(key == saved)
         self._apply_theme()
 
     def _apply_theme(self) -> None:
         t = self._theme
-        self.root.configure(bg=t["bg"])
-        style = ttk.Style(self.root)
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        style.configure(".", background=t["panel"], foreground=t["text"])
-        style.configure("TFrame", background=t["panel"])
-        style.configure("TLabel", background=t["panel"], foreground=t["text"])
-        style.configure("TLabelframe", background=t["panel"], foreground=t["text"])
-        style.configure("TLabelframe.Label", background=t["panel"], foreground=t["text"])
-        style.configure("TButton", background=t["panel_alt"], foreground=t["text"])
-        style.map("TButton", background=[("active", t["primary_hover"])])
-        style.configure("TMenubutton", background=t["panel_alt"], foreground=t["text"])
-        style.configure(
-            "TEntry",
-            fieldbackground=t["panel_alt"],
-            background=t["panel_alt"],
-            foreground=t["text"],
-            bordercolor=t["border"],
-        )
-        style.configure(
-            "TCombobox",
-            fieldbackground=t["panel_alt"],
-            background=t["panel_alt"],
-            foreground=t["text"],
-            bordercolor=t["border"],
-        )
-        self.log_text.configure(
-            bg=t["panel_alt"], fg=t["text"], insertbackground=t["text"]
-        )
-        self.settings_menu.configure(
-            background=t["panel"],
-            foreground=t["text"],
-            activebackground=t["primary"],
-            activeforeground=t["text"],
-            tearoff=False,
-        )
-        self.theme_menu.configure(
-            background=t["panel"],
-            foreground=t["text"],
-            activebackground=t["primary"],
-            activeforeground=t["text"],
-            tearoff=False,
-        )
+        style = f"""
+            QMainWindow {{ background: {t['bg']}; color: {t['text']}; }}
+            QWidget {{ background: {t['panel']}; color: {t['text']}; }}
+            QLineEdit, QComboBox, QTextEdit {{
+                background: {t['panel_alt']};
+                color: {t['text']};
+                border: 1px solid {t['border']};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QPushButton, QToolButton {{
+                background: {t['panel_alt']};
+                color: {t['text']};
+                border: 1px solid {t['border']};
+                border-radius: 4px;
+                padding: 5px 9px;
+            }}
+            QPushButton:hover, QToolButton:hover {{
+                background: {t['primary_hover']};
+            }}
+            QMenu {{
+                background: {t['panel']};
+                color: {t['text']};
+                border: 1px solid {t['border']};
+            }}
+            QMenu::item:selected {{
+                background: {t['primary']};
+            }}
+        """
+        self.setStyleSheet(style)
 
     def _pick_output_dir(self) -> None:
-        p = filedialog.askdirectory(title="Select output directory", initialdir="outputs")
+        p = QFileDialog.getExistingDirectory(self, "Select output directory", "outputs")
         if p:
-            self.output_var.set(str(Path(p)))
+            self.output_edit.setText(str(Path(p)))
 
     def _pick_scenario(self) -> None:
-        p = filedialog.askdirectory(title="Select scenario directory", initialdir="data/scenarios")
+        p = QFileDialog.getExistingDirectory(self, "Select scenario directory", "data/scenarios")
         if p:
-            self.scenario_var.set(str(Path(p)))
+            self.scenario_edit.setText(str(Path(p)))
+
+    def _set_metric(self, key: str, value: str) -> None:
+        label = self.metric_labels.get(key)
+        if label is not None:
+            label.setText(value)
 
     def _append_log(self, line: str) -> None:
-        self.log_text.configure(state="normal")
-        self.log_text.insert(tk.END, line + "\n")
-        self.log_text.see(tk.END)
-        self.log_text.configure(state="disabled")
+        self.log_text.append(line)
+        self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
 
     def _parse_metrics(self, line: str) -> None:
         m = CUSTOM_PROGRESS_RE.search(line)
         if not m:
             return
-        for k in ("ret", "win", "surv", "starve", "loss", "eps"):
-            self.metric_vars[k].set(m.group(k))
+        for key in ("ret", "win", "surv", "starve", "loss", "eps"):
+            self._set_metric(key, m.group(key))
 
     def _build_command(self) -> list[str]:
-        cmd = ["python3", "-m", "train", "--backend", self.backend_var.get().strip() or "custom"]
-        cmd += ["--seed", self.seed_var.get().strip() or "0"]
-        cmd += ["--output-dir", self.output_var.get().strip() or "outputs/train/gui_run"]
-        max_steps = self.max_steps_var.get().strip()
+        backend = self.backend_combo.currentText().strip() or "custom"
+        cmd = ["python3", "-m", "train", "--backend", backend]
+        cmd += ["--seed", self.seed_edit.text().strip() or "0"]
+        cmd += ["--output-dir", self.output_edit.text().strip() or "outputs/train/gui_run"]
+
+        max_steps = self.max_steps_edit.text().strip()
         if max_steps:
             cmd += ["--max-steps", max_steps]
-        scenario = self.scenario_var.get().strip()
+
+        scenario = self.scenario_edit.text().strip()
         if scenario:
             cmd += ["--scenario-path", scenario]
-        if self.backend_var.get().strip() == "custom":
-            cmd += ["--episodes", self.episodes_var.get().strip() or "100"]
+
+        if backend == "custom":
+            cmd += ["--episodes", self.episodes_edit.text().strip() or "100"]
         else:
-            cmd += ["--iterations", self.iterations_var.get().strip() or "50"]
+            cmd += ["--iterations", self.iterations_edit.text().strip() or "50"]
         return cmd
 
     def _start(self) -> None:
-        if self.proc is not None and self.proc.poll() is None:
-            messagebox.showwarning("Training", "Training is already running.")
+        if self.proc is not None and self.proc.state() != QProcess.ProcessState.NotRunning:
+            QMessageBox.warning(self, "Training", "Training is already running.")
             return
+
         cmd = self._build_command()
-        env = dict(os.environ)
-        env["PYTHONUNBUFFERED"] = "1"
-        try:
-            self.proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                cwd=str(Path(__file__).resolve().parents[1]),
-                env=env,
-            )
-        except Exception as exc:
-            messagebox.showerror("Failed to start", str(exc))
-            return
+        self.proc = QProcess(self)
+        self.proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
 
-        self.metric_vars["status"].set("running")
-        self._append_log("$ " + " ".join(cmd))
-        self.start_btn.state(["disabled"])
+        env = self.proc.processEnvironment()
+        env.insert("PYTHONUNBUFFERED", "1")
+        for key, value in os.environ.items():
+            if not env.contains(key):
+                env.insert(key, value)
+        self.proc.setProcessEnvironment(env)
+        self.proc.setWorkingDirectory(str(Path(__file__).resolve().parents[1]))
+        self.proc.readyReadStandardOutput.connect(self._read_process_output)
+        self.proc.finished.connect(self._on_process_finished)
+        self.proc.errorOccurred.connect(self._on_process_error)
 
-        def _reader() -> None:
-            assert self.proc is not None
-            if self.proc.stdout is None:
-                return
-            for line in self.proc.stdout:
-                self._queue.put(line.rstrip("\n"))
-            rc = self.proc.wait()
-            self._queue.put(f"[process exited with code {rc}]")
-            self._queue.put("__PROCESS_DONE__")
+        self._set_metric("status", "running")
+        self.start_btn.setEnabled(False)
+        self._append_log("$ " + " ".join(shlex.quote(part) for part in cmd))
 
-        self._reader_thread = threading.Thread(target=_reader, daemon=True)
-        self._reader_thread.start()
+        self._stdout_buf = ""
+        self.proc.start(cmd[0], cmd[1:])
+        if not self.proc.waitForStarted(1500):
+            err = self.proc.errorString() if self.proc is not None else "unknown"
+            QMessageBox.critical(self, "Failed to start", err)
+            self._set_metric("status", "idle")
+            self.start_btn.setEnabled(True)
 
     def _stop(self) -> None:
-        if self.proc is None or self.proc.poll() is not None:
+        if self.proc is None:
+            return
+        if self.proc.state() == QProcess.ProcessState.NotRunning:
             return
         self.proc.terminate()
-        self.metric_vars["status"].set("stopping")
+        self._set_metric("status", "stopping")
 
-    def _tick_queue(self) -> None:
-        try:
-            while True:
-                line = self._queue.get_nowait()
-                if line == "__PROCESS_DONE__":
-                    self.metric_vars["status"].set("idle")
-                    self.start_btn.state(["!disabled"])
-                    continue
-                self._append_log(line)
-                self._parse_metrics(line)
-        except queue.Empty:
-            pass
-        self.root.after(100, self._tick_queue)
+    def _read_process_output(self) -> None:
+        if self.proc is None:
+            return
+        data = bytes(self.proc.readAllStandardOutput()).decode("utf-8", errors="replace")
+        if not data:
+            return
+        self._stdout_buf += data
+        while "\n" in self._stdout_buf:
+            line, self._stdout_buf = self._stdout_buf.split("\n", 1)
+            self._append_log(line.rstrip("\r"))
+            self._parse_metrics(line)
+
+    def _on_process_finished(self, code: int, _status: QProcess.ExitStatus) -> None:
+        if self._stdout_buf:
+            tail = self._stdout_buf.rstrip("\r")
+            if tail:
+                self._append_log(tail)
+                self._parse_metrics(tail)
+            self._stdout_buf = ""
+        self._append_log(f"[process exited with code {code}]")
+        self._set_metric("status", "idle")
+        self.start_btn.setEnabled(True)
+
+    def _on_process_error(self, _error: QProcess.ProcessError) -> None:
+        if self.proc is None:
+            return
+        self._append_log(f"[process error: {self.proc.errorString()}]")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Open Training Launcher")
-    return p
+    return argparse.ArgumentParser(description="Open Training Launcher")
 
 
 def main() -> None:
     _ = build_parser().parse_args()
-    root = tk.Tk()
-    app = TrainLauncherApp(root)
-    _ = app
-    root.mainloop()
+    app = QApplication(sys.argv)
+    win = TrainLauncherWindow()
+    win.show()
+    raise SystemExit(app.exec())
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ DEFAULT_SKILL_LEVELS = {
     "smithing": 0,
     "alchemy": 0,
     "farming": 0,
+    "foraging": 0,
     "armor_light": 0,
     "armor_medium": 0,
     "armor_heavy": 0,
@@ -163,6 +164,13 @@ class AnimalState:
 
 
 @dataclass
+class PlantPlotState:
+    crop_id: str
+    planter_id: str = ""
+    planter_faction_id: int = -1
+
+
+@dataclass
 class EnvState:
     grid: List[List[str]]
     tile_interactions: Dict[Tuple[int, int], int]
@@ -174,6 +182,7 @@ class EnvState:
     resource_nodes: Dict[Tuple[int, int], ResourceNodeState] = field(default_factory=dict)
     stations: Dict[Tuple[int, int], StationState] = field(default_factory=dict)
     animals: Dict[str, AnimalState] = field(default_factory=dict)
+    plant_plots: Dict[Tuple[int, int], PlantPlotState] = field(default_factory=dict)
     agent_statuses: Dict[str, List[ActiveStatus]] = field(default_factory=dict)
     item_metadata: Dict[str, Dict[str, object]] = field(default_factory=dict)
     faction_leaders: Dict[int, str] = field(default_factory=dict)

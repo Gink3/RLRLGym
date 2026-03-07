@@ -24,6 +24,7 @@ python3 examples/train_demo.py
 - `tools/view_replay.py`: replay viewer for `*.replay.json` files with playback controls, focus, zoom, and render mode switch (`ascii` default, optional `tileset`).
 - `tools/scenario_editor.py`: GUI editor for scenario files (snapshot `env_config` + agent list). Agent creation flow is race + class selection followed by editable combined JSON before save.
 - `tools/train_launcher.py`: GUI launcher for training jobs with live log streaming and basic live metrics (`return`, `win`, `survival`, `starvation`, `loss`, `epsilon`).
+- `tools/map_builder.py`: generate a new terrain map, preview it in ASCII, and save/attach it to a scenario via `static_map_path` or embedded `static_map_data`.
 - `python3 -m train`: training CLI (custom and RLlib backends) with scenario support.
 - `docs/CraftingSystem.md`: crafting runtime behavior and content authoring reference.
 - `docs/ConstructionSystem.md`: construction/build placement behavior and authoring reference.

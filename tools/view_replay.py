@@ -1,4 +1,5 @@
-"""Replay viewer for saved training replay JSON files."""
+#!/usr/bin/env python3
+"""PyQt6 replay viewer with smooth pan/zoom and playback controls."""
 
 from __future__ import annotations
 
@@ -6,309 +7,371 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from typing import Dict, List
+
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtWidgets import (
+    QApplication,
+    QGraphicsScene,
+    QGraphicsSimpleTextItem,
+    QGraphicsView,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QPushButton,
+    QSlider,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.models import AgentState, AnimalState, ChestState, EnvState, MonsterState
+from rlrlgym.env import PLANT_TYPES  # noqa: E402
+from rlrlgym.tiles import load_tileset  # noqa: E402
 
 
-def _state_from_payload(frame: dict) -> EnvState:
-    tile_interactions = {
-        (int(row["position"][0]), int(row["position"][1])): int(row["count"])
-        for row in frame.get("tile_interactions", [])
-    }
-    ground_items = {
-        (int(row["position"][0]), int(row["position"][1])): list(row.get("items", []))
-        for row in frame.get("ground_items", [])
-    }
-    chests = {
-        (int(row["position"][0]), int(row["position"][1])): ChestState(
-            position=(int(row["position"][0]), int(row["position"][1])),
-            opened=bool(row.get("opened", False)),
-            locked=bool(row.get("locked", False)),
-            loot=list(row.get("loot", [])),
-        )
-        for row in frame.get("chests", [])
-    }
-    agents = {}
-    for aid, row in frame.get("agents", {}).items():
-        agent = AgentState(
-            agent_id=str(row["agent_id"]),
-            position=(int(row["position"][0]), int(row["position"][1])),
-            profile_name=str(row.get("profile_name", "reward_explorer_policy_v1")),
-            race_name=str(
-                row.get(
-                    "race_name",
-                    row.get("profile_name", "reward_explorer_policy_v1"),
-                )
-            ),
-            class_name=str(row.get("class_name", "fighter")),
-            hp=int(row.get("hp", 0)),
-            max_hp=int(row.get("max_hp", 0)),
-            mana=int(row.get("mana", 0)),
-            max_mana=int(row.get("max_mana", 0)),
-            hunger=int(row.get("hunger", 0)),
-            max_hunger=int(row.get("max_hunger", 0)),
-            inventory=list(row.get("inventory", [])),
-            equipped=list(row.get("equipped", [])),
-            armor_slots={
-                str(k): (None if v is None else str(v))
-                for k, v in dict(row.get("armor_slots", {})).items()
-            },
-            faction_id=int(row.get("faction_id", -1)),
-            alive=bool(row.get("alive", True)),
-            visited={
-                (int(pos[0]), int(pos[1]))
-                for pos in row.get("visited", [])
-            },
-            wait_streak=int(row.get("wait_streak", 0)),
-            recent_positions=[
-                (int(pos[0]), int(pos[1]))
-                for pos in row.get("recent_positions", [])
-            ],
-            strength=int(row.get("strength", 5)),
-            dexterity=int(row.get("dexterity", 5)),
-            intellect=int(row.get("intellect", 5)),
-            skills={str(k): int(v) for k, v in dict(row.get("skills", {})).items()},
-            skill_xp={str(k): int(v) for k, v in dict(row.get("skill_xp", {})).items()},
-            spell_cooldowns={
-                str(k): int(v) for k, v in dict(row.get("spell_cooldowns", {})).items()
-            },
-            known_spells=[str(x) for x in row.get("known_spells", [])],
-        )
-        agents[aid] = agent
-    monsters = {}
-    for row in frame.get("monsters", []):
-        entity_id = str(row.get("entity_id", "monster"))
-        monster = MonsterState(
-            entity_id=entity_id,
-            monster_id=str(row.get("monster_id", entity_id)),
-            name=str(row.get("name", row.get("monster_id", entity_id))),
-            symbol=str(row.get("symbol", "M"))[:1] or "M",
-            color=str(row.get("color", "red")),
-            position=(int(row["position"][0]), int(row["position"][1])),
-            hp=int(row.get("hp", 1)),
-            max_hp=int(row.get("max_hp", 1)),
-            acc=int(row.get("acc", 0)),
-            eva=int(row.get("eva", 0)),
-            dmg_min=int(row.get("dmg_min", 1)),
-            dmg_max=int(row.get("dmg_max", 1)),
-            dr_min=int(row.get("dr_min", 0)),
-            dr_max=int(row.get("dr_max", 0)),
-            alive=bool(row.get("alive", True)),
-        )
-        monsters[entity_id] = monster
-    animals = {}
-    for row in frame.get("animals", []):
-        entity_id = str(row.get("entity_id", "animal"))
-        animal = AnimalState(
-            entity_id=entity_id,
-            animal_id=str(row.get("animal_id", entity_id)),
-            name=str(row.get("name", row.get("animal_id", entity_id))),
-            symbol=str(row.get("symbol", "a"))[:1] or "a",
-            color=str(row.get("color", "green")),
-            position=(int(row["position"][0]), int(row["position"][1])),
-            hp=int(row.get("hp", 1)),
-            max_hp=int(row.get("max_hp", 1)),
-            hunger=int(row.get("hunger", 1)),
-            max_hunger=int(row.get("max_hunger", 1)),
-            thirst=int(row.get("thirst", 1)),
-            max_thirst=int(row.get("max_thirst", 1)),
-            age=int(row.get("age", 0)),
-            mature_age=int(row.get("mature_age", 1)),
-            reproduction_cooldown=int(row.get("reproduction_cooldown", 0)),
-            reproduction_cooldown_max=int(row.get("reproduction_cooldown_max", 1)),
-            can_shear=bool(row.get("can_shear", False)),
-            sheared=bool(row.get("sheared", False)),
-            shear_item=str(row.get("shear_item", "")),
-            wool_regrow=int(row.get("wool_regrow", 0)),
-            shear_regrow_max=int(row.get("shear_regrow_max", 0)),
-            alive=bool(row.get("alive", True)),
-        )
-        animals[entity_id] = animal
-    return EnvState(
-        grid=frame["grid"],
-        tile_interactions=tile_interactions,
-        ground_items=ground_items,
-        agents=agents,
-        chests=chests,
-        monsters=monsters,
-        animals=animals,
-        faction_leaders={
-            int(fid): str(leader)
-            for fid, leader in dict(frame.get("factions", {}).get("leaders", {})).items()
-        },
-        pending_faction_invites={
-            str(aid): {
-                "faction_id": int(invite.get("faction_id", -1)),
-                "inviter_id": str(invite.get("inviter_id", "")),
-                "created_step": int(invite.get("created_step", -1)),
-            }
-            for aid, invite in dict(
-                frame.get("factions", {}).get("pending_invites", {})
-            ).items()
-        },
-        step_count=int(frame.get("step_count", 0)),
-    )
+COLOR_MAP: Dict[str, str] = {
+    "black": "#111111",
+    "bright_black": "#4b4b4b",
+    "red": "#d66b6b",
+    "green": "#67b35c",
+    "yellow": "#d6c15c",
+    "blue": "#5c84d6",
+    "magenta": "#b86bd6",
+    "cyan": "#58bfbf",
+    "white": "#e6e6e6",
+    "bright_green": "#7ddf6a",
+}
 
 
-def _fallback_step_logs(
-    states: list[EnvState], actions_raw: list[dict]
-) -> list[dict]:
-    out: list[dict] = []
-    for i in range(1, len(states)):
-        prev = states[i - 1]
-        curr = states[i]
-        acts = actions_raw[i - 1] if (i - 1) < len(actions_raw) else {}
-        agents = {}
-        for aid, agent in curr.agents.items():
-            prev_agent = prev.agents.get(aid)
-            events = []
-            if prev_agent is not None and prev_agent.hp > agent.hp:
-                events.append("damage_taken")
-            if prev_agent is not None and prev_agent.alive and not agent.alive:
-                events.append("death")
-            agents[aid] = {
-                "action": int(acts.get(aid, -1)) if isinstance(acts, dict) else -1,
-                "reward": 0.0,
-                "events": events,
-                "terminated": bool(not agent.alive),
-                "truncated": False,
-                "death_reason": "unknown" if "death" in events else None,
-                "winner": False,
-            }
-        agent_damage = []
-        for aid, agent in curr.agents.items():
-            prev_agent = prev.agents.get(aid)
-            if prev_agent is None:
+class MapView(QGraphicsView):
+    def __init__(self, scene: QGraphicsScene, parent: QWidget | None = None) -> None:
+        super().__init__(scene, parent)
+        self.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.TextAntialiasing
+            | QPainter.RenderHint.SmoothPixmapTransform
+        )
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+
+    def wheelEvent(self, event) -> None:  # type: ignore[override]
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return
+        # Continuous exponential scaling gives smoother zoom than fixed jumps.
+        factor = 1.0015 ** delta
+        self.scale(factor, factor)
+
+
+class ReplayWindow(QMainWindow):
+    def __init__(self, replay_path: Path, title: str) -> None:
+        super().__init__()
+        self.setWindowTitle(title)
+        self.resize(1400, 900)
+
+        self.replay_files = sorted(replay_path.parent.glob("*.replay.json"))
+        if replay_path not in self.replay_files:
+            self.replay_files.append(replay_path)
+            self.replay_files.sort()
+        self.replay_index = self.replay_files.index(replay_path)
+
+        self.frames: List[dict] = []
+        self.step_logs: List[dict] = []
+        self.tile_defs = load_tileset("data/base/tiles.json")
+
+        self.tile_px = 24
+        self.playing = False
+
+        root = QWidget(self)
+        self.setCentralWidget(root)
+        layout = QHBoxLayout(root)
+
+        left_col = QVBoxLayout()
+        layout.addLayout(left_col, stretch=4)
+
+        self.scene = QGraphicsScene(self)
+        self.view = MapView(self.scene, self)
+        left_col.addWidget(self.view, stretch=1)
+
+        controls = QHBoxLayout()
+        self.prev_ep_btn = QPushButton("Prev Replay")
+        self.next_ep_btn = QPushButton("Next Replay")
+        self.prev_btn = QPushButton("Prev")
+        self.play_btn = QPushButton("Play")
+        self.next_btn = QPushButton("Next")
+        self.frame_label = QLabel("frame 0/0")
+        controls.addWidget(self.prev_ep_btn)
+        controls.addWidget(self.next_ep_btn)
+        controls.addWidget(self.prev_btn)
+        controls.addWidget(self.play_btn)
+        controls.addWidget(self.next_btn)
+        controls.addWidget(self.frame_label)
+        left_col.addLayout(controls)
+
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(0)
+        left_col.addWidget(self.slider)
+
+        right_col = QVBoxLayout()
+        layout.addLayout(right_col, stretch=2)
+
+        right_col.addWidget(QLabel("Replay Files"))
+        self.replay_list = QListWidget()
+        right_col.addWidget(self.replay_list, stretch=1)
+
+        right_col.addWidget(QLabel("Frame Summary"))
+        self.summary = QTextEdit()
+        self.summary.setReadOnly(True)
+        right_col.addWidget(self.summary, stretch=1)
+
+        right_col.addWidget(QLabel("Action / Events"))
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        right_col.addWidget(self.log_text, stretch=1)
+
+        self.timer = QTimer(self)
+        self.timer.setInterval(110)
+        self.timer.timeout.connect(self._tick_playback)
+
+        self.prev_btn.clicked.connect(lambda: self._set_frame(self.slider.value() - 1))
+        self.next_btn.clicked.connect(lambda: self._set_frame(self.slider.value() + 1))
+        self.play_btn.clicked.connect(self._toggle_play)
+        self.slider.valueChanged.connect(self._set_frame)
+        self.prev_ep_btn.clicked.connect(lambda: self._load_replay(self.replay_index - 1))
+        self.next_ep_btn.clicked.connect(lambda: self._load_replay(self.replay_index + 1))
+        self.replay_list.currentRowChanged.connect(self._load_replay)
+
+        self._reload_replay_list()
+        self._load_replay(self.replay_index)
+
+    def _reload_replay_list(self) -> None:
+        self.replay_list.blockSignals(True)
+        self.replay_list.clear()
+        for p in self.replay_files:
+            self.replay_list.addItem(QListWidgetItem(p.name))
+        self.replay_list.setCurrentRow(self.replay_index)
+        self.replay_list.blockSignals(False)
+
+    def _load_replay(self, idx: int) -> None:
+        if idx < 0 or idx >= len(self.replay_files):
+            return
+        self.replay_index = idx
+        path = self.replay_files[idx]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        frames_raw = payload.get("frames", [])
+        if not isinstance(frames_raw, list) or not frames_raw:
+            raise ValueError(f"No frames in replay: {path}")
+        self.frames = [dict(row) for row in frames_raw if isinstance(row, dict)]
+        step_logs = payload.get("step_logs", [])
+        self.step_logs = [dict(row) for row in step_logs if isinstance(row, dict)] if isinstance(step_logs, list) else []
+        self.setWindowTitle(f"RLRLGym Replay Viewer - {path.name}")
+        self.slider.blockSignals(True)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(max(0, len(self.frames) - 1))
+        self.slider.setValue(0)
+        self.slider.blockSignals(False)
+        self._set_frame(0)
+        self.replay_list.blockSignals(True)
+        self.replay_list.setCurrentRow(idx)
+        self.replay_list.blockSignals(False)
+
+    def _toggle_play(self) -> None:
+        self.playing = not self.playing
+        if self.playing:
+            self.play_btn.setText("Pause")
+            self.timer.start()
+        else:
+            self.play_btn.setText("Play")
+            self.timer.stop()
+
+    def _tick_playback(self) -> None:
+        nxt = self.slider.value() + 1
+        if nxt > self.slider.maximum():
+            self.playing = False
+            self.play_btn.setText("Play")
+            self.timer.stop()
+            return
+        self.slider.setValue(nxt)
+
+    def _tile_color(self, name: str) -> QColor:
+        return QColor(COLOR_MAP.get(name, "#d0d0d0"))
+
+    def _set_frame(self, idx: int) -> None:
+        if not self.frames:
+            return
+        idx = max(0, min(idx, len(self.frames) - 1))
+        frame = self.frames[idx]
+        grid = frame.get("grid", [])
+        if not isinstance(grid, list):
+            return
+
+        self.scene.clear()
+        h = len(grid)
+        w = len(grid[0]) if h > 0 and isinstance(grid[0], list) else 0
+
+        # Base tiles
+        for r, row in enumerate(grid):
+            if not isinstance(row, list):
                 continue
-            dmg = int(prev_agent.hp) - int(agent.hp)
-            if dmg > 0:
-                agent_damage.append(
-                    {"agent_id": aid, "amount": dmg, "source": "unknown"}
-                )
-        monster_deaths = []
-        monster_damage = []
-        for entity_id, mon in curr.monsters.items():
-            prev_mon = prev.monsters.get(entity_id)
-            if prev_mon is None:
+            for c, tile_id_any in enumerate(row):
+                tile_id = str(tile_id_any)
+                td = self.tile_defs.get(tile_id)
+                glyph = td.glyph if td is not None else "?"
+                color_name = td.color if td is not None else "white"
+                x = c * self.tile_px
+                y = r * self.tile_px
+                bg = QColor("#1f232a") if (r + c) % 2 == 0 else QColor("#242a33")
+                self.scene.addRect(x, y, self.tile_px, self.tile_px, QPen(Qt.PenStyle.NoPen), bg)
+                text = QGraphicsSimpleTextItem(glyph)
+                text.setBrush(self._tile_color(color_name))
+                text.setFont(QFont("DejaVu Sans Mono", 10))
+                text.setPos(x + 5, y + 2)
+                self.scene.addItem(text)
+
+        # Plant plots highlight
+        for row in frame.get("plant_plots", []):
+            if not isinstance(row, dict):
                 continue
-            dmg = int(prev_mon.hp) - int(mon.hp)
-            if dmg > 0:
-                monster_damage.append(
-                    {
-                        "entity_id": entity_id,
-                        "monster_id": mon.monster_id,
-                        "amount": dmg,
-                        "hp_before": int(prev_mon.hp),
-                        "hp_after": int(mon.hp),
-                        "hp_max": int(mon.max_hp),
-                        "source": "unknown",
-                    }
-                )
-            if prev_mon.alive and not mon.alive:
-                monster_deaths.append(
-                    {
-                        "entity_id": entity_id,
-                        "monster_id": mon.monster_id,
-                        "reason": "unknown",
-                    }
-                )
-        out.append(
-            {
-                "agents": agents,
-                "agent_damage": agent_damage,
-                "monster_damage": monster_damage,
-                "monster_deaths": monster_deaths,
-            }
-        )
-    return out
+            pos = row.get("position", [])
+            if not isinstance(pos, list) or len(pos) != 2:
+                continue
+            r = int(pos[0])
+            c = int(pos[1])
+            x = c * self.tile_px
+            y = r * self.tile_px
+            outline = QPen(QColor("#44d1d1"))
+            outline.setWidth(2)
+            self.scene.addRect(x + 1, y + 1, self.tile_px - 2, self.tile_px - 2, outline)
 
+        # Chests
+        for row in frame.get("chests", []):
+            if not isinstance(row, dict):
+                continue
+            pos = row.get("position", [])
+            if not isinstance(pos, list) or len(pos) != 2:
+                continue
+            r = int(pos[0])
+            c = int(pos[1])
+            x = c * self.tile_px
+            y = r * self.tile_px
+            ch = QGraphicsSimpleTextItem("C" if not bool(row.get("opened", False)) else "c")
+            ch.setBrush(QColor("#f0d060"))
+            ch.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
+            ch.setPos(x + 5, y + 2)
+            self.scene.addItem(ch)
 
-def _load_replay_payload(replay_path: Path) -> tuple[list[EnvState], list[dict]]:
-    payload = json.loads(replay_path.read_text(encoding="utf-8"))
-    frames_raw = payload.get("frames", [])
-    actions_raw = payload.get("actions", [])
-    step_logs_raw = payload.get("step_logs", [])
-    if not frames_raw:
-        raise ValueError(f"No frames in replay file: {replay_path}")
+        # Monsters
+        for row in frame.get("monsters", []):
+            if not isinstance(row, dict) or not bool(row.get("alive", True)):
+                continue
+            pos = row.get("position", [])
+            if not isinstance(pos, list) or len(pos) != 2:
+                continue
+            r = int(pos[0])
+            c = int(pos[1])
+            x = c * self.tile_px
+            y = r * self.tile_px
+            sym = str(row.get("symbol", "M"))[:1] or "M"
+            m = QGraphicsSimpleTextItem(sym)
+            m.setBrush(QColor("#d66b6b"))
+            m.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
+            m.setPos(x + 5, y + 2)
+            self.scene.addItem(m)
 
-    states = [_state_from_payload(frame) for frame in frames_raw]
-    action_log: list[dict] = []
-    if isinstance(step_logs_raw, list) and step_logs_raw:
-        for row in step_logs_raw:
-            if isinstance(row, dict):
-                action_log.append(dict(row))
-    else:
-        raw_actions = [
-            {str(aid): int(action) for aid, action in dict(row).items()}
-            for row in actions_raw
-            if isinstance(row, dict)
+        # Animals
+        for row in frame.get("animals", []):
+            if not isinstance(row, dict) or not bool(row.get("alive", True)):
+                continue
+            pos = row.get("position", [])
+            if not isinstance(pos, list) or len(pos) != 2:
+                continue
+            r = int(pos[0])
+            c = int(pos[1])
+            x = c * self.tile_px
+            y = r * self.tile_px
+            sym = str(row.get("symbol", "a"))[:1] or "a"
+            a = QGraphicsSimpleTextItem(sym)
+            a.setBrush(QColor("#9fe28a"))
+            a.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
+            a.setPos(x + 5, y + 2)
+            self.scene.addItem(a)
+
+        # Agents
+        agents = frame.get("agents", {})
+        if isinstance(agents, dict):
+            for aid, row in sorted(agents.items()):
+                if not isinstance(row, dict) or not bool(row.get("alive", True)):
+                    continue
+                pos = row.get("position", [])
+                if not isinstance(pos, list) or len(pos) != 2:
+                    continue
+                r = int(pos[0])
+                c = int(pos[1])
+                x = c * self.tile_px
+                y = r * self.tile_px
+                label = aid.split("_")[-1]
+                t = QGraphicsSimpleTextItem(label)
+                t.setBrush(QColor("#64b2ff"))
+                t.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
+                t.setPos(x + 4, y + 2)
+                self.scene.addItem(t)
+
+        self.scene.setSceneRect(0, 0, max(1, w * self.tile_px), max(1, h * self.tile_px))
+        self.frame_label.setText(f"frame {idx + 1}/{len(self.frames)}")
+
+        agents_count = len(frame.get("agents", {})) if isinstance(frame.get("agents", {}), dict) else 0
+        monsters_count = len([x for x in frame.get("monsters", []) if isinstance(x, dict) and bool(x.get("alive", True))])
+        animals_count = len([x for x in frame.get("animals", []) if isinstance(x, dict) and bool(x.get("alive", True))])
+        plants_count = len(frame.get("plant_plots", [])) if isinstance(frame.get("plant_plots", []), list) else 0
+        summary_lines = [
+            f"size: {w}x{h}",
+            f"agents: {agents_count}",
+            f"monsters(alive): {monsters_count}",
+            f"animals(alive): {animals_count}",
+            f"plant_plots: {plants_count}",
         ]
-        action_log = _fallback_step_logs(states, raw_actions)
-    return states, action_log
+        self.summary.setPlainText("\n".join(summary_lines))
+
+        if idx > 0 and idx - 1 < len(self.step_logs):
+            step = self.step_logs[idx - 1]
+            lines: List[str] = []
+            if isinstance(step.get("agents"), dict):
+                for aid, row in sorted(step["agents"].items()):
+                    if not isinstance(row, dict):
+                        continue
+                    action = row.get("action", -1)
+                    reward = row.get("reward", 0.0)
+                    events = row.get("events", [])
+                    lines.append(f"{aid}: action={action} reward={reward:.3f}")
+                    if isinstance(events, list) and events:
+                        lines.extend([f"  - {e}" for e in events])
+            self.log_text.setPlainText("\n".join(lines))
+        else:
+            self.log_text.setPlainText("(no step log for first frame)")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="View a saved episode replay")
+    parser = argparse.ArgumentParser(description="View a saved episode replay (PyQt6)")
     parser.add_argument("replay_path", type=str, help="Path to *.replay.json file")
     parser.add_argument("--title", type=str, default="RLRLGym Replay Viewer")
     args = parser.parse_args()
 
     replay_path = Path(args.replay_path).resolve()
-    states, action_log = _load_replay_payload(replay_path)
-    first = states[0]
-    width = len(first.grid[0]) if first.grid else 1
-    height = len(first.grid)
-    n_agents = max(1, len(first.agents))
+    if not replay_path.exists():
+        raise FileNotFoundError(replay_path)
 
-    env = PettingZooParallelRLRLGym(
-        EnvConfig(
-            width=width,
-            height=height,
-            n_agents=n_agents,
-            render_enabled=True,
-        )
-    )
-
-    replay_files = sorted(replay_path.parent.glob("*.replay.json"))
-    if replay_path in replay_files:
-        current_idx = replay_files.index(replay_path)
-    else:
-        replay_files.append(replay_path)
-        replay_files = sorted(replay_files)
-        current_idx = replay_files.index(replay_path)
-
-    def _load_idx(idx: int) -> None:
-        nonlocal current_idx, states, action_log
-        if idx < 0 or idx >= len(replay_files):
-            return
-        current_idx = idx
-        p = replay_files[current_idx]
-        states, action_log = _load_replay_payload(p)
-        env.play_frames_in_window(
-            states,
-            title=f"{args.title} - {p.name}",
-            playback_actions=action_log,
-            on_prev_episode=_prev,
-            on_next_episode=_next,
-        )
-
-    def _prev() -> None:
-        _load_idx(current_idx - 1)
-
-    def _next() -> None:
-        _load_idx(current_idx + 1)
-
-    env.play_frames_in_window(
-        states,
-        title=f"{args.title} - {replay_path.name}",
-        playback_actions=action_log,
-        on_prev_episode=_prev,
-        on_next_episode=_next,
-    )
-    env.run_render_window()
+    app = QApplication(sys.argv)
+    win = ReplayWindow(replay_path=replay_path, title=args.title)
+    win.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

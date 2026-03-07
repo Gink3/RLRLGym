@@ -59,6 +59,11 @@ A saved scenario directory contains:
 
 These bundled sections are used at runtime and do not require external base-data files.
 
+Optional static map override:
+- Set `env_config.static_map_path` to a saved map JSON (for example created by `tools/map_builder.py`), or
+- Set `env_config.static_map_data` to embedded map JSON payload.
+- When provided, static map terrain is used instead of procedural terrain generation.
+
 ## 4) Train Using the Scenario
 Open Training Launcher (`python3 tools/train_launcher.py`), select the scenario directory, then start training.
 

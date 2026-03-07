@@ -29,6 +29,7 @@ class MapGenConfig:
     biomes: List[Dict[str, object]] = field(default_factory=list)
     resource_nodes: List[Dict[str, object]] = field(default_factory=list)
     station_spawns: List[Dict[str, object]] = field(default_factory=list)
+    worldgen: Dict[str, object] = field(default_factory=dict)
 
 
 def load_mapgen_config(path: str | Path) -> MapGenConfig:
@@ -49,6 +50,9 @@ def parse_mapgen_config(raw: object) -> MapGenConfig:
     if missing:
         miss = ", ".join(sorted(missing))
         raise ValueError(f"mapgen missing required field(s): {miss}")
+
+    worldgen_raw = row.get("worldgen", {})
+    worldgen = dict(worldgen_raw) if isinstance(worldgen_raw, dict) else {}
 
     return MapGenConfig(
         wall_tile_id=str(row["wall_tile_id"]),
@@ -73,4 +77,5 @@ def parse_mapgen_config(raw: object) -> MapGenConfig:
             for x in row.get("station_spawns", [])
             if isinstance(x, dict)
         ],
+        worldgen=worldgen,
     )
