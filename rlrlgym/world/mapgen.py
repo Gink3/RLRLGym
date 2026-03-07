@@ -244,6 +244,7 @@ def _fill_organic_blob(
     perm: List[int],
     noise_scale: float,
     roughness: float,
+    skip_existing_tile_ids: set[str] | None = None,
 ) -> None:
     if not grid or not grid[0]:
         return
@@ -266,6 +267,8 @@ def _fill_organic_blob(
             noise = _fractal_noise_2d(float(c) / scale, float(r) / scale, perm, octaves=3)
             radius_factor = 1.0 + ((noise - 0.5) * 2.0 * roughness)
             if dist > radius_factor:
+                continue
+            if skip_existing_tile_ids and grid[r][c] in skip_existing_tile_ids:
                 continue
             if dist > max(0.0, radius_factor - edge_band):
                 grid[r][c] = edge_tile_id
@@ -290,6 +293,7 @@ def _fill_multi_lobe_blob(
     roughness: float,
     min_lobes: int,
     max_lobes: int,
+    skip_existing_tile_ids: set[str] | None = None,
 ) -> None:
     if not grid or not grid[0]:
         return
@@ -323,6 +327,7 @@ def _fill_multi_lobe_blob(
             perm=perm,
             noise_scale=noise_scale,
             roughness=roughness,
+            skip_existing_tile_ids=skip_existing_tile_ids,
         )
 
 
@@ -975,6 +980,11 @@ def generate_biome_terrain(
     stone_blobs = max(2, int(area / float(max(1, int(worldgen.get("stone_cluster_scale", 180 * 180))))))
     forest_radius = max(8, int(worldgen.get("forest_cluster_radius", 22)))
     stone_radius = max(8, int(worldgen.get("stone_cluster_radius", 18)))
+    stone_min_lobes = max(1, int(worldgen.get("stone_min_lobes", 2)))
+    stone_max_lobes = max(stone_min_lobes, int(worldgen.get("stone_max_lobes", 6)))
+    stone_radius_jitter = max(0.0, min(0.9, float(worldgen.get("stone_radius_jitter", 0.35))))
+    stone_blob_noise_scale = float(worldgen.get("stone_blob_noise_scale", worldgen.get("blob_noise_scale", 24.0)))
+    stone_blob_roughness = float(worldgen.get("stone_blob_roughness", worldgen.get("blob_noise_roughness", 0.35)))
 
     _apply_forest_density_mask(
         grid=grid,
@@ -991,18 +1001,23 @@ def generate_biome_terrain(
     for _ in range(stone_blobs):
         cr = rng.randint(2 + stone_radius, max(2 + stone_radius, height - 3 - stone_radius))
         cc = rng.randint(2 + stone_radius, max(2 + stone_radius, width - 3 - stone_radius))
-        _fill_organic_blob(
+        rr = max(4, int(round(float(stone_radius) * rng.uniform(1.0 - stone_radius_jitter, 1.0 + stone_radius_jitter))))
+        _fill_multi_lobe_blob(
             grid=grid,
             biomes=biomes,
+            rng=rng,
             center_r=cr,
             center_c=cc,
-            radius=stone_radius,
+            radius=rr,
             fill_tile_id=stone_tile,
             edge_tile_id=floor_id,
             biome_id="rocky",
             perm=organic_perm,
-            noise_scale=float(worldgen.get("blob_noise_scale", 24.0)),
-            roughness=float(worldgen.get("blob_noise_roughness", 0.35)),
+            noise_scale=stone_blob_noise_scale,
+            roughness=stone_blob_roughness,
+            min_lobes=stone_min_lobes,
+            max_lobes=stone_max_lobes,
+            skip_existing_tile_ids=OPEN_WATER_TILE_IDS,
         )
 
     _apply_dirt_patches(
