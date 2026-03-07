@@ -130,6 +130,16 @@ class TileSprites:
                 self._paint_stone_wall(p)
         elif tile_id == "stone_floor":
             self._paint_stone_floor(p)
+        elif tile_id == "dirt_floor":
+            p.fillRect(0, 0, self.size, self.size, QColor("#5b452d"))
+            p.setPen(QPen(QColor("#6a5338"), 1))
+            for y in range(4, self.size, 7):
+                p.drawLine(2, y, self.size - 2, y)
+        elif tile_id == "sand_floor":
+            p.fillRect(0, 0, self.size, self.size, QColor("#b49b63"))
+            p.setPen(QPen(QColor("#c7b17c"), 1))
+            for x in range(3, self.size, 6):
+                p.drawLine(x, 3, x, self.size - 3)
         elif tile_id == "shrine":
             self._paint_stone_floor(p)
             p.setPen(QPen(QColor("#d08bd6"), 2))

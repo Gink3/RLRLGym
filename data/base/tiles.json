@@ -92,6 +92,24 @@
       "loot_table": ["stone"]
     },
     {
+      "id": "dirt_floor",
+      "glyph": ".",
+      "color": "yellow",
+      "walkable": true,
+      "spawn_weight": 0.08,
+      "max_interactions": 4,
+      "loot_table": ["stone"]
+    },
+    {
+      "id": "sand_floor",
+      "glyph": ".",
+      "color": "yellow",
+      "walkable": true,
+      "spawn_weight": 0.04,
+      "max_interactions": 3,
+      "loot_table": []
+    },
+    {
       "id": "tree",
       "glyph": "T",
       "color": "bright_green",

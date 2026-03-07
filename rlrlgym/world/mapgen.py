@@ -577,6 +577,58 @@ def _apply_forest_density_mask(
                     grid[r][c] = fallback_floor
 
 
+def _apply_shore_tiles(
+    grid: List[List[str]],
+    biomes: Dict[Tuple[int, int], str],
+    rng: random.Random,
+    *,
+    dirt_tile: str,
+    sand_tile: str,
+    worldgen: Dict[str, object],
+) -> None:
+    if not grid or not grid[0]:
+        return
+    h = len(grid)
+    w = len(grid[0])
+    perm = _build_permutation(rng)
+    nscale = max(8.0, float(worldgen.get("shore_noise_scale", 20.0)))
+    near_water_threshold = max(1, int(worldgen.get("shore_water_neighbor_threshold", 1)))
+
+    for r in range(1, h - 1):
+        for c in range(1, w - 1):
+            tile_id = grid[r][c]
+            if tile_id in OPEN_WATER_TILE_IDS:
+                continue
+            water_neighbors = 0
+            forest_neighbors = 0
+            for nr in range(r - 1, r + 2):
+                for nc in range(c - 1, c + 2):
+                    if nr == r and nc == c:
+                        continue
+                    nt = grid[nr][nc]
+                    if nt in OPEN_WATER_TILE_IDS:
+                        water_neighbors += 1
+                    if biomes.get((nr, nc), "") == "forest":
+                        forest_neighbors += 1
+            if water_neighbors < near_water_threshold:
+                continue
+            biome = biomes.get((r, c), "")
+            noise = _fractal_noise_2d(float(c) / nscale, float(r) / nscale, perm, octaves=2)
+            sand_bias = 0.15 + (0.08 * float(water_neighbors))
+            if biome in {"plains", "rocky"}:
+                sand_bias += 0.18
+            if forest_neighbors > 0 or biome == "forest":
+                sand_bias -= 0.25
+            sand_bias += (noise - 0.5) * 0.2
+            sand_bias = max(0.05, min(0.92, sand_bias))
+            if rng.random() < sand_bias:
+                grid[r][c] = sand_tile
+                biomes[(r, c)] = "shore_sand"
+            else:
+                grid[r][c] = dirt_tile
+                biomes[(r, c)] = "shore_dirt"
+
+
 def generate_biome_terrain(
     width: int,
     height: int,
@@ -602,6 +654,8 @@ def generate_biome_terrain(
     deep_tile = _valid_tile(tiles, str(worldgen.get("deep_water_tile_id", "deep_water")), shallow_tile)
     tree_tile = _valid_tile(tiles, str(worldgen.get("tree_tile_id", "tree")), floor_id)
     stone_tile = _valid_tile(tiles, str(worldgen.get("stone_tile_id", "rock_wall")), wall_id)
+    dirt_tile = _valid_tile(tiles, str(worldgen.get("dirt_tile_id", "dirt_floor")), floor_id)
+    sand_tile = _valid_tile(tiles, str(worldgen.get("sand_tile_id", "sand_floor")), dirt_tile)
 
     biome_ids: List[str] = []
     biome_weights: List[float] = []
@@ -708,6 +762,15 @@ def generate_biome_terrain(
     river_w_max = max(river_w_min, int(worldgen.get("river_max_width", 4)))
     for _ in range(n_rivers):
         _paint_river(grid, rng, deep_tile, shallow_tile, river_w_min, river_w_max)
+
+    _apply_shore_tiles(
+        grid=grid,
+        biomes=biomes,
+        rng=rng,
+        dirt_tile=dirt_tile,
+        sand_tile=sand_tile,
+        worldgen=worldgen,
+    )
 
     # Dense forest zones and exposed stone/mineral zones.
     area = width * height

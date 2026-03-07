@@ -15,6 +15,8 @@ TILE_VOCAB = [
     "bush",
     "tree",
     "stone_floor",
+    "dirt_floor",
+    "sand_floor",
     "rock_wall",
     "stone_wall",
     "food_cache",
