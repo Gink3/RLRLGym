@@ -4250,7 +4250,7 @@ class MultiAgentRLRLGym:
 
     def _nearby_agent_counts(
         self, aid: str, center: Tuple[int, int], height: int, width: int
-    ) -> Dict[str, int | None]:
+    ) -> Dict[str, object]:
         assert self.state is not None
         cr, cc = center
         start_r = cr - (height // 2)
@@ -4261,6 +4261,7 @@ class MultiAgentRLRLGym:
         adjacent = 0
         nearest: int | None = None
         relation_counts = {"ally": 0, "neutral": 0, "enemy": 0}
+        observed_agents: List[Dict[str, object]] = []
         actor = self.state.agents[aid]
         for other_id, other in self.state.agents.items():
             if other_id == aid or not other.alive:
@@ -4276,11 +4277,24 @@ class MultiAgentRLRLGym:
                 adjacent += 1
             if nearest is None or dist < nearest:
                 nearest = dist
+            observed_agents.append(
+                {
+                    "agent_id": other_id,
+                    "distance": dist,
+                    "position": other.position,
+                    "relation": rel,
+                    "hp": int(other.hp),
+                    "faction_id": int(other.faction_id),
+                    "overall_level": int(self._overall_level(other)),
+                }
+            )
+        observed_agents.sort(key=lambda entry: (int(entry["distance"]), str(entry["agent_id"])))
         return {
             "visible": total_visible,
             "adjacent": adjacent,
             "nearest_distance": nearest,
             "relation_counts": relation_counts,
+            "observed_agents": observed_agents,
         }
 
     def _nearby_monster_counts(

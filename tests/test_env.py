@@ -620,6 +620,36 @@ class TestEnv(unittest.TestCase):
         self.assertEqual(rel.get("ally"), 1)
         self.assertEqual(rel.get("enemy"), 1)
 
+    def test_nearby_agent_counts_include_observed_agent_details(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=3, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=64)
+        a0 = env.state.agents["agent_0"]
+        a1 = env.state.agents["agent_1"]
+        a2 = env.state.agents["agent_2"]
+        a0.position = (4, 4)
+        a1.position = (4, 5)
+        a2.position = (7, 4)
+        a1.faction_id = 3
+        a2.faction_id = 4
+        a1.hp = 17
+        a2.hp = 23
+        a1.skills["melee"] = 2
+        a2.skills["melee"] = 4
+
+        obs = env._build_observation("agent_0")
+        nearby = obs["stats"]["nearby_agents"]
+        observed = nearby["observed_agents"]
+        self.assertEqual(len(observed), 2)
+
+        first = observed[0]
+        self.assertEqual(first["agent_id"], "agent_1")
+        self.assertEqual(first["hp"], 17)
+        self.assertEqual(first["faction_id"], 3)
+        self.assertIsInstance(first["overall_level"], int)
+        self.assertEqual(first["distance"], 1)
+
     def test_attacking_allied_agent_applies_penalty(self):
         env = PettingZooParallelRLRLGym(
             EnvConfig(width=12, height=10, n_agents=2, max_steps=8, render_enabled=False)
