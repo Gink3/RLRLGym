@@ -33,6 +33,69 @@ def _cum_weights(weights: List[float]) -> List[float]:
     return out
 
 
+def _fade(t: float) -> float:
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def _grad(hashv: int, x: float, y: float) -> float:
+    h = hashv & 7
+    u = x if h < 4 else y
+    v = y if h < 4 else x
+    return (u if (h & 1) == 0 else -u) + (v if (h & 2) == 0 else -v)
+
+
+def _build_permutation(rng: random.Random) -> List[int]:
+    values = list(range(256))
+    rng.shuffle(values)
+    return values + values
+
+
+def _perlin_2d(x: float, y: float, perm: List[int]) -> float:
+    xi = int(math.floor(x)) & 255
+    yi = int(math.floor(y)) & 255
+    xf = x - math.floor(x)
+    yf = y - math.floor(y)
+
+    u = _fade(xf)
+    v = _fade(yf)
+
+    aa = perm[perm[xi] + yi]
+    ab = perm[perm[xi] + yi + 1]
+    ba = perm[perm[xi + 1] + yi]
+    bb = perm[perm[xi + 1] + yi + 1]
+
+    x1 = _lerp(_grad(aa, xf, yf), _grad(ba, xf - 1.0, yf), u)
+    x2 = _lerp(_grad(ab, xf, yf - 1.0), _grad(bb, xf - 1.0, yf - 1.0), u)
+    return _lerp(x1, x2, v)
+
+
+def _fractal_noise_2d(
+    x: float,
+    y: float,
+    perm: List[int],
+    octaves: int,
+    persistence: float = 0.5,
+    lacunarity: float = 2.0,
+) -> float:
+    total = 0.0
+    amplitude = 1.0
+    frequency = 1.0
+    norm = 0.0
+    for _ in range(max(1, octaves)):
+        total += amplitude * _perlin_2d(x * frequency, y * frequency, perm)
+        norm += amplitude
+        amplitude *= persistence
+        frequency *= lacunarity
+    if norm <= 0.0:
+        return 0.5
+    # Normalize Perlin output from [-1, 1] to [0, 1].
+    return max(0.0, min(1.0, (total / norm) * 0.5 + 0.5))
+
+
 def _valid_tile(tiles: Dict[str, TileDef], tile_id: str, fallback: str) -> str:
     if tile_id in tiles:
         return tile_id
@@ -77,12 +140,37 @@ def generate_biome_map(
     patch_rows: int,
     patch_cols: int,
     smooth_passes: int,
+    noise_scale: float = 5.0,
+    noise_octaves: int = 3,
+    noise_mix: float = 0.2,
 ) -> BiomeMap:
+    perm = _build_permutation(rng)
+    xoff = rng.uniform(-1000.0, 1000.0)
+    yoff = rng.uniform(-1000.0, 1000.0)
+    total_w = biome_cum[-1]
+    scale = max(1.0, float(noise_scale))
+    mix = max(0.0, min(1.0, float(noise_mix)))
+
     field: List[List[str]] = []
-    for _ in range(patch_rows):
+    for pr in range(patch_rows):
         row: List[str] = []
-        for _ in range(patch_cols):
-            row.append(_weighted_choice(rng, biome_ids, biome_cum))
+        for pc in range(patch_cols):
+            # Perlin drives broad contiguous regions; mix keeps local variety.
+            noise = _fractal_noise_2d(
+                (float(pc) / scale) + xoff,
+                (float(pr) / scale) + yoff,
+                perm=perm,
+                octaves=noise_octaves,
+            )
+            if mix > 0.0:
+                noise = ((1.0 - mix) * noise) + (mix * rng.random())
+            pick = noise * total_w
+            idx = bisect.bisect_left(biome_cum, pick)
+            if idx < 0:
+                idx = 0
+            if idx >= len(biome_ids):
+                idx = len(biome_ids) - 1
+            row.append(biome_ids[idx])
         field.append(row)
 
     for _ in range(max(1, smooth_passes)):
@@ -141,6 +229,48 @@ def _fill_disc(
             if dist > 1.0:
                 continue
             grid[r][c] = tile_id if dist <= 0.72 else tile_id_edge
+
+
+def _fill_organic_blob(
+    grid: List[List[str]],
+    biomes: Dict[Tuple[int, int], str],
+    center_r: int,
+    center_c: int,
+    radius: int,
+    fill_tile_id: str,
+    edge_tile_id: str,
+    biome_id: str,
+    perm: List[int],
+    noise_scale: float,
+    roughness: float,
+) -> None:
+    if not grid or not grid[0]:
+        return
+    h = len(grid)
+    w = len(grid[0])
+    r0 = max(1, center_r - radius)
+    r1 = min(h - 2, center_r + radius)
+    c0 = max(1, center_c - radius)
+    c1 = min(w - 2, center_c + radius)
+    rr = float(max(1, radius))
+    scale = max(1.0, noise_scale)
+    edge_band = 0.18
+    for r in range(r0, r1 + 1):
+        dr = float(r - center_r) / rr
+        for c in range(c0, c1 + 1):
+            dc = float(c - center_c) / rr
+            dist = math.sqrt((dr * dr) + (dc * dc))
+            if dist > 1.45:
+                continue
+            noise = _fractal_noise_2d(float(c) / scale, float(r) / scale, perm, octaves=3)
+            radius_factor = 1.0 + ((noise - 0.5) * 2.0 * roughness)
+            if dist > radius_factor:
+                continue
+            if dist > max(0.0, radius_factor - edge_band):
+                grid[r][c] = edge_tile_id
+            else:
+                grid[r][c] = fill_tile_id
+            biomes[(r, c)] = biome_id
 
 
 def _paint_river(
@@ -251,6 +381,9 @@ def generate_biome_terrain(
     patch_cols = (width + patch_size - 1) // patch_size
 
     smooth_passes = max(1, int(worldgen.get("biome_smooth_passes", 2)))
+    biome_noise_scale = max(1.0, float(worldgen.get("biome_noise_scale", 6.0)))
+    biome_noise_octaves = max(1, int(worldgen.get("biome_noise_octaves", 3)))
+    biome_noise_mix = max(0.0, min(1.0, float(worldgen.get("biome_noise_mix", 0.15))))
     biome_map = generate_biome_map(
         rng=rng,
         biome_ids=biome_ids,
@@ -259,6 +392,9 @@ def generate_biome_terrain(
         patch_rows=patch_rows,
         patch_cols=patch_cols,
         smooth_passes=smooth_passes,
+        noise_scale=biome_noise_scale,
+        noise_octaves=biome_noise_octaves,
+        noise_mix=biome_noise_mix,
     )
 
     grid: List[List[str]] = [[floor_id for _ in range(width)] for _ in range(height)]
@@ -281,11 +417,24 @@ def generate_biome_terrain(
     n_lakes = min(n_lakes, int(worldgen.get("max_lakes", 24)))
     min_lake_r = max(3, int(worldgen.get("lake_min_radius", 6)))
     max_lake_r = max(min_lake_r, int(worldgen.get("lake_max_radius", 26)))
+    organic_perm = _build_permutation(rng)
     for _ in range(n_lakes):
         cr = rng.randint(2 + max_lake_r, max(2 + max_lake_r, height - 3 - max_lake_r))
         cc = rng.randint(2 + max_lake_r, max(2 + max_lake_r, width - 3 - max_lake_r))
         rr = rng.randint(min_lake_r, max_lake_r)
-        _fill_disc(grid, cr, cc, rr, deep_tile, shallow_tile)
+        _fill_organic_blob(
+            grid=grid,
+            biomes=biomes,
+            center_r=cr,
+            center_c=cc,
+            radius=rr,
+            fill_tile_id=deep_tile,
+            edge_tile_id=shallow_tile,
+            biome_id="water",
+            perm=organic_perm,
+            noise_scale=float(worldgen.get("blob_noise_scale", 24.0)),
+            roughness=float(worldgen.get("blob_noise_roughness", 0.35)),
+        )
 
     # Rivers.
     min_rivers = max(1, int(worldgen.get("min_rivers", 2)))
@@ -306,20 +455,36 @@ def generate_biome_terrain(
     for _ in range(forest_blobs):
         cr = rng.randint(2 + forest_radius, max(2 + forest_radius, height - 3 - forest_radius))
         cc = rng.randint(2 + forest_radius, max(2 + forest_radius, width - 3 - forest_radius))
-        _fill_disc(grid, cr, cc, forest_radius, tree_tile, "bush" if "bush" in tiles else tree_tile)
-        for r in range(max(1, cr - forest_radius), min(height - 1, cr + forest_radius + 1)):
-            for c in range(max(1, cc - forest_radius), min(width - 1, cc + forest_radius + 1)):
-                if abs(r - cr) + abs(c - cc) <= forest_radius:
-                    biomes[(r, c)] = "forest"
+        _fill_organic_blob(
+            grid=grid,
+            biomes=biomes,
+            center_r=cr,
+            center_c=cc,
+            radius=forest_radius,
+            fill_tile_id=tree_tile,
+            edge_tile_id="bush" if "bush" in tiles else tree_tile,
+            biome_id="forest",
+            perm=organic_perm,
+            noise_scale=float(worldgen.get("blob_noise_scale", 24.0)),
+            roughness=float(worldgen.get("blob_noise_roughness", 0.35)),
+        )
 
     for _ in range(stone_blobs):
         cr = rng.randint(2 + stone_radius, max(2 + stone_radius, height - 3 - stone_radius))
         cc = rng.randint(2 + stone_radius, max(2 + stone_radius, width - 3 - stone_radius))
-        _fill_disc(grid, cr, cc, stone_radius, stone_tile, floor_id)
-        for r in range(max(1, cr - stone_radius), min(height - 1, cr + stone_radius + 1)):
-            for c in range(max(1, cc - stone_radius), min(width - 1, cc + stone_radius + 1)):
-                if abs(r - cr) + abs(c - cc) <= stone_radius:
-                    biomes[(r, c)] = "rocky"
+        _fill_organic_blob(
+            grid=grid,
+            biomes=biomes,
+            center_r=cr,
+            center_c=cc,
+            radius=stone_radius,
+            fill_tile_id=stone_tile,
+            edge_tile_id=floor_id,
+            biome_id="rocky",
+            perm=organic_perm,
+            noise_scale=float(worldgen.get("blob_noise_scale", 24.0)),
+            roughness=float(worldgen.get("blob_noise_roughness", 0.35)),
+        )
 
     fallback_tile = tiles.get(floor_id) or next(iter(tiles.values()))
     walkable = [
