@@ -1,9 +1,9 @@
 """Game/system helpers namespace."""
 
-from ..curriculum import load_curriculum_phases
-from ..featurize import observation_vector_size, vectorize_observation
-from ..names import generate_full_name, load_name_table
-from ..scenario import (
+from .curriculum import load_curriculum_phases
+from .featurize import observation_vector_size, vectorize_observation
+from ..content.names import generate_full_name, load_name_table
+from .scenario import (
     Scenario,
     ScenarioAgent,
     agent_combined_payload,
