@@ -274,6 +274,58 @@ def _fill_organic_blob(
             biomes[(r, c)] = biome_id
 
 
+def _fill_multi_lobe_blob(
+    grid: List[List[str]],
+    biomes: Dict[Tuple[int, int], str],
+    rng: random.Random,
+    *,
+    center_r: int,
+    center_c: int,
+    radius: int,
+    fill_tile_id: str,
+    edge_tile_id: str,
+    biome_id: str,
+    perm: List[int],
+    noise_scale: float,
+    roughness: float,
+    min_lobes: int,
+    max_lobes: int,
+) -> None:
+    if not grid or not grid[0]:
+        return
+    h = len(grid)
+    w = len(grid[0])
+    min_lobes = max(1, int(min_lobes))
+    max_lobes = max(min_lobes, int(max_lobes))
+    lobe_count = rng.randint(min_lobes, max_lobes)
+    for idx in range(lobe_count):
+        if idx == 0:
+            lr = center_r
+            lc = center_c
+            rr = radius
+        else:
+            ang = rng.uniform(0.0, math.pi * 2.0)
+            offset = int(float(radius) * rng.uniform(0.22, 0.92))
+            lr = center_r + int(round(math.sin(ang) * float(offset)))
+            lc = center_c + int(round(math.cos(ang) * float(offset)))
+            lr = max(1, min(h - 2, lr))
+            lc = max(1, min(w - 2, lc))
+            rr = max(2, int(round(float(radius) * rng.uniform(0.42, 0.92))))
+        _fill_organic_blob(
+            grid=grid,
+            biomes=biomes,
+            center_r=lr,
+            center_c=lc,
+            radius=rr,
+            fill_tile_id=fill_tile_id,
+            edge_tile_id=edge_tile_id,
+            biome_id=biome_id,
+            perm=perm,
+            noise_scale=noise_scale,
+            roughness=roughness,
+        )
+
+
 def _paint_river(
     grid: List[List[str]],
     biomes: Dict[Tuple[int, int], str],
@@ -861,14 +913,17 @@ def generate_biome_terrain(
     n_lakes = min(n_lakes, int(worldgen.get("max_lakes", 24)))
     min_lake_r = max(3, int(worldgen.get("lake_min_radius", 6)))
     max_lake_r = max(min_lake_r, int(worldgen.get("lake_max_radius", 26)))
+    lake_min_lobes = max(1, int(worldgen.get("lake_min_lobes", 2)))
+    lake_max_lobes = max(lake_min_lobes, int(worldgen.get("lake_max_lobes", 5)))
     organic_perm = _build_permutation(rng)
     for _ in range(n_lakes):
         cr = rng.randint(2 + max_lake_r, max(2 + max_lake_r, height - 3 - max_lake_r))
         cc = rng.randint(2 + max_lake_r, max(2 + max_lake_r, width - 3 - max_lake_r))
         rr = rng.randint(min_lake_r, max_lake_r)
-        _fill_organic_blob(
+        _fill_multi_lobe_blob(
             grid=grid,
             biomes=biomes,
+            rng=rng,
             center_r=cr,
             center_c=cc,
             radius=rr,
@@ -878,6 +933,8 @@ def generate_biome_terrain(
             perm=organic_perm,
             noise_scale=float(worldgen.get("blob_noise_scale", 24.0)),
             roughness=float(worldgen.get("blob_noise_roughness", 0.35)),
+            min_lobes=lake_min_lobes,
+            max_lobes=lake_max_lobes,
         )
 
     # Rivers.

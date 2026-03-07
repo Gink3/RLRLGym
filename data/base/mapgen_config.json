@@ -70,6 +70,8 @@
       "max_lakes": 24,
       "lake_min_radius": 8,
       "lake_max_radius": 30,
+      "lake_min_lobes": 2,
+      "lake_max_lobes": 5,
       "min_rivers": 2,
       "max_rivers": 6,
       "river_min_width": 2,
