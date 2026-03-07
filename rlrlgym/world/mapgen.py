@@ -276,11 +276,16 @@ def _fill_organic_blob(
 
 def _paint_river(
     grid: List[List[str]],
+    biomes: Dict[Tuple[int, int], str],
     rng: random.Random,
     deep_tile: str,
     shallow_tile: str,
     min_width: int,
     max_width: int,
+    *,
+    cross_map_probability: float = 0.7,
+    endpoint_margin: int = 6,
+    meander_strength: float = 1.2,
 ) -> None:
     if not grid or not grid[0]:
         return
@@ -288,35 +293,108 @@ def _paint_river(
     w = len(grid[0])
     if h < 8 or w < 8:
         return
-    from_left = bool(rng.randint(0, 1))
-    if from_left:
-        r = rng.randint(1, h - 2)
-        c = 1
-        end_c = w - 2
-        step_c = 1
-    else:
-        r = rng.randint(1, h - 2)
-        c = w - 2
-        end_c = 1
-        step_c = -1
+    endpoint_margin = max(2, int(endpoint_margin))
+    meander_strength = max(0.0, float(meander_strength))
+    cross_map_probability = max(0.0, min(1.0, float(cross_map_probability)))
 
-    while c != end_c:
-        width = rng.randint(min_width, max_width)
-        for wc in range(-width, width + 1):
-            rr = r + wc
+    def _interior_point() -> Tuple[int, int]:
+        r_lo = max(1, endpoint_margin)
+        r_hi = min(h - 2, h - 1 - endpoint_margin)
+        c_lo = max(1, endpoint_margin)
+        c_hi = min(w - 2, w - 1 - endpoint_margin)
+        if r_lo > r_hi:
+            r_lo, r_hi = 1, h - 2
+        if c_lo > c_hi:
+            c_lo, c_hi = 1, w - 2
+        return rng.randint(r_lo, r_hi), rng.randint(c_lo, c_hi)
+
+    def _carve(r: int, c: int, width: int) -> None:
+        if r <= 0 or r >= h - 1 or c <= 0 or c >= w - 1:
+            return
+        radius = max(1, int(width))
+        for dr in range(-radius, radius + 1):
+            rr = r + dr
             if rr <= 0 or rr >= h - 1:
                 continue
-            if abs(wc) <= max(0, width // 2):
-                grid[rr][c] = deep_tile
-            else:
-                grid[rr][c] = shallow_tile
-        c += step_c
-        # Meander gently and occasionally wider bends.
-        r += rng.choice((-1, 0, 0, 0, 1))
-        r = max(1, min(h - 2, r))
+            for dc in range(-radius, radius + 1):
+                cc = c + dc
+                if cc <= 0 or cc >= w - 1:
+                    continue
+                dist = math.sqrt(float((dr * dr) + (dc * dc)))
+                if dist > float(radius):
+                    continue
+                grid[rr][cc] = deep_tile if dist <= max(1.0, float(radius) * 0.6) else shallow_tile
+                biomes[(rr, cc)] = "water"
+
+    river_is_cross_map = rng.random() < cross_map_probability
+    if river_is_cross_map:
+        horizontal = bool(rng.randint(0, 1))
+        if horizontal:
+            start_r = rng.randint(1, h - 2)
+            start_c = 1 if bool(rng.randint(0, 1)) else w - 2
+            end_r = rng.randint(1, h - 2)
+            end_c = w - 2 if start_c == 1 else 1
+        else:
+            start_r = 1 if bool(rng.randint(0, 1)) else h - 2
+            start_c = rng.randint(1, w - 2)
+            end_r = h - 2 if start_r == 1 else 1
+            end_c = rng.randint(1, w - 2)
+    else:
+        start_r, start_c = _interior_point()
+        end_r, end_c = _interior_point()
+        min_sep = max(8, min((h + w) // 6, 20))
+        retries = 0
+        while (
+            abs(start_r - end_r) + abs(start_c - end_c) < min_sep
+            and retries < 20
+        ):
+            end_r, end_c = _interior_point()
+            retries += 1
+
+    if river_is_cross_map:
+        row_min = 1
+        row_max = h - 2
+        col_min = 1
+        col_max = w - 2
+    else:
+        row_min = max(1, endpoint_margin)
+        row_max = min(h - 2, h - 1 - endpoint_margin)
+        col_min = max(1, endpoint_margin)
+        col_max = min(w - 2, w - 1 - endpoint_margin)
+        if row_min > row_max:
+            row_min, row_max = 1, h - 2
+        if col_min > col_max:
+            col_min, col_max = 1, w - 2
+
+    cur_r = start_r
+    cur_c = start_c
+    max_steps = max(24, (h + w) * 4)
+    steps = 0
+    while steps < max_steps:
+        width = rng.randint(min_width, max_width)
+        _carve(cur_r, cur_c, width)
+        if cur_r == end_r and cur_c == end_c:
+            break
+        best: Tuple[int, int] | None = None
+        best_score = float("inf")
+        candidates = [(cur_r - 1, cur_c), (cur_r + 1, cur_c), (cur_r, cur_c - 1), (cur_r, cur_c + 1)]
+        rng.shuffle(candidates)
+        for nr, nc in candidates:
+            if nr < row_min or nr > row_max or nc < col_min or nc > col_max:
+                continue
+            target = abs(nr - end_r) + abs(nc - end_c)
+            score = float(target) + (rng.random() * meander_strength)
+            if score < best_score:
+                best_score = score
+                best = (nr, nc)
+        if best is None:
+            break
+        cur_r, cur_c = best
+        # Occasional meander kick to avoid straight-line barriers.
         if rng.random() < 0.08:
-            r += rng.choice((-1, 1))
-            r = max(1, min(h - 2, r))
+            cur_r = max(row_min, min(row_max, cur_r + rng.choice((-1, 1))))
+            cur_c = max(col_min, min(col_max, cur_c + rng.choice((-1, 1))))
+        steps += 1
 
 
 def _can_place_rect(
@@ -778,7 +856,7 @@ def generate_biome_terrain(
 
     # Lakes: deep core + shallow ring.
     lake_scale = max(1, int(worldgen.get("lake_scale", 170)))
-    n_lakes = max(1, int((width * height) / float(lake_scale * lake_scale)))
+    n_lakes = max(0, int((width * height) / float(lake_scale * lake_scale)))
     n_lakes = max(n_lakes, int(worldgen.get("min_lakes", 2)))
     n_lakes = min(n_lakes, int(worldgen.get("max_lakes", 24)))
     min_lake_r = max(3, int(worldgen.get("lake_min_radius", 6)))
@@ -808,8 +886,22 @@ def generate_biome_terrain(
     n_rivers = rng.randint(min_rivers, max_rivers)
     river_w_min = max(1, int(worldgen.get("river_min_width", 2)))
     river_w_max = max(river_w_min, int(worldgen.get("river_max_width", 4)))
+    river_cross_map_probability = float(worldgen.get("river_cross_map_probability", 0.7))
+    river_endpoint_margin = int(worldgen.get("river_endpoint_margin", 6))
+    river_meander_strength = float(worldgen.get("river_meander_strength", 1.2))
     for _ in range(n_rivers):
-        _paint_river(grid, rng, deep_tile, shallow_tile, river_w_min, river_w_max)
+        _paint_river(
+            grid=grid,
+            biomes=biomes,
+            rng=rng,
+            deep_tile=deep_tile,
+            shallow_tile=shallow_tile,
+            min_width=river_w_min,
+            max_width=river_w_max,
+            cross_map_probability=river_cross_map_probability,
+            endpoint_margin=river_endpoint_margin,
+            meander_strength=river_meander_strength,
+        )
 
     _apply_shore_tiles(
         grid=grid,
