@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from .names import generate_full_name, load_name_table
+
 SCENARIO_ENV_FILE = "env_config.json"
 SCENARIO_AGENTS_FILE = "agents.json"
 
@@ -231,6 +233,7 @@ def apply_scenario_to_env_config(env_config, scenario: Scenario):
     cfg.agent_race_map = {}
     cfg.agent_class_map = {}
     cfg.agent_observation_config = {}
+    names_by_race = load_name_table()
 
     normalized_agents: List[Dict[str, object]] = []
     for idx, agent in enumerate(scenario.agents):
@@ -241,12 +244,23 @@ def apply_scenario_to_env_config(env_config, scenario: Scenario):
             cfg.agent_profile_map[aid] = agent.profile
         if agent.observation_config:
             cfg.agent_observation_config[aid] = dict(agent.observation_config)
+        normalized_name = str(agent.name or "").strip()
+        if (
+            not normalized_name
+            or normalized_name == aid
+            or normalized_name.lower() in {"default", "agent"}
+        ):
+            normalized_name = generate_full_name(
+                names_by_race,
+                race=agent.race,
+                seed_key=f"{scenario.name}:{aid}:{idx}:{agent.race}:{agent.class_name}",
+            )
         normalized_agents.append(
             {
                 "agent_id": aid,
                 "race": agent.race,
                 "class": agent.class_name,
-                "name": agent.name,
+                "name": normalized_name,
                 "profile": agent.profile,
                 "network": agent.network,
                 "observation_config": dict(agent.observation_config),

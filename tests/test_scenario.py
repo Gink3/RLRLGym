@@ -48,6 +48,23 @@ class TestScenario(unittest.TestCase):
             self.assertEqual(cfg.agent_race_map["agent_0"], "human")
             self.assertEqual(cfg.agent_class_map["agent_1"], "rogue")
             self.assertEqual(cfg.agent_profile_map["agent_1"], "orc")
+            self.assertTrue(str(cfg.agent_scenario[0].get("name", "")).strip())
+
+    def test_default_or_blank_names_are_auto_generated(self):
+        scenario = Scenario(
+            name="name_gen_case",
+            env_config={},
+            agents=[
+                ScenarioAgent(agent_id="agent_0", race="human", class_name="fighter", name="agent_0"),
+                ScenarioAgent(agent_id="agent_1", race="orc", class_name="rogue", name=""),
+            ],
+        )
+        cfg = apply_scenario_to_env_config(EnvConfig(render_enabled=False), scenario)
+        name0 = str(cfg.agent_scenario[0].get("name", "")).strip()
+        name1 = str(cfg.agent_scenario[1].get("name", "")).strip()
+        self.assertTrue(name0 and " " in name0)
+        self.assertTrue(name1 and " " in name1)
+        self.assertNotEqual(name0, "agent_0")
 
     def test_env_config_scenario_path(self):
         with tempfile.TemporaryDirectory() as tmp:

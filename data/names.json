@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "names": {
+    "human": {
+      "first_names": ["Alden", "Bryn", "Cassia", "Darian", "Elara", "Garrick", "Helena", "Rowan"],
+      "last_names": ["Ashford", "Blackwell", "Crowley", "Dunham", "Fairchild", "Merrick", "Stone", "Vale"]
+    },
+    "dragonborn": {
+      "first_names": ["Arjhan", "Balasar", "Ghesh", "Kriv", "Nala", "Rhogar", "Sora", "Torinn"],
+      "last_names": ["Clethtinthiallor", "Daardendrian", "Kepeshkmolik", "Norixius", "Shestendeliath", "Turnuroth"]
+    },
+    "dwarf": {
+      "first_names": ["Baern", "Dagna", "Eberk", "Gunnloda", "Morgran", "Orsik", "Riswynn", "Thoradin"],
+      "last_names": ["Battlehammer", "Bronzebeard", "Deepdelver", "Ironfist", "Runecaller", "Stoneforge"]
+    },
+    "elf": {
+      "first_names": ["Aelar", "Caelynn", "Enna", "Faelar", "Lia", "Myriil", "Soveliss", "Thia"],
+      "last_names": ["Amakiir", "Galanodel", "Holimion", "Liadon", "Nailo", "Siannodel", "Xiloscient"]
+    },
+    "gnome": {
+      "first_names": ["Alston", "Bimpnottin", "Caramip", "Duvamil", "Fonkin", "Nissa", "Orla", "Wrenn"],
+      "last_names": ["Beren", "Daergel", "Folkor", "Nackle", "Scheppen", "Turen"]
+    },
+    "half_elf": {
+      "first_names": ["Alaric", "Briala", "Corin", "Delara", "Eldrin", "Ilyra", "Kael", "Mira"],
+      "last_names": ["Brightwood", "Dawnsong", "Evenwood", "Moonbrook", "Rivershade", "Stormvale", "Wynmere"]
+    },
+    "half_orc": {
+      "first_names": ["Brug", "Dura", "Ghak", "Henk", "Imra", "Karg", "Myev", "Ront"],
+      "last_names": ["Bloodtusk", "Grimjaw", "Ironhide", "Skullsplitter", "Stonefang", "Warbrand"]
+    },
+    "halfling": {
+      "first_names": ["Andry", "Bree", "Cade", "Kithri", "Lyle", "Milo", "Poppy", "Seraphina"],
+      "last_names": ["Brushgather", "Goodbarrel", "Greenbottle", "Highhill", "Tealeaf", "Underbough"]
+    },
+    "orc": {
+      "first_names": ["Durog", "Grom", "Hruk", "Korga", "Magra", "Rasha", "Thok", "Zugra"],
+      "last_names": ["Bonecrusher", "Doomfist", "Ironmaw", "Skullcleaver", "Stormrage", "Warmaul"]
+    },
+    "tiefling": {
+      "first_names": ["Akmenos", "Azra", "Kairon", "Leucis", "Makaria", "Nemeia", "Orianna", "Vesper"],
+      "last_names": ["Ashenborn", "Duskwalker", "Emberveil", "Nightbrand", "Ravenscar", "Shadowmourn", "Vexley"]
+    }
+  }
+}
