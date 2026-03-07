@@ -41,7 +41,7 @@
       "id": "shallow_water",
       "glyph": "~",
       "color": "cyan",
-      "walkable": false,
+      "walkable": true,
       "spawn_weight": 0.0,
       "max_interactions": 1,
       "loot_table": []
