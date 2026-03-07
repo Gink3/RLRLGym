@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import random
 import sys
 from typing import Dict, List, Tuple
 
@@ -13,6 +14,7 @@ from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -318,6 +320,7 @@ class MapBuilderWindow(QMainWindow):
         self.args = args
         self.generated_grid: List[List[str]] = []
         self.generated_biomes: Dict[Tuple[int, int], str] = {}
+        self.last_seed: int | None = None
         self.tile_defs = load_tileset(str(args.tiles_path))
 
         root = QWidget(self)
@@ -332,6 +335,8 @@ class MapBuilderWindow(QMainWindow):
 
         self.name_edit = QLineEdit(str(args.name))
         self.seed_edit = QLineEdit(str(args.seed))
+        self.lock_seed_check = QCheckBox("Use fixed seed")
+        self.lock_seed_check.setChecked(False)
         self.width_edit = QLineEdit(str(args.width))
         self.height_edit = QLineEdit(str(args.height))
         self.tiles_path_edit = QLineEdit(str(args.tiles_path))
@@ -349,6 +354,7 @@ class MapBuilderWindow(QMainWindow):
 
         controls.addRow("Map Name", self.name_edit)
         controls.addRow("Seed", self.seed_edit)
+        controls.addRow("", self.lock_seed_check)
         controls.addRow("Width", self.width_edit)
         controls.addRow("Height", self.height_edit)
         controls.addRow("Tiles JSON", tile_path_row)
@@ -445,7 +451,11 @@ class MapBuilderWindow(QMainWindow):
         try:
             width = max(4, int(self.width_edit.text().strip() or "80"))
             height = max(4, int(self.height_edit.text().strip() or "80"))
-            seed = int(self.seed_edit.text().strip() or "7")
+            if self.lock_seed_check.isChecked():
+                seed = int(self.seed_edit.text().strip() or "7")
+            else:
+                seed = random.SystemRandom().randint(1, 2_147_483_647)
+                self.seed_edit.setText(str(seed))
             tiles_path = str(self.tiles_path_edit.text().strip() or "data/base/tiles.json")
             mapgen_path = str(self.mapgen_path_edit.text().strip() or "data/base/mapgen_config.json")
 
@@ -466,6 +476,7 @@ class MapBuilderWindow(QMainWindow):
 
             self.generated_grid = [[str(tile) for tile in row] for row in env.state.grid]
             self.generated_biomes = dict(env.state.biomes)
+            self.last_seed = seed
             self.canvas.set_map(self.generated_grid, self.generated_biomes, self.tile_defs)
             self.save_btn.setEnabled(True)
             self._update_summary(seed)
@@ -536,7 +547,7 @@ class MapBuilderWindow(QMainWindow):
             QMessageBox.warning(self, "Save map", "Generate a map first.")
             return
         name = self.name_edit.text().strip() or "generated_map"
-        seed = int(self.seed_edit.text().strip() or "7")
+        seed = self.last_seed if self.last_seed is not None else int(self.seed_edit.text().strip() or "7")
         payload = _map_payload(
             name=name,
             seed=seed,
