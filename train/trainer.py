@@ -208,9 +208,10 @@ class MultiAgentTrainer:
                         episode_teammate_dist.append(float(td))
                         episode_agent_dist[aid].append(float(td))
 
+                active_agents = [aid for aid in self.env.agents if aid in observations]
                 actions = {
                     aid: self.policies[aid].act(observations[aid], training=True)
-                    for aid in self.env.agents
+                    for aid in active_agents
                 }
 
                 next_obs, rewards, terminations, truncations, info = self.env.step(actions)
@@ -252,6 +253,8 @@ class MultiAgentTrainer:
                     episode_action_counts[name] = episode_action_counts.get(name, 0) + 1
 
                 for aid, action in actions.items():
+                    if aid not in observations:
+                        continue
                     done = bool(terminations.get(aid, False) or truncations.get(aid, False))
                     loss = self.policies[aid].update(
                         observation=observations[aid],
