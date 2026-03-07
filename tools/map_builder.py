@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym  # noqa: E402
+from rlrlgym.map_layout import parse_map_layout  # noqa: E402
 from rlrlgym.models import TileDef  # noqa: E402
 from rlrlgym.tiles import load_tileset  # noqa: E402
 
@@ -362,9 +363,11 @@ class MapBuilderWindow(QMainWindow):
 
         btns = QHBoxLayout()
         self.generate_btn = QPushButton("Generate Map")
+        self.load_btn = QPushButton("Load Map...")
         self.save_btn = QPushButton("Save Map As...")
         self.save_btn.setEnabled(False)
         btns.addWidget(self.generate_btn)
+        btns.addWidget(self.load_btn)
         btns.addWidget(self.save_btn)
         left.addLayout(btns)
 
@@ -392,6 +395,7 @@ class MapBuilderWindow(QMainWindow):
         self.browse_tiles_btn.clicked.connect(self._pick_tiles)
         self.browse_mapgen_btn.clicked.connect(self._pick_mapgen)
         self.generate_btn.clicked.connect(self._generate_map)
+        self.load_btn.clicked.connect(self._load_map)
         self.save_btn.clicked.connect(self._save_map)
 
         self._apply_dark_theme()
@@ -483,6 +487,36 @@ class MapBuilderWindow(QMainWindow):
             self._update_legend()
         except Exception as exc:
             QMessageBox.critical(self, "Map generation failed", str(exc))
+
+    def _load_map(self) -> None:
+        p, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load map JSON",
+            str(Path("data/maps")),
+            "JSON (*.json)",
+        )
+        if not p:
+            return
+        try:
+            raw = json.loads(Path(p).read_text(encoding="utf-8"))
+            layout = parse_map_layout(raw)
+            body = raw.get("map", raw) if isinstance(raw, dict) else {}
+            seed_val = int(body.get("seed", self.last_seed if self.last_seed is not None else 7))
+
+            self.generated_grid = [[str(tile) for tile in row] for row in layout.grid]
+            self.generated_biomes = dict(layout.biomes)
+            self.last_seed = seed_val
+            self.seed_edit.setText(str(seed_val))
+            self.width_edit.setText(str(len(self.generated_grid[0]) if self.generated_grid else 0))
+            self.height_edit.setText(str(len(self.generated_grid)))
+            if layout.name.strip():
+                self.name_edit.setText(layout.name.strip())
+            self.canvas.set_map(self.generated_grid, self.generated_biomes, self.tile_defs)
+            self.save_btn.setEnabled(True)
+            self._update_summary(seed_val)
+            self._update_legend()
+        except Exception as exc:
+            QMessageBox.critical(self, "Load map failed", str(exc))
 
     def _update_summary(self, seed: int) -> None:
         grid = self.generated_grid
