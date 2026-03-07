@@ -144,9 +144,9 @@ class EnvConfig:
     max_steps: int = 150
     n_agents: int = 2
     tiles_path: str = str(Path("data") / "base" / "tiles.json")
-    profiles_path: str = str(Path("data") / "base" / "agent_profiles.json")
-    races_path: str = str(Path("data") / "base" / "agent_races.json")
-    classes_path: str = str(Path("data") / "base" / "agent_classes.json")
+    profiles_path: str = str(Path("data") / "base" / "agent" / "agent_profiles.json")
+    races_path: str = str(Path("data") / "base" / "agent" / "agent_races.json")
+    classes_path: str = str(Path("data") / "base" / "agent" / "agent_classes.json")
     items_path: str = str(Path("data") / "base" / "items.json")
     monsters_path: str = str(Path("data") / "base" / "monsters.json")
     animals_path: str = str(Path("data") / "base" / "animals.json")

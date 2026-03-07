@@ -188,10 +188,10 @@ class ScenarioEditorWindow(QMainWindow):
         self.setWindowTitle("RLRLGym Scenario Editor (PyQt6)")
         self.resize(1300, 850)
 
-        self.races = load_races("data/base/agent_races.json")
-        self.classes = load_classes("data/base/agent_classes.json")
-        self.profiles = load_profiles("data/base/agent_profiles.json")
-        self.networks = load_network_configs("data/base/agent_networks.json")
+        self.races = load_races("data/base/agent/agent_races.json")
+        self.classes = load_classes("data/base/agent/agent_classes.json")
+        self.profiles = load_profiles("data/base/agent/agent_profiles.json")
+        self.networks = load_network_configs("data/base/agent/agent_networks.json")
         self.default_env_config = self._load_default_env_config()
         self.maps_dir = Path("data/maps")
 

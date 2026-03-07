@@ -4,8 +4,8 @@ RougeLike Reinforcement Learning Gym
 ## Terminology
 
 - `Agent`: a single controllable unit in the environment (for example `agent_0`), with inventory, skills, health, hunger, faction state, race, and class.
-- `Race`: the base stat template for an agent (strength/dexterity/intellect and damage-resistance traits) loaded from `data/base/agent_races.json`.
-- `Class`: the starting role package for an agent (starting items and initial skill modifiers) loaded from `data/base/agent_classes.json`.
+- `Race`: the base stat template for an agent (strength/dexterity/intellect and damage-resistance traits) loaded from `data/base/agent/agent_races.json`.
+- `Class`: the starting role package for an agent (starting items and initial skill modifiers) loaded from `data/base/agent/agent_classes.json`.
 - `Scenario`: a runnable setup file containing `env_config` values plus an explicit list of agents (race/class/profile/network choices), typically stored in `data/scenarios/`.
 
 ## Minimal Running Example
@@ -166,7 +166,7 @@ Outputs include:
 - RLlib metrics/checkpoints in the selected output directory
 - (custom backend only) `neural_policies.json` checkpoint
 
-Network architectures are defined in `data/base/agent_networks.json` by profile name
+Network architectures are defined in `data/base/agent/agent_networks.json` by profile name
 (for example `default`, and optionally per-profile variants).
 
 Install RLlib:
@@ -184,7 +184,7 @@ python3 -m train --backend rllib --iterations 50 --max-steps 120 --output-dir ou
 Legacy custom backend example:
 
 ```bash
-python3 -m train --backend custom --episodes 100 --max-steps 120 --output-dir outputs/train/custom --networks-path data/base/agent_networks.json
+python3 -m train --backend custom --episodes 100 --max-steps 120 --output-dir outputs/train/custom --networks-path data/base/agent/agent_networks.json
 ```
 
 Scenario-driven custom training (one NN per agent in scenario roster):
@@ -226,7 +226,7 @@ python3 -m unittest discover -s tests -q
 
 - PettingZoo Parallel-style multi-agent environment with `reset(seed, options)` / `step(actions)`
 - Configurable per-agent observations
-- Agent profile system loaded from `data/base/agent_profiles.json` with descriptive reward/network profile names
+- Agent profile system loaded from `data/base/agent/agent_profiles.json` with descriptive reward/network profile names
 - JSON tile schema with required `schema_version` and required tile fields
 - Reward shaping with interaction caps and anti-exploit penalties
 - Window-only rendering with playback controls and focused zoom

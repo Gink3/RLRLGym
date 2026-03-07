@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--width", type=int, default=None)
     p.add_argument("--height", type=int, default=None)
     p.add_argument("--agents", type=int, default=None)
-    p.add_argument("--networks-path", type=str, default="data/base/agent_networks.json")
+    p.add_argument("--networks-path", type=str, default="data/base/agent/agent_networks.json")
     p.add_argument("--iterations", type=int, default=50)
     p.add_argument("--framework", type=str, default="torch")
     p.add_argument("--num-gpus", type=float, default=0.0)

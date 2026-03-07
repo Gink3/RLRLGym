@@ -113,5 +113,4 @@ These increase downstream rewards by reducing damage taken and improving team co
 
 ## Profile-Based Reward Shaping
 
-`AgentProfile.reward_adjustment(...)` applies additional reward deltas from profile event weights (`data/agent_profiles.json`) on top of the base system.
-
+`AgentProfile.reward_adjustment(...)` applies additional reward deltas from profile event weights (`data/base/agent/agent_profiles.json`) on top of the base system.

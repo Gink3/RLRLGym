@@ -33,7 +33,7 @@ class TrainConfig:
     height: Optional[int] = None
     n_agents: Optional[int] = None
     render_enabled: bool = False
-    networks_path: str = "data/base/agent_networks.json"
+    networks_path: str = "data/base/agent/agent_networks.json"
     agent_profile_map: Dict[str, str] | None = None
     progress_window: int = 50
     show_progress: bool = True
