@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Tuple
 from ..systems.models import TileDef
 from ..content.tiles import weighted_tile_ids, weighted_tile_weights
 
+OPEN_WATER_TILE_IDS = {"water", "shallow_water", "deep_water"}
 
 def _weighted_choice(
     rng: random.Random, ids: List[str], cum_weights: List[float]
@@ -439,6 +440,143 @@ def _place_structures(
             placed += 1
 
 
+def _gaussian_kernel_1d(sigma: float, radius: int) -> List[float]:
+    radius = max(1, int(radius))
+    sigma = max(0.5, float(sigma))
+    vals: List[float] = []
+    denom = 2.0 * sigma * sigma
+    for i in range(-radius, radius + 1):
+        vals.append(math.exp(-(float(i * i)) / denom))
+    total = sum(vals)
+    if total <= 0.0:
+        return [1.0 / float((radius * 2) + 1)] * ((radius * 2) + 1)
+    return [v / total for v in vals]
+
+
+def _blur_mask(mask: List[List[float]], sigma: float, radius: int) -> List[List[float]]:
+    if not mask or not mask[0]:
+        return mask
+    h = len(mask)
+    w = len(mask[0])
+    kernel = _gaussian_kernel_1d(sigma=sigma, radius=radius)
+    kr = len(kernel) // 2
+
+    # Horizontal pass.
+    tmp: List[List[float]] = [[0.0 for _ in range(w)] for _ in range(h)]
+    for r in range(h):
+        row = mask[r]
+        out_row = tmp[r]
+        for c in range(w):
+            s = 0.0
+            for ki, kv in enumerate(kernel):
+                cc = c + (ki - kr)
+                if cc < 0:
+                    cc = 0
+                elif cc >= w:
+                    cc = w - 1
+                s += row[cc] * kv
+            out_row[c] = s
+
+    # Vertical pass.
+    out: List[List[float]] = [[0.0 for _ in range(w)] for _ in range(h)]
+    for r in range(h):
+        out_row = out[r]
+        for c in range(w):
+            s = 0.0
+            for ki, kv in enumerate(kernel):
+                rr = r + (ki - kr)
+                if rr < 0:
+                    rr = 0
+                elif rr >= h:
+                    rr = h - 1
+                s += tmp[rr][c] * kv
+            out_row[c] = s
+    return out
+
+
+def _apply_forest_density_mask(
+    grid: List[List[str]],
+    biomes: Dict[Tuple[int, int], str],
+    rng: random.Random,
+    *,
+    forest_blobs: int,
+    forest_radius: int,
+    tree_tile: str,
+    bush_tile: str,
+    fallback_floor: str,
+    worldgen: Dict[str, object],
+) -> None:
+    if not grid or not grid[0] or forest_blobs <= 0:
+        return
+    h = len(grid)
+    w = len(grid[0])
+    if h < 6 or w < 6:
+        return
+
+    mask: List[List[float]] = [[0.0 for _ in range(w)] for _ in range(h)]
+    perm = _build_permutation(rng)
+    warp_scale = max(8.0, float(worldgen.get("forest_warp_scale", 26.0)))
+    warp_strength = max(0.0, min(0.5, float(worldgen.get("forest_warp_strength", 0.15))))
+
+    for _ in range(forest_blobs):
+        cr = rng.randint(2 + forest_radius, max(2 + forest_radius, h - 3 - forest_radius))
+        cc = rng.randint(2 + forest_radius, max(2 + forest_radius, w - 3 - forest_radius))
+        rr = float(max(1, forest_radius))
+        r0 = max(1, cr - forest_radius)
+        r1 = min(h - 2, cr + forest_radius)
+        c0 = max(1, cc - forest_radius)
+        c1 = min(w - 2, cc + forest_radius)
+        for r in range(r0, r1 + 1):
+            dr = float(r - cr) / rr
+            for c in range(c0, c1 + 1):
+                dc = float(c - cc) / rr
+                d = math.sqrt((dr * dr) + (dc * dc))
+                if d > 1.1:
+                    continue
+                base = max(0.0, 1.0 - d)
+                if base <= 0.0:
+                    continue
+                n = _fractal_noise_2d(float(c) / warp_scale, float(r) / warp_scale, perm, octaves=3)
+                warped = max(0.0, min(1.0, base + ((n - 0.5) * 2.0 * warp_strength)))
+                if warped > mask[r][c]:
+                    mask[r][c] = warped
+
+    sigma = max(0.6, float(worldgen.get("forest_blur_sigma", 1.9)))
+    blur_radius = max(1, int(worldgen.get("forest_blur_radius", 3)))
+    mask = _blur_mask(mask, sigma=sigma, radius=blur_radius)
+
+    tree_threshold = max(0.30, min(0.95, float(worldgen.get("forest_tree_threshold", 0.62))))
+    bush_threshold = max(0.08, min(tree_threshold - 0.02, float(worldgen.get("forest_bush_threshold", 0.32))))
+    max_tree_density = max(0.1, min(0.95, float(worldgen.get("forest_max_tree_density", 0.72))))
+    min_tree_density = max(0.0, min(max_tree_density, float(worldgen.get("forest_min_tree_density", 0.16))))
+
+    for r in range(1, h - 1):
+        for c in range(1, w - 1):
+            if grid[r][c] in OPEN_WATER_TILE_IDS:
+                continue
+            density = mask[r][c]
+            if density < bush_threshold:
+                continue
+            biomes[(r, c)] = "forest"
+            if density >= tree_threshold:
+                scale = (density - tree_threshold) / max(1e-6, 1.0 - tree_threshold)
+                tree_prob = min_tree_density + ((max_tree_density - min_tree_density) * scale)
+                if rng.random() < tree_prob:
+                    grid[r][c] = tree_tile
+                elif rng.random() < 0.7:
+                    grid[r][c] = bush_tile
+                else:
+                    grid[r][c] = fallback_floor
+            else:
+                t = (density - bush_threshold) / max(1e-6, tree_threshold - bush_threshold)
+                if rng.random() < (0.75 * t):
+                    grid[r][c] = bush_tile
+                elif rng.random() < (0.12 * t):
+                    grid[r][c] = tree_tile
+                else:
+                    grid[r][c] = fallback_floor
+
+
 def generate_biome_terrain(
     width: int,
     height: int,
@@ -473,6 +611,7 @@ def generate_biome_terrain(
     global_cum = _cum_weights(global_tile_weights if global_tile_weights else [1.0])
     if not global_tile_ids:
         global_tile_ids = [floor_id]
+    allow_scattered_open_water = bool(worldgen.get("allow_scattered_open_water", False))
     for row in biome_defs:
         bid = str(row.get("id", "")).strip()
         if not bid:
@@ -486,6 +625,9 @@ def generate_biome_terrain(
             for tid, weight in raw.items():
                 stid = str(tid)
                 if stid not in tiles:
+                    continue
+                if not allow_scattered_open_water and stid in OPEN_WATER_TILE_IDS:
+                    # Keep open-water placement controlled by dedicated lake/river passes.
                     continue
                 tile_ids.append(stid)
                 tile_weights.append(max(0.0, float(weight)))
@@ -574,22 +716,17 @@ def generate_biome_terrain(
     forest_radius = max(8, int(worldgen.get("forest_cluster_radius", 22)))
     stone_radius = max(8, int(worldgen.get("stone_cluster_radius", 18)))
 
-    for _ in range(forest_blobs):
-        cr = rng.randint(2 + forest_radius, max(2 + forest_radius, height - 3 - forest_radius))
-        cc = rng.randint(2 + forest_radius, max(2 + forest_radius, width - 3 - forest_radius))
-        _fill_organic_blob(
-            grid=grid,
-            biomes=biomes,
-            center_r=cr,
-            center_c=cc,
-            radius=forest_radius,
-            fill_tile_id=tree_tile,
-            edge_tile_id="bush" if "bush" in tiles else tree_tile,
-            biome_id="forest",
-            perm=organic_perm,
-            noise_scale=float(worldgen.get("blob_noise_scale", 24.0)),
-            roughness=float(worldgen.get("blob_noise_roughness", 0.35)),
-        )
+    _apply_forest_density_mask(
+        grid=grid,
+        biomes=biomes,
+        rng=rng,
+        forest_blobs=forest_blobs,
+        forest_radius=forest_radius,
+        tree_tile=tree_tile,
+        bush_tile="bush" if "bush" in tiles else tree_tile,
+        fallback_floor=floor_id,
+        worldgen=worldgen,
+    )
 
     for _ in range(stone_blobs):
         cr = rng.randint(2 + stone_radius, max(2 + stone_radius, height - 3 - stone_radius))
