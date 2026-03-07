@@ -20,6 +20,15 @@
       "loot_table": []
     },
     {
+      "id": "indestructible_wall",
+      "glyph": "#",
+      "color": "white",
+      "walkable": false,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
       "id": "water",
       "glyph": "~",
       "color": "blue",

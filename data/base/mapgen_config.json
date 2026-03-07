@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "mapgen": {
-    "wall_tile_id": "stone_wall",
+    "wall_tile_id": "indestructible_wall",
     "floor_fallback_id": "grass",
     "chest_density": 0.06,
     "monster_density": 0.05,

@@ -506,7 +506,7 @@ def generate_map(
     height: int,
     tiles: Dict[str, TileDef],
     rng: random.Random,
-    wall_tile_id: str = "wall",
+    wall_tile_id: str = "indestructible_wall",
     floor_fallback_id: str = "floor",
     min_width: int = 4,
     min_height: int = 4,

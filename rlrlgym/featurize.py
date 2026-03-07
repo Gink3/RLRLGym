@@ -7,6 +7,7 @@ from typing import Dict, List
 TILE_VOCAB = [
     "floor",
     "wall",
+    "indestructible_wall",
     "water",
     "shallow_water",
     "deep_water",

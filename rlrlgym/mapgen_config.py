@@ -19,7 +19,7 @@ REQUIRED_MAPGEN_FIELDS = {
 
 @dataclass
 class MapGenConfig:
-    wall_tile_id: str = "wall"
+    wall_tile_id: str = "indestructible_wall"
     floor_fallback_id: str = "floor"
     chest_density: float = 0.02
     monster_density: float = 0.0
