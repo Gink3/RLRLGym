@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import (
+from rlrlgym.systems.constants import (
     ACTION_EAT,
     ACTION_INTERACT,
     ACTION_LOOT,

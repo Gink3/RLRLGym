@@ -1,9 +1,9 @@
 import random
 import unittest
 
-from rlrlgym.mapgen import generate_biome_terrain
-from rlrlgym.mapgen_config import load_mapgen_config
-from rlrlgym.tiles import load_tileset
+from rlrlgym.world.mapgen import generate_biome_terrain
+from rlrlgym.world.mapgen_config import load_mapgen_config
+from rlrlgym.content.tiles import load_tileset
 
 
 class TestMapgenShapeControls(unittest.TestCase):

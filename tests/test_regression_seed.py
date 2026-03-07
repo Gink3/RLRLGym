@@ -1,7 +1,7 @@
 import unittest
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import ACTION_WAIT
+from rlrlgym.systems.constants import ACTION_WAIT
 
 
 class TestRegressionSeed(unittest.TestCase):

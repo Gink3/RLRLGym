@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.monsters import load_monster_spawns, load_monsters
+from rlrlgym.content.monsters import load_monster_spawns, load_monsters
 
 
 class TestMonstersJson(unittest.TestCase):

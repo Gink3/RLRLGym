@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.tiles import load_tileset
+from rlrlgym.content.tiles import load_tileset
 
 
 class TestTiles(unittest.TestCase):

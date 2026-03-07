@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 
 from rlrlgym import EnvConfig
-from rlrlgym.env import PettingZooParallelRLRLGym
-from rlrlgym.scenario import (
+from rlrlgym.world.env import PettingZooParallelRLRLGym
+from rlrlgym.systems.scenario import (
     SCENARIO_AGENTS_FILE,
     SCENARIO_ENV_FILE,
     apply_scenario_to_env_config,

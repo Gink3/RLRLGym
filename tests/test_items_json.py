@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.items import load_items
+from rlrlgym.content.items import load_items
 
 
 class TestItemsJson(unittest.TestCase):

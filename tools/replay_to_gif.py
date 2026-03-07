@@ -11,7 +11,7 @@ from typing import Dict, List, Set
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rlrlgym.tiles import load_tileset  # noqa: E402
+from rlrlgym.content.tiles import load_tileset  # noqa: E402
 
 try:
     from PIL import Image, ImageDraw, ImageFont

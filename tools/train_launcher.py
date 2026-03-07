@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rlrlgym.themes import (  # noqa: E402
+from rlrlgym.world.themes import (  # noqa: E402
     get_theme,
     list_theme_names,
     load_selected_theme,

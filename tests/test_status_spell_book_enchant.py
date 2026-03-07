@@ -1,7 +1,7 @@
 import unittest
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import ACTION_GIVE, ACTION_USE, ACTION_WAIT
+from rlrlgym.systems.constants import ACTION_GIVE, ACTION_USE, ACTION_WAIT
 
 
 class TestStatusSpellBookEnchant(unittest.TestCase):

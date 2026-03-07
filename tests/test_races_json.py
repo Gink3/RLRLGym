@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.races import load_races
+from rlrlgym.content.races import load_races
 
 
 class TestRacesJson(unittest.TestCase):

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import (
+from rlrlgym.systems.constants import (
     ACTION_ATTACK,
     ACTION_DEFEND,
     ACTION_EQUIP,
@@ -19,8 +19,8 @@ from rlrlgym.constants import (
     ACTION_TRADE,
     ACTION_WAIT,
 )
-from rlrlgym.env import DAMAGE_TYPE_BLUNT, DAMAGE_TYPE_PIERCE, DAMAGE_TYPE_SLASH
-from rlrlgym.models import MonsterState
+from rlrlgym.world.env import DAMAGE_TYPE_BLUNT, DAMAGE_TYPE_PIERCE, DAMAGE_TYPE_SLASH
+from rlrlgym.systems.models import MonsterState
 
 
 class TestEnv(unittest.TestCase):

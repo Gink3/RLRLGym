@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import ACTION_NAMES
-from rlrlgym.scenario import estimate_max_networks
+from rlrlgym.systems.constants import ACTION_NAMES
+from rlrlgym.systems.scenario import estimate_max_networks
 
 from .aim_logger import AimLogger
 from .data_archive import archive_training_inputs

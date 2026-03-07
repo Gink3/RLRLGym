@@ -31,11 +31,11 @@ from PyQt6.QtWidgets import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rlrlgym.classes import load_classes  # noqa: E402
-from rlrlgym.env import EnvConfig  # noqa: E402
-from rlrlgym.profiles import load_profiles  # noqa: E402
-from rlrlgym.races import load_races  # noqa: E402
-from rlrlgym.scenario import (  # noqa: E402
+from rlrlgym.content.classes import load_classes  # noqa: E402
+from rlrlgym.world.env import EnvConfig  # noqa: E402
+from rlrlgym.content.profiles import load_profiles  # noqa: E402
+from rlrlgym.content.races import load_races  # noqa: E402
+from rlrlgym.systems.scenario import (  # noqa: E402
     SCENARIO_AGENTS_FILE,
     SCENARIO_ENV_FILE,
     Scenario,

@@ -30,8 +30,8 @@ from PyQt6.QtWidgets import (
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from rlrlgym.env import PLANT_TYPES  # noqa: E402
-from rlrlgym.tiles import load_tileset  # noqa: E402
+from rlrlgym.world.env import PLANT_TYPES  # noqa: E402
+from rlrlgym.content.tiles import load_tileset  # noqa: E402
 
 
 COLOR_MAP: Dict[str, str] = {

@@ -1,6 +1,6 @@
 import unittest
 
-from rlrlgym.animals import load_animals
+from rlrlgym.content.animals import load_animals
 
 
 class TestAnimalsJson(unittest.TestCase):

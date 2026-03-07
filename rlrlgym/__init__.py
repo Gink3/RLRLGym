@@ -1,17 +1,17 @@
 """RLRLGym package."""
 
-from .classes import AgentClass, load_classes
+from .content.classes import AgentClass, load_classes
 from .content import load_structures_config, parse_structures_config
-from .env import EnvConfig, MultiAgentRLRLGym
-from .env import PettingZooParallelRLRLGym
-from .featurize import observation_vector_size, vectorize_observation
-from .items import ItemCatalog, ItemDef, WeaponDef, load_items
-from .mapgen_config import MapGenConfig, load_mapgen_config
-from .monsters import load_monster_spawns, load_monsters
-from .profiles import AgentProfile, load_profiles
-from .races import AgentRace, load_races
-from .render import PlaybackController, RenderWindow
-from .scenario import (
+from .world.env import EnvConfig, MultiAgentRLRLGym
+from .world.env import PettingZooParallelRLRLGym
+from .systems.featurize import observation_vector_size, vectorize_observation
+from .content.items import ItemCatalog, ItemDef, WeaponDef, load_items
+from .world.mapgen_config import MapGenConfig, load_mapgen_config
+from .content.monsters import load_monster_spawns, load_monsters
+from .content.profiles import AgentProfile, load_profiles
+from .content.races import AgentRace, load_races
+from .world.render import PlaybackController, RenderWindow
+from .systems.scenario import (
     Scenario,
     ScenarioAgent,
     agent_combined_payload,
@@ -21,7 +21,7 @@ from .scenario import (
     make_all_race_class_combinations,
     save_scenario,
 )
-from .vector_env import SyncVectorEnv
+from .world.vector_env import SyncVectorEnv
 from . import content, systems, world
 
 __all__ = [

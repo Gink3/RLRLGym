@@ -1,7 +1,7 @@
 import unittest
 
-from rlrlgym.featurize import observation_vector_size
-from rlrlgym.rllib_env import RLRLGymRLlibEnv
+from rlrlgym.systems.featurize import observation_vector_size
+from rlrlgym.world.rllib_env import RLRLGymRLlibEnv
 
 try:
     import numpy as np

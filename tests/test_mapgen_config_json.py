@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.mapgen_config import load_mapgen_config
+from rlrlgym.world.mapgen_config import load_mapgen_config
 
 
 class TestMapgenConfigJson(unittest.TestCase):

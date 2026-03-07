@@ -1,8 +1,8 @@
 import unittest
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import ACTION_INTERACT, ACTION_WAIT
-from rlrlgym.models import AnimalState
+from rlrlgym.systems.constants import ACTION_INTERACT, ACTION_WAIT
+from rlrlgym.systems.models import AnimalState
 
 
 class TestAnimals(unittest.TestCase):

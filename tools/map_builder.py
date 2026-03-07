@@ -34,9 +34,9 @@ from PyQt6.QtWidgets import (
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym  # noqa: E402
-from rlrlgym.map_layout import parse_map_layout  # noqa: E402
-from rlrlgym.models import TileDef  # noqa: E402
-from rlrlgym.tiles import load_tileset  # noqa: E402
+from rlrlgym.world.map_layout import parse_map_layout  # noqa: E402
+from rlrlgym.systems.models import TileDef  # noqa: E402
+from rlrlgym.content.tiles import load_tileset  # noqa: E402
 
 
 TILE_SIZE = 32

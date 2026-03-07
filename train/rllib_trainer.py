@@ -15,7 +15,7 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-from rlrlgym.curriculum import load_curriculum_phases
+from rlrlgym.systems.curriculum import load_curriculum_phases
 
 from .aim_logger import AimLogger
 from .data_archive import archive_training_inputs
@@ -61,7 +61,7 @@ class RLlibTrainer:
             from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec
             from ray.rllib.core.rl_module.rl_module import RLModuleSpec
             from ray.tune.registry import register_env
-            from rlrlgym.rllib_env import RLRLGymRLlibEnv
+            from rlrlgym.world.rllib_env import RLRLGymRLlibEnv
         except Exception as exc:  # pragma: no cover - dependency/runtime specific
             raise RuntimeError(
                 "RLlib backend requires dependencies. Install with: "

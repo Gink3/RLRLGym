@@ -1,8 +1,8 @@
 import unittest
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.constants import ACTION_EQUIP, ACTION_INTERACT, ACTION_INTERACT_MINE, ACTION_INTERACT_STATION
-from rlrlgym.models import ResourceNodeState, StationState
+from rlrlgym.systems.constants import ACTION_EQUIP, ACTION_INTERACT, ACTION_INTERACT_MINE, ACTION_INTERACT_STATION
+from rlrlgym.systems.models import ResourceNodeState, StationState
 
 
 class TestGatherAndCrafting(unittest.TestCase):

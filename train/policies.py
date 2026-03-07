@@ -7,7 +7,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence, Tuple
 
-from rlrlgym.featurize import vectorize_observation
+from rlrlgym.systems.featurize import vectorize_observation
 
 from .network_config import NetworkConfig
 

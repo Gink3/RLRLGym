@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.map_layout import load_map_layout
+from rlrlgym.world.map_layout import load_map_layout
 
 
 class TestMapLayout(unittest.TestCase):

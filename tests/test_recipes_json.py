@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.recipes import load_recipes
+from rlrlgym.content.recipes import load_recipes
 
 
 class TestRecipesJson(unittest.TestCase):

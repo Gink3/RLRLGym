@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.curriculum import load_curriculum_phases
+from rlrlgym.systems.curriculum import load_curriculum_phases
 
 
 class TestCurriculumJson(unittest.TestCase):

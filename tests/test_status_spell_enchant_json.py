@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.enchantments import load_enchantments
-from rlrlgym.spells import load_spells
-from rlrlgym.statuses import load_statuses
+from rlrlgym.content.enchantments import load_enchantments
+from rlrlgym.content.spells import load_spells
+from rlrlgym.content.statuses import load_statuses
 
 
 class TestStatusSpellEnchantJson(unittest.TestCase):

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.env import EnvConfig
+from rlrlgym.world.env import EnvConfig
 
 
 class TestEnvConfigJson(unittest.TestCase):

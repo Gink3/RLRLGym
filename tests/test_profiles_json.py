@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.profiles import load_profiles
+from rlrlgym.content.profiles import load_profiles
 
 
 class TestProfilesJson(unittest.TestCase):
