@@ -43,7 +43,7 @@
         "weight": 0.2,
         "tile_weights": {
           "stone_floor": 0.62,
-          "stone_wall": 0.22,
+          "rock_wall": 0.22,
           "grass": 0.05,
           "herb_plant": 0.05,
           "shallow_water": 0.02,
@@ -58,7 +58,7 @@
       "shallow_water_tile_id": "shallow_water",
       "deep_water_tile_id": "deep_water",
       "tree_tile_id": "tree",
-      "stone_tile_id": "stone_wall",
+      "stone_tile_id": "rock_wall",
       "lake_scale": 170,
       "min_lakes": 3,
       "max_lakes": 24,
@@ -135,7 +135,7 @@
         "density": 0.006,
         "speed_multiplier": 1.0,
         "quality_tier": 0,
-        "unlock_recipes": ["craft_wood_wall", "craft_stone_wall"]
+        "unlock_recipes": ["craft_wood_wall", "craft_rock_wall"]
       },
       {
         "id": "smelter",
@@ -150,21 +150,6 @@
         "speed_multiplier": 1.0,
         "quality_tier": 1,
         "unlock_recipes": ["mint_copper_coin", "mint_silver_coin", "mint_gold_coin"]
-      }
-    ],
-    "structures": [
-      {
-        "id": "ruins",
-        "density": 0.0035,
-        "min_count": 1,
-        "max_count": 6,
-        "min_width": 6,
-        "max_width": 12,
-        "min_height": 6,
-        "max_height": 12,
-        "wall_tile_id": "stone_wall",
-        "floor_tile_id": "stone_floor",
-        "biome_id": "ruins"
       }
     ]
   }

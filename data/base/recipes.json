@@ -39,14 +39,14 @@
       "tags": ["construction", "wall"]
     },
     {
-      "id": "craft_stone_wall",
+      "id": "craft_rock_wall",
       "inputs": {"stone": 4},
       "outputs": {},
       "skill": "crafting",
       "min_skill": 1,
       "station": "workbench",
       "craft_time": 3,
-      "build_tile_id": "stone_wall",
+      "build_tile_id": "rock_wall",
       "speed_multiplier": 1.0,
       "quality_bonus": 0.0,
       "tags": ["construction", "wall"]

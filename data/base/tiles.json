@@ -155,6 +155,15 @@
       "loot_table": []
     },
     {
+      "id": "rock_wall",
+      "glyph": "X",
+      "color": "bright_black",
+      "walkable": false,
+      "spawn_weight": 0.0,
+      "max_interactions": 5,
+      "loot_table": []
+    },
+    {
       "id": "stone_wall",
       "glyph": "X",
       "color": "bright_black",

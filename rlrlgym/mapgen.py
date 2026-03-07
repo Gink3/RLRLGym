@@ -407,7 +407,7 @@ def _place_structures(
         max_w = max(min_w, int(row.get("max_width", 12)))
         min_h = max(5, int(row.get("min_height", 6)))
         max_h = max(min_h, int(row.get("max_height", 12)))
-        wall_tile = _valid_tile(tiles, str(row.get("wall_tile_id", "stone_wall")), "stone_wall")
+        wall_tile = _valid_tile(tiles, str(row.get("wall_tile_id", "rock_wall")), "rock_wall")
         floor_tile = _valid_tile(tiles, str(row.get("floor_tile_id", floor_fallback_id)), floor_fallback_id)
         biome_id = str(row.get("biome_id", "ruins")).strip() or "ruins"
 
@@ -463,7 +463,7 @@ def generate_biome_terrain(
     shallow_tile = _valid_tile(tiles, str(worldgen.get("shallow_water_tile_id", "shallow_water")), "water")
     deep_tile = _valid_tile(tiles, str(worldgen.get("deep_water_tile_id", "deep_water")), shallow_tile)
     tree_tile = _valid_tile(tiles, str(worldgen.get("tree_tile_id", "tree")), floor_id)
-    stone_tile = _valid_tile(tiles, str(worldgen.get("stone_tile_id", "stone_wall")), wall_id)
+    stone_tile = _valid_tile(tiles, str(worldgen.get("stone_tile_id", "rock_wall")), wall_id)
 
     biome_ids: List[str] = []
     biome_weights: List[float] = []

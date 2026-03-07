@@ -8,7 +8,7 @@ Construction is implemented as a recipe variant:
 
 - A construction recipe sets `build_tile_id` (and may leave `outputs` empty).
 - Construction is triggered through station interaction via `ACTION_INTERACT`.
-- Current base construction recipes are wall placements (`wood_wall`, `stone_wall`).
+- Current base construction recipes are wall placements (`wood_wall`, `rock_wall`).
 
 Core runtime logic is in:
 
@@ -56,7 +56,7 @@ A build target must:
 Base recipes:
 
 - `craft_wood_wall` -> places `wood_wall`
-- `craft_stone_wall` -> places `stone_wall`
+- `craft_rock_wall` -> places `rock_wall`
 
 Both are currently unlocked through `workbench` station spawns.
 

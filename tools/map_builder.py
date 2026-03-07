@@ -118,7 +118,7 @@ class TileSprites:
             p.drawRect(13, 16, 6, 12)
             p.setBrush(QColor("#2f8b45"))
             p.drawEllipse(5, 5, 22, 16)
-        elif tile_id in {"wall", "stone_wall", "wood_wall", "indestructible_wall"}:
+        elif tile_id in {"wall", "stone_wall", "rock_wall", "wood_wall", "indestructible_wall"}:
             if tile_id == "wood_wall":
                 self._paint_wood_wall(p)
             elif tile_id == "indestructible_wall":
