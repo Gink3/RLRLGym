@@ -629,6 +629,54 @@ def _apply_shore_tiles(
                 biomes[(r, c)] = "shore_dirt"
 
 
+def _apply_dirt_patches(
+    grid: List[List[str]],
+    biomes: Dict[Tuple[int, int], str],
+    rng: random.Random,
+    *,
+    dirt_tile: str,
+    worldgen: Dict[str, object],
+) -> None:
+    if not grid or not grid[0]:
+        return
+    h = len(grid)
+    w = len(grid[0])
+    area = h * w
+    patch_scale = max(1, int(worldgen.get("dirt_cluster_scale", 150 * 150)))
+    patch_count = max(1, int(area / float(patch_scale)))
+    patch_count = max(patch_count, int(worldgen.get("min_dirt_clusters", 2)))
+    patch_count = min(patch_count, int(worldgen.get("max_dirt_clusters", 20)))
+    patch_radius = max(4, int(worldgen.get("dirt_cluster_radius", 12)))
+    perm = _build_permutation(rng)
+    nscale = max(6.0, float(worldgen.get("dirt_cluster_noise_scale", 18.0)))
+    roughness = max(0.1, min(0.7, float(worldgen.get("dirt_cluster_roughness", 0.28))))
+    for _ in range(patch_count):
+        cr = rng.randint(2 + patch_radius, max(2 + patch_radius, h - 3 - patch_radius))
+        cc = rng.randint(2 + patch_radius, max(2 + patch_radius, w - 3 - patch_radius))
+        rr = float(max(1, patch_radius))
+        r0 = max(1, cr - patch_radius)
+        r1 = min(h - 2, cr + patch_radius)
+        c0 = max(1, cc - patch_radius)
+        c1 = min(w - 2, cc + patch_radius)
+        for r in range(r0, r1 + 1):
+            dr = float(r - cr) / rr
+            for c in range(c0, c1 + 1):
+                if grid[r][c] in OPEN_WATER_TILE_IDS:
+                    continue
+                if grid[r][c] in {"indestructible_wall", "rock_wall", "wood_wall", "tree"}:
+                    continue
+                dc = float(c - cc) / rr
+                dist = math.sqrt((dr * dr) + (dc * dc))
+                if dist > 1.25:
+                    continue
+                noise = _fractal_noise_2d(float(c) / nscale, float(r) / nscale, perm, octaves=3)
+                rf = 1.0 + ((noise - 0.5) * 2.0 * roughness)
+                if dist <= rf:
+                    grid[r][c] = dirt_tile
+                    if biomes.get((r, c), "") not in {"shore_sand", "shore_dirt", "water"}:
+                        biomes[(r, c)] = "dirt_patch"
+
+
 def generate_biome_terrain(
     width: int,
     height: int,
@@ -807,6 +855,14 @@ def generate_biome_terrain(
             noise_scale=float(worldgen.get("blob_noise_scale", 24.0)),
             roughness=float(worldgen.get("blob_noise_roughness", 0.35)),
         )
+
+    _apply_dirt_patches(
+        grid=grid,
+        biomes=biomes,
+        rng=rng,
+        dirt_tile=dirt_tile,
+        worldgen=worldgen,
+    )
 
     structure_defs = [dict(x) for x in list(structures_defs or []) if isinstance(x, dict)]
     if not structure_defs:
