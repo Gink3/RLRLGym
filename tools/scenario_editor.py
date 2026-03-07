@@ -193,6 +193,7 @@ class ScenarioEditorWindow(QMainWindow):
         self.profiles = load_profiles("data/base/agent_profiles.json")
         self.networks = load_network_configs("data/base/agent_networks.json")
         self.default_env_config = self._load_default_env_config()
+        self.maps_dir = Path("data/maps")
 
         self.scenario_path: Path | None = initial_path
         self.scenario = Scenario(
@@ -237,6 +238,12 @@ class ScenarioEditorWindow(QMainWindow):
         self.generate_btn = QPushButton("Generate Race x Class")
         self.generate_btn.clicked.connect(self._generate_combos)
         top.addWidget(self.generate_btn)
+        top.addWidget(QLabel("Static Map"))
+        self.map_combo = QComboBox()
+        self.map_combo.setMinimumWidth(280)
+        top.addWidget(self.map_combo)
+        self.refresh_maps_btn = QPushButton("Refresh Maps")
+        top.addWidget(self.refresh_maps_btn)
         top.addStretch(1)
 
         body = QHBoxLayout()
@@ -267,6 +274,10 @@ class ScenarioEditorWindow(QMainWindow):
         self.env_edit.setFont(QFont("DejaVu Sans Mono", 10))
         right.addWidget(self.env_edit, stretch=1)
         self.env_edit.setPlainText(json.dumps(self.scenario.env_config, indent=2))
+        self.refresh_maps_btn.clicked.connect(self._refresh_map_choices)
+        self.map_combo.currentTextChanged.connect(self._apply_selected_map)
+        self._refresh_map_choices()
+        self._sync_map_selector_from_env()
 
     def _load_default_env_config(self) -> Dict[str, object]:
         try:
@@ -313,6 +324,8 @@ class ScenarioEditorWindow(QMainWindow):
         self.scenario = Scenario(name="new_scenario", env_config=copy.deepcopy(self.default_env_config), agents=[])
         self.name_edit.setText(self.scenario.name)
         self.env_edit.setPlainText(json.dumps(self.scenario.env_config, indent=2))
+        self._refresh_map_choices()
+        self._sync_map_selector_from_env()
         self._refresh_list()
 
     def _load_dialog(self) -> None:
@@ -331,6 +344,8 @@ class ScenarioEditorWindow(QMainWindow):
             self.scenario.env_config = self._expand_embedded_spawn_data(merged_env)
             self.name_edit.setText(self.scenario.name)
             self.env_edit.setPlainText(json.dumps(self.scenario.env_config, indent=2))
+            self._refresh_map_choices()
+            self._sync_map_selector_from_env()
             self._refresh_list()
         except Exception as exc:
             QMessageBox.critical(self, "Load failed", str(exc))
@@ -377,6 +392,44 @@ class ScenarioEditorWindow(QMainWindow):
         for a in self.scenario.agents:
             display_name = (a.name or "").strip() or f"{a.race}/{a.class_name}"
             self.agent_list.addItem(display_name)
+
+    def _refresh_map_choices(self) -> None:
+        self.map_combo.blockSignals(True)
+        self.map_combo.clear()
+        self.map_combo.addItem("<none>")
+        if self.maps_dir.exists():
+            for path in sorted(self.maps_dir.glob("*.json")):
+                self.map_combo.addItem(path.as_posix())
+        self.map_combo.blockSignals(False)
+
+    def _sync_map_selector_from_env(self) -> None:
+        try:
+            env_payload = json.loads(self.env_edit.toPlainText().strip() or "{}")
+        except Exception:
+            return
+        if not isinstance(env_payload, dict):
+            return
+        map_path = str(env_payload.get("static_map_path", "")).strip()
+        idx = self.map_combo.findText(map_path)
+        if idx < 0:
+            idx = 0
+        self.map_combo.blockSignals(True)
+        self.map_combo.setCurrentIndex(idx)
+        self.map_combo.blockSignals(False)
+
+    def _apply_selected_map(self, selected: str) -> None:
+        try:
+            env_payload = json.loads(self.env_edit.toPlainText().strip() or "{}")
+            if not isinstance(env_payload, dict):
+                return
+            if selected and selected != "<none>":
+                env_payload["static_map_path"] = selected
+                env_payload["static_map_data"] = {}
+            else:
+                env_payload["static_map_path"] = ""
+            self.env_edit.setPlainText(json.dumps(env_payload, indent=2))
+        except Exception:
+            return
 
     def _generate_combos(self) -> None:
         default_profile_by_race = {name: name for name in self.races.keys() if name in self.profiles}

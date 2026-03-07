@@ -596,7 +596,11 @@ class MapBuilderWindow(QMainWindow):
         )
         if not out:
             return
+        maps_dir = Path("data/maps")
+        maps_dir.mkdir(parents=True, exist_ok=True)
         out_path = Path(out)
+        if out_path.parent.resolve() != maps_dir.resolve():
+            out_path = maps_dir / out_path.name
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         QMessageBox.information(self, "Map saved", f"Saved: {out_path}")
