@@ -204,6 +204,14 @@ class ReplayWindow(QMainWindow):
     def _tile_color(self, name: str) -> QColor:
         return QColor(COLOR_MAP.get(name, "#d0d0d0"))
 
+    def _faction_bg_color(self, faction_id: int) -> QColor:
+        if faction_id < 0:
+            return QColor(90, 90, 90, 120)
+        hue = (int(faction_id) * 67) % 360
+        color = QColor.fromHsv(hue, 180, 220)
+        color.setAlpha(120)
+        return color
+
     def _set_frame(self, idx: int) -> None:
         if not self.frames:
             return
@@ -317,9 +325,12 @@ class ReplayWindow(QMainWindow):
                 c = int(pos[1])
                 x = c * self.tile_px
                 y = r * self.tile_px
+                faction_id = int(row.get("faction_id", -1))
+                faction_bg = self._faction_bg_color(faction_id)
+                self.scene.addRect(x, y, self.tile_px, self.tile_px, QPen(Qt.PenStyle.NoPen), faction_bg)
                 label = aid.split("_")[-1]
                 t = QGraphicsSimpleTextItem(label)
-                t.setBrush(QColor("#64b2ff"))
+                t.setBrush(QColor("#f3f7ff"))
                 t.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
                 t.setPos(x + 4, y + 2)
                 self.scene.addItem(t)
