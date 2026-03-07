@@ -12,6 +12,7 @@ from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 from .env import EnvConfig, PettingZooParallelRLRLGym
 from ..systems.featurize import observation_vector_size, vectorize_observation
+from ..systems.constants import ACTION_MAX
 
 
 class RLRLGymRLlibEnv(MultiAgentEnv):
@@ -39,7 +40,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             shape=(observation_vector_size(),),
             dtype=np.float32,
         )
-        self._action_space = spaces.Discrete(19)
+        self._action_space = spaces.Discrete(int(ACTION_MAX) + 1)
         self.possible_agents = list(self.base.possible_agents)
         self.agents = []
         self.observation_spaces = {aid: self._obs_space for aid in self.possible_agents}

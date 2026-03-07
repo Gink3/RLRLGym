@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from ..systems.constants import (
+    ACTION_MAX,
     ACTION_ACCEPT_INVITE,
     ACTION_ATTACK,
     ACTION_DEFEND,
@@ -27,6 +28,17 @@ from ..systems.constants import (
     ACTION_TRADE,
     ACTION_PICKUP,
     ACTION_REVIVE,
+    ACTION_INTERACT_CHEST,
+    ACTION_INTERACT_DRINK,
+    ACTION_INTERACT_FACTION,
+    ACTION_INTERACT_FORAGE,
+    ACTION_INTERACT_HARVEST,
+    ACTION_INTERACT_MINE,
+    ACTION_INTERACT_PLANT,
+    ACTION_INTERACT_RESOURCE,
+    ACTION_INTERACT_SHEAR,
+    ACTION_INTERACT_SHRINE,
+    ACTION_INTERACT_STATION,
     ACTION_USE,
     ACTION_WAIT,
     MOVE_DELTAS,
@@ -406,7 +418,7 @@ class MultiAgentRLRLGym:
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
             raise KeyError(f"Unknown agent: {agent_id}")
-        return (0, 18)
+        return (0, int(ACTION_MAX))
 
     def observation_space(self, agent_id: str) -> Dict[str, object]:
         if agent_id not in self.possible_agents:
@@ -541,7 +553,7 @@ class MultiAgentRLRLGym:
         obs = {aid: self._build_observation(aid) for aid in self.possible_agents}
         info = {
             aid: {
-                "action_mask": [1] * 19,
+                "action_mask": [1] * (int(ACTION_MAX) + 1),
                 "alive": True,
                 "profile": self.state.agents[aid].profile_name,
                 "race": self.state.agents[aid].race_name,
@@ -1050,6 +1062,63 @@ class MultiAgentRLRLGym:
         elif action == ACTION_INTERACT:
             reward += self._interact(agent, aid, events)
 
+        elif action == ACTION_INTERACT_RESOURCE:
+            specific_reward, handled = self._interact_resource_node(
+                actor=agent, actor_id=aid, events=events
+            )
+            reward += specific_reward if handled else -0.01
+
+        elif action == ACTION_INTERACT_STATION:
+            specific_reward, handled = self._interact_station(
+                actor=agent, actor_id=aid, events=events
+            )
+            reward += specific_reward if handled else -0.01
+
+        elif action == ACTION_INTERACT_SHEAR:
+            specific_reward, handled = self._interact_shear(
+                actor=agent, actor_id=aid, events=events
+            )
+            reward += specific_reward if handled else -0.01
+
+        elif action == ACTION_INTERACT_HARVEST:
+            specific_reward, handled = self._interact_harvest_plant(
+                actor=agent, actor_id=aid, events=events
+            )
+            reward += specific_reward if handled else -0.01
+
+        elif action == ACTION_INTERACT_MINE:
+            specific_reward, handled = self._interact_mine_tile(
+                actor=agent, actor_id=aid, events=events
+            )
+            reward += specific_reward if handled else -0.01
+
+        elif action == ACTION_INTERACT_FORAGE:
+            specific_reward, handled = self._interact_forage_tile(
+                actor=agent, actor_id=aid, events=events
+            )
+            reward += specific_reward if handled else -0.01
+
+        elif action == ACTION_INTERACT_PLANT:
+            specific_reward, handled = self._interact_plant(
+                actor=agent, actor_id=aid, events=events
+            )
+            reward += specific_reward if handled else -0.01
+
+        elif action == ACTION_INTERACT_FACTION:
+            specific_reward, handled = self._handle_faction_interact(
+                actor=agent, actor_id=aid, events=events
+            )
+            reward += specific_reward if handled else -0.01
+
+        elif action == ACTION_INTERACT_CHEST:
+            reward += self._interact_chest(agent=agent, events=events)
+
+        elif action == ACTION_INTERACT_SHRINE:
+            reward += self._interact_shrine(actor=agent, events=events)
+
+        elif action == ACTION_INTERACT_DRINK:
+            reward += self._interact_drink(actor=agent, events=events)
+
         elif action == ACTION_ATTACK:
             if self.config.combat_training_mode and adjacent_hostile:
                 reward += 0.02
@@ -1113,13 +1182,19 @@ class MultiAgentRLRLGym:
         )
         if faction_handled:
             return reward + faction_reward
+        chest_reward = self._interact_chest(agent=actor, events=events)
+        if chest_reward > -0.01:
+            return reward + chest_reward
+        if self.state.grid[actor.position[0]][actor.position[1]] == "shrine":
+            return reward + self._interact_shrine(actor=actor, events=events)
+        if self.state.grid[actor.position[0]][actor.position[1]] in WATER_TILE_IDS:
+            return reward + self._interact_drink(actor=actor, events=events)
+        return reward + self._interact_generic_tile(actor, actor_id, events)
 
+    def _interact_generic_tile(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
+        assert self.state is not None
+        reward = 0.0
         r, c = actor.position
-        chest = self.state.chests.get((r, c))
-        if chest and not chest.opened:
-            events.append("interact:chest")
-            reward += self._pickup_from_tile(actor, events)
-            return reward
 
         tile_id = self.state.grid[r][c]
         tile = self.tiles[tile_id]
@@ -1142,6 +1217,54 @@ class MultiAgentRLRLGym:
             events.append("interact_exhausted")
             reward -= 0.02
         return reward
+
+    def _interact_chest(self, agent: AgentState, events: List[str]) -> float:
+        assert self.state is not None
+        chest = self.state.chests.get(agent.position)
+        if chest and not chest.opened:
+            events.append("interact:chest")
+            return self._pickup_from_tile(agent, events)
+        events.append("interact_chest_fail")
+        return -0.01
+
+    def _interact_shrine(self, actor: AgentState, events: List[str]) -> float:
+        assert self.state is not None
+        r, c = actor.position
+        if self.state.grid[r][c] != "shrine":
+            events.append("interact_shrine_fail")
+            return -0.01
+        tile = self.tiles.get("shrine")
+        if tile is None:
+            events.append("interact_shrine_fail")
+            return -0.01
+        used = int(self.state.tile_interactions.get((r, c), 0))
+        if used >= max(1, int(tile.max_interactions)):
+            events.append("interact_exhausted")
+            return -0.02
+        self.state.tile_interactions[(r, c)] = used + 1
+        actor.hp = min(actor.max_hp, actor.hp + 1)
+        events.append("interact:shrine")
+        return 0.1
+
+    def _interact_drink(self, actor: AgentState, events: List[str]) -> float:
+        assert self.state is not None
+        r, c = actor.position
+        tile_id = self.state.grid[r][c]
+        if tile_id not in WATER_TILE_IDS:
+            events.append("interact_drink_fail")
+            return -0.01
+        tile = self.tiles.get(tile_id)
+        if tile is None:
+            events.append("interact_drink_fail")
+            return -0.01
+        used = int(self.state.tile_interactions.get((r, c), 0))
+        if used >= max(1, int(tile.max_interactions)):
+            events.append("interact_exhausted")
+            return -0.02
+        self.state.tile_interactions[(r, c)] = used + 1
+        actor.hunger = min(actor.max_hunger, actor.hunger + 1)
+        events.append("interact:water")
+        return 0.04
 
     def _is_unbreakable_edge(self, pos: Tuple[int, int]) -> bool:
         assert self.state is not None
