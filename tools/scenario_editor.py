@@ -48,6 +48,35 @@ from rlrlgym.systems.scenario import (  # noqa: E402
 from train.network_config import load_network_configs  # noqa: E402
 
 
+def _map_builder_stylesheet() -> str:
+    return """
+            QMainWindow { background: #11161c; color: #dbe6f3; }
+            QWidget { background: #1b232d; color: #dbe6f3; }
+            QLineEdit, QTextEdit, QListWidget {
+                background: #10161d;
+                color: #dbe6f3;
+                border: 1px solid #2d3a47;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QLabel { color: #cfe0f0; }
+            QPushButton {
+                background: #243140;
+                color: #e5eef7;
+                border: 1px solid #3a4a5e;
+                border-radius: 4px;
+                padding: 6px 10px;
+            }
+            QPushButton:hover { background: #2d3e52; }
+            QPushButton:disabled { background: #1a2531; color: #8092a5; }
+            QToolTip {
+                background: #0f141a;
+                color: #e6f0fa;
+                border: 1px solid #3a4a5e;
+            }
+            """
+
+
 class AgentDialog(QDialog):
     def __init__(
         self,
@@ -71,6 +100,7 @@ class AgentDialog(QDialog):
         self._existing = existing
         self.result_agent: ScenarioAgent | None = None
 
+        self.setStyleSheet(_map_builder_stylesheet())
         layout = QVBoxLayout(self)
 
         top = QHBoxLayout()
@@ -203,6 +233,7 @@ class ScenarioEditorWindow(QMainWindow):
         )
 
         self._build_ui()
+        self._apply_dark_theme()
         if initial_path and initial_path.exists():
             self._load(initial_path)
         else:
@@ -278,6 +309,9 @@ class ScenarioEditorWindow(QMainWindow):
         self.map_combo.currentTextChanged.connect(self._apply_selected_map)
         self._refresh_map_choices()
         self._sync_map_selector_from_env()
+
+    def _apply_dark_theme(self) -> None:
+        self.setStyleSheet(_map_builder_stylesheet())
 
     def _load_default_env_config(self) -> Dict[str, object]:
         try:
