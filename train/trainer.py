@@ -55,8 +55,6 @@ class EpisodeSummary:
     steps: int
     team_return: float
     per_agent_return: Dict[str, float]
-    win: bool
-    outcome: str
     mean_survival_time: float
     cause_of_death: Dict[str, str]
     action_counts: Dict[str, int]
@@ -162,7 +160,6 @@ class MultiAgentTrainer:
         )
         window = max(1, int(self.config.progress_window))
         recent_returns: deque[float] = deque(maxlen=window)
-        recent_wins: deque[float] = deque(maxlen=window)
         recent_survival: deque[float] = deque(maxlen=window)
         recent_starvation: deque[float] = deque(maxlen=window)
         recent_loss: deque[float] = deque(maxlen=window)
@@ -271,29 +268,11 @@ class MultiAgentTrainer:
                     break
 
             alive = {aid: self.env.state.agents[aid].alive for aid in self.env.possible_agents}
-            explorer_alive = any(
-                bool(alive.get(aid, False))
-                for aid in self.env.possible_agents
-                if self.env.state.agents[aid].profile_name in EXPLORER_PROFILES
-            )
-            brawler_alive = any(
-                bool(alive.get(aid, False))
-                for aid in self.env.possible_agents
-                if self.env.state.agents[aid].profile_name in BRAWLER_PROFILES
-            )
-            if explorer_alive and not brawler_alive:
-                outcome = "explorer_win"
-            elif brawler_alive and not explorer_alive:
-                outcome = "brawler_win"
-            else:
-                outcome = "tie"
             summary = EpisodeSummary(
                 episode=ep + 1,
                 steps=int(self.env.state.step_count),
                 team_return=float(sum(episode_agent_returns.values())),
                 per_agent_return=dict(episode_agent_returns),
-                win=any(alive.values()),
-                outcome=outcome,
                 mean_survival_time=(
                     sum(float(v) for v in episode_agent_survival.values())
                     / max(1, len(episode_agent_survival))
@@ -329,7 +308,6 @@ class MultiAgentTrainer:
             )
 
             recent_returns.append(float(summary.team_return))
-            recent_wins.append(1.0 if summary.win else 0.0)
             recent_survival.append(float(summary.mean_survival_time))
             recent_starvation.append(episode_starved)
             recent_loss.append(float(episode_mean_loss))
@@ -351,7 +329,6 @@ class MultiAgentTrainer:
                     total=self.config.episodes,
                     window=window,
                     moving_avg_team_return=sum(recent_returns) / len(recent_returns),
-                    moving_win_rate=sum(recent_wins) / len(recent_wins),
                     moving_mean_survival_steps=sum(recent_survival) / len(recent_survival),
                     starvation_rate=sum(recent_starvation) / len(recent_starvation),
                     mean_loss=sum(recent_loss) / len(recent_loss),
@@ -366,7 +343,6 @@ class MultiAgentTrainer:
                 episode_mean_teammate=episode_mean_teammate,
                 starvation_rate=episode_starved,
                 recent_returns=recent_returns,
-                recent_wins=recent_wins,
                 recent_survival=recent_survival,
                 recent_starvation=recent_starvation,
                 recent_loss=recent_loss,
@@ -399,7 +375,6 @@ class MultiAgentTrainer:
         episode_mean_teammate: float,
         starvation_rate: float,
         recent_returns,
-        recent_wins,
         recent_survival,
         recent_starvation,
         recent_loss,
@@ -412,16 +387,11 @@ class MultiAgentTrainer:
             [
                 ("steps", summary.steps),
                 ("team_return", summary.team_return),
-                ("win", summary.win),
-                ("outcome_explorer_win", summary.outcome == "explorer_win"),
-                ("outcome_brawler_win", summary.outcome == "brawler_win"),
-                ("outcome_tie", summary.outcome == "tie"),
                 ("mean_survival_time", summary.mean_survival_time),
                 ("episode_mean_loss", episode_mean_loss),
                 ("episode_mean_teammate_distance", episode_mean_teammate),
                 ("episode_starvation", starvation_rate),
                 ("rolling_return_window", sum(recent_returns) / max(1, len(recent_returns))),
-                ("rolling_win_window", sum(recent_wins) / max(1, len(recent_wins))),
                 ("rolling_survival_window", sum(recent_survival) / max(1, len(recent_survival))),
                 ("rolling_starvation_window", sum(recent_starvation) / max(1, len(recent_starvation))),
                 ("rolling_loss_window", sum(recent_loss) / max(1, len(recent_loss))),
@@ -456,7 +426,6 @@ class MultiAgentTrainer:
             self.aim.track_pairs(
                 [
                     ("return", self._mean(metrics["return"])),
-                    ("win", self._mean(metrics["win"])),
                     ("survival", self._mean(metrics["survival"])),
                     ("starvation", self._mean(metrics["starvation"])),
                     ("loss", self._mean(metrics["loss"])),
@@ -469,10 +438,6 @@ class MultiAgentTrainer:
         self.aim.track_pairs(
             [
                 ("episodes", aggregate["episodes"]),
-                ("win_rate", aggregate["win_rate"]),
-                ("human_win_rate", aggregate["human_win_rate"]),
-                ("orc_win_rate", aggregate["orc_win_rate"]),
-                ("tie_rate", aggregate["tie_rate"]),
                 ("mean_team_return", aggregate["mean_team_return"]),
                 ("mean_survival_time", aggregate["mean_survival_time"]),
             ],
@@ -496,12 +461,6 @@ class MultiAgentTrainer:
         if not episode_summaries:
             return {
                 "episodes": 0,
-                "win_rate": 0.0,
-                "explorer_win_rate": 0.0,
-                "brawler_win_rate": 0.0,
-                "human_win_rate": 0.0,
-                "orc_win_rate": 0.0,
-                "tie_rate": 0.0,
                 "mean_team_return": 0.0,
                 "mean_survival_time": 0.0,
                 "cause_of_death_histogram": {},
@@ -510,10 +469,6 @@ class MultiAgentTrainer:
                     "network_parameter_counts": self._network_parameter_counts(),
                 },
             }
-        wins = sum(1 for e in episode_summaries if e.win)
-        explorer_wins = sum(1 for e in episode_summaries if e.outcome == "explorer_win")
-        brawler_wins = sum(1 for e in episode_summaries if e.outcome == "brawler_win")
-        ties = sum(1 for e in episode_summaries if e.outcome == "tie")
         cod: Dict[str, int] = {}
         actions: Dict[str, int] = {}
         for e in episode_summaries:
@@ -524,13 +479,6 @@ class MultiAgentTrainer:
         n = len(episode_summaries)
         return {
             "episodes": n,
-            "win_rate": wins / n,
-            "explorer_win_rate": explorer_wins / n,
-            "brawler_win_rate": brawler_wins / n,
-            # Legacy keys retained for backward-compatible dashboards.
-            "human_win_rate": explorer_wins / n,
-            "orc_win_rate": brawler_wins / n,
-            "tie_rate": ties / n,
             "mean_team_return": sum(e.team_return for e in episode_summaries) / n,
             "mean_survival_time": sum(e.mean_survival_time for e in episode_summaries) / n,
             "cause_of_death_histogram": cod,
@@ -598,7 +546,6 @@ class MultiAgentTrainer:
         total: int,
         window: int,
         moving_avg_team_return: float,
-        moving_win_rate: float,
         moving_mean_survival_steps: float,
         starvation_rate: float,
         mean_loss: float,
@@ -613,7 +560,6 @@ class MultiAgentTrainer:
         line = (
             f"\r[{bar}] {episode}/{total} "
             f"ret{window}={moving_avg_team_return:.3f} "
-            f"win{window}={moving_win_rate:.3f} "
             f"surv{window}={moving_mean_survival_steps:.1f} "
             f"starve{window}={starvation_rate:.3f} "
             f"loss{window}={mean_loss:.4f} "
@@ -625,7 +571,6 @@ class MultiAgentTrainer:
             for profile in sorted(profile_metrics.keys()):
                 pm = profile_metrics[profile]
                 pret = self._mean(pm["return"])
-                pwin = self._mean(pm["win"])
                 psurv = self._mean(pm["survival"])
                 pstarve = self._mean(pm["starvation"])
                 ploss = self._mean(pm["loss"])
@@ -633,7 +578,6 @@ class MultiAgentTrainer:
                 line += (
                     f" {profile}:"
                     f"ret={pret:.3f},"
-                    f"win={pwin:.3f},"
                     f"surv={psurv:.1f},"
                     f"starve={pstarve:.3f},"
                     f"loss={ploss:.4f},"
@@ -662,7 +606,6 @@ class MultiAgentTrainer:
             if profile not in recent_profile_metrics:
                 recent_profile_metrics[profile] = {
                     "return": deque(maxlen=window),
-                    "win": deque(maxlen=window),
                     "survival": deque(maxlen=window),
                     "starvation": deque(maxlen=window),
                     "loss": deque(maxlen=window),
@@ -671,7 +614,6 @@ class MultiAgentTrainer:
             pm = recent_profile_metrics[profile]
 
             returns = [episode_returns[aid] for aid in aids]
-            wins = [1.0 if alive_agents.get(aid, False) else 0.0 for aid in aids]
             survival = [float(episode_survival[aid]) for aid in aids]
             starvation = [
                 1.0 if cause_of_death.get(aid) == "starvation" else 0.0 for aid in aids
@@ -690,7 +632,6 @@ class MultiAgentTrainer:
             ]
 
             pm["return"].append(sum(returns) / max(1, len(returns)))
-            pm["win"].append(sum(wins) / max(1, len(wins)))
             pm["survival"].append(sum(survival) / max(1, len(survival)))
             pm["starvation"].append(sum(starvation) / max(1, len(starvation)))
             pm["loss"].append(sum(losses) / max(1, len(losses)))

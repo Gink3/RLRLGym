@@ -134,9 +134,6 @@ class RLlibTrainer:
         env_name = "RLRLGymRLlib-v0"
         window = 50
         recent_returns: deque[float] = deque(maxlen=window)
-        recent_agent0_wins: deque[float] = deque(maxlen=window)
-        recent_agent1_wins: deque[float] = deque(maxlen=window)
-        recent_ties: deque[float] = deque(maxlen=window)
         recent_survival: deque[float] = deque(maxlen=window)
         recent_loss: deque[float] = deque(maxlen=window)
 
@@ -293,7 +290,6 @@ class RLlibTrainer:
                 alive_flags = []
                 starvation_flags = []
                 teammate_dists = []
-                winner_tag = None
                 death_counts = {
                     "starvation": 0,
                     "monster": 0,
@@ -316,15 +312,6 @@ class RLlibTrainer:
                         continue
                     alive = bool(info.get("alive", False))
                     events = info.get("events", [])
-                    for e in events:
-                        if not isinstance(e, str) or not e.startswith("winner:"):
-                            continue
-                        if e == "winner:none":
-                            winner_tag = "tie"
-                        elif e == "winner:agent_0":
-                            winner_tag = "agent_0"
-                        elif e == "winner:agent_1":
-                            winner_tag = "agent_1"
                     starved = bool("starve_tick" in events and "death" in events)
                     td = info.get("teammate_distance")
                     alive_flags.append(1.0 if alive else 0.0)
@@ -378,18 +365,6 @@ class RLlibTrainer:
                         else:
                             death_counts["other"] += 1
 
-                if winner_tag is None:
-                    # If no explicit winner event was emitted, treat as tie.
-                    winner_tag = "tie"
-                self._emit_metric(
-                    episode, metrics_logger, "agent0_win", 1.0 if winner_tag == "agent_0" else 0.0
-                )
-                self._emit_metric(
-                    episode, metrics_logger, "agent1_win", 1.0 if winner_tag == "agent_1" else 0.0
-                )
-                self._emit_metric(
-                    episode, metrics_logger, "tie", 1.0 if winner_tag == "tie" else 0.0
-                )
                 store = self._get_episode_store(episode)
                 counts = store.get("action_counts", {})
                 total_actions = max(1, int(counts.get("total", 0)))
@@ -707,41 +682,6 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
-            agent0_win = self._extract_float(
-                result,
-                [
-                    ("custom_metrics", "agent0_win_mean"),
-                    ("custom_metrics", "agent0_win"),
-                    ("env_runners", "custom_metrics", "agent0_win_mean"),
-                    ("env_runners", "custom_metrics", "agent0_win"),
-                ],
-                default=0.0,
-            )
-            agent1_win = self._extract_float(
-                result,
-                [
-                    ("custom_metrics", "agent1_win_mean"),
-                    ("custom_metrics", "agent1_win"),
-                    ("env_runners", "custom_metrics", "agent1_win_mean"),
-                    ("env_runners", "custom_metrics", "agent1_win"),
-                ],
-                default=0.0,
-            )
-            tie_metric_raw = self._extract_float(
-                result,
-                [
-                    ("custom_metrics", "tie_mean"),
-                    ("custom_metrics", "tie"),
-                    ("env_runners", "custom_metrics", "tie_mean"),
-                    ("env_runners", "custom_metrics", "tie"),
-                ],
-                default=0.0,
-            )
-            # For two-agent episodes with mutually exclusive outcomes, derive tie
-            # directly from wins to avoid callback metric key drift.
-            tie_rate = max(0.0, min(1.0, 1.0 - agent0_win - agent1_win))
-            if tie_metric_raw > 0.0:
-                tie_rate = float(tie_metric_raw)
             action_wait_rate = self._extract_float(
                 result,
                 [
@@ -1033,9 +973,6 @@ class RLlibTrainer:
                     )
 
             recent_returns.append(reward_mean)
-            recent_agent0_wins.append(agent0_win)
-            recent_agent1_wins.append(agent1_win)
-            recent_ties.append(tie_rate)
             recent_survival.append(survival_mean)
             recent_loss.append(loss)
 
@@ -1044,14 +981,10 @@ class RLlibTrainer:
                 "episode_reward_mean": reward_mean,
                 "episodes_total": episodes_total,
                 "timesteps_total": result.get("timesteps_total"),
-                "win_rate": agent0_win + agent1_win,
                 "survival_mean": survival_mean,
                 "starvation_rate": 0.0,
                 "loss": loss,
                 "mean_teammate_distance": 0.0,
-                "agent0_win": agent0_win,
-                "agent1_win": agent1_win,
-                "tie": tie_rate,
                 "action_wait_rate": action_wait_rate,
                 "action_move_rate": action_move_rate,
                 "action_interact_rate": action_interact_rate,
@@ -1107,9 +1040,6 @@ class RLlibTrainer:
                 total=self.config.iterations,
                 window=window,
                 ret=sum(recent_returns) / len(recent_returns),
-                agent0_win_count=int(round(sum(recent_agent0_wins))),
-                agent1_win_count=int(round(sum(recent_agent1_wins))),
-                tie_count=int(round(sum(recent_ties))),
                 surv=sum(recent_survival) / len(recent_survival),
                 loss=sum(recent_loss) / len(recent_loss),
                 episodes_total=int(episodes_total),
@@ -1333,7 +1263,6 @@ class RLlibTrainer:
                 )
                 for i in range(len(metrics_rows))
             ],
-            "win_rate": [float(r.get("win_rate", 0.0) or 0.0) for r in metrics_rows],
             "survival_mean": [float(r.get("survival_mean", 0.0) or 0.0) for r in metrics_rows],
             "starvation_rate": [float(r.get("starvation_rate", 0.0) or 0.0) for r in metrics_rows],
             "loss": [float(r.get("loss", 0.0) or 0.0) for r in metrics_rows],
@@ -1424,9 +1353,6 @@ class RLlibTrainer:
         total: int,
         window: int,
         ret: float,
-        agent0_win_count: int,
-        agent1_win_count: int,
-        tie_count: int,
         surv: float,
         loss: float,
         episodes_total: int,
@@ -1438,9 +1364,6 @@ class RLlibTrainer:
         line = (
             f"\r[{bar}] {iteration}/{total} "
             f"ret{window}={ret:.3f} "
-            f"a0_wins{window}={agent0_win_count} "
-            f"a1_wins{window}={agent1_win_count} "
-            f"ties{window}={tie_count} "
             f"surv{window}={surv:.1f} "
             f"loss{window}={loss:.4f} "
             f"episodes_total={episodes_total}"
