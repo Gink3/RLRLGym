@@ -218,6 +218,24 @@
       "loot_table": []
     },
     {
+      "id": "firepit",
+      "glyph": "*",
+      "color": "yellow",
+      "walkable": true,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
+      "id": "fireplace",
+      "glyph": "*",
+      "color": "bright_white",
+      "walkable": true,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
       "id": "clay_forge",
       "glyph": "F",
       "color": "yellow",

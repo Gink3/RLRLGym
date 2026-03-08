@@ -204,6 +204,57 @@ class TestGatherAndCrafting(unittest.TestCase):
         _, _, _, _, info = env.step({aid: ACTION_INTERACT})
         self.assertTrue(any(str(evt).startswith("fire_refuel:stick:") for evt in info[aid]["events"]))
 
+    def test_build_firepit_and_fireplace_and_refuel(self):
+        for recipe_id, input_item, tile_id, seed in (
+            ("build_firepit_test", "firepit_kit", "firepit", 26),
+            ("build_fireplace_test", "fireplace_kit", "fireplace", 27),
+        ):
+            recipes_data = {
+                "schema_version": 1,
+                "recipes": [
+                    {
+                        "id": recipe_id,
+                        "inputs": {input_item: 1},
+                        "outputs": {},
+                        "skill": "crafting",
+                        "station": "workbench",
+                        "build_tile_id": tile_id,
+                    }
+                ],
+            }
+            cfg = EnvConfig(
+                width=12,
+                height=10,
+                n_agents=1,
+                max_steps=10,
+                render_enabled=False,
+                recipes_data=recipes_data,
+            )
+            env = PettingZooParallelRLRLGym(cfg)
+            env.reset(seed=seed)
+            aid = "agent_0"
+            pos = env.state.agents[aid].position
+            env.state.stations[pos] = StationState(
+                station_id="workbench",
+                position=pos,
+                speed_multiplier=1.0,
+                quality_tier=0,
+                unlock_recipes=[recipe_id],
+            )
+            env.state.agents[aid].inventory.append(input_item)
+            env.step({aid: ACTION_INTERACT_STATION})
+
+            built_pos = None
+            for nr, nc in ((pos[0] - 1, pos[1]), (pos[0] + 1, pos[1]), (pos[0], pos[1] - 1), (pos[0], pos[1] + 1)):
+                if env.state.grid[nr][nc] == tile_id:
+                    built_pos = (nr, nc)
+                    break
+            self.assertIsNotNone(built_pos)
+            env.state.agents[aid].position = built_pos
+            env.state.agents[aid].inventory.append("stick")
+            _, _, _, _, info = env.step({aid: ACTION_INTERACT})
+            self.assertTrue(any(str(evt).startswith("fire_refuel:stick:") for evt in info[aid]["events"]))
+
     def test_spike_trap_damages_on_move(self):
         cfg = EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
         env = PettingZooParallelRLRLGym(cfg)

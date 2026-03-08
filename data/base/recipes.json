@@ -225,6 +225,56 @@
       "tags": ["construction", "fire"]
     },
     {
+      "id": "craft_firepit_kit",
+      "inputs": {"stone": 3, "wood": 1},
+      "outputs": {"firepit_kit": 1},
+      "skill": "crafting",
+      "min_skill": 0,
+      "station": "workbench",
+      "craft_time": 1,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "kit", "fire"]
+    },
+    {
+      "id": "build_firepit",
+      "inputs": {"firepit_kit": 1},
+      "outputs": {},
+      "skill": "crafting",
+      "min_skill": 0,
+      "station": "workbench",
+      "craft_time": 1,
+      "build_tile_id": "firepit",
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "fire"]
+    },
+    {
+      "id": "craft_fireplace_kit",
+      "inputs": {"stone": 4, "clay": 2, "wood_plank": 1},
+      "outputs": {"fireplace_kit": 1},
+      "skill": "crafting",
+      "min_skill": 1,
+      "station": "workbench",
+      "craft_time": 2,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "kit", "fire"]
+    },
+    {
+      "id": "build_fireplace",
+      "inputs": {"fireplace_kit": 1},
+      "outputs": {},
+      "skill": "crafting",
+      "min_skill": 1,
+      "station": "workbench",
+      "craft_time": 2,
+      "build_tile_id": "fireplace",
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "fire"]
+    },
+    {
       "id": "craft_clay_forge_kit",
       "inputs": {"clay": 4, "stone": 2},
       "outputs": {"clay_forge_kit": 1},

@@ -129,6 +129,7 @@ FIRE_FUEL_PER_STICK = 2
 FIRE_FUEL_PER_WOOD = 5
 FIRE_FUEL_PER_LOG = 8
 FIRE_FUEL_DECAY_PER_STEP = 1
+FIRE_CONTAINER_TILE_IDS = {"campfire", "firepit", "fireplace"}
 OPAQUE_TILE_IDS = {
     "wall",
     "indestructible_wall",
@@ -1350,7 +1351,7 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         r, c = actor.position
         tile_id = self.state.grid[r][c]
-        if tile_id != "campfire":
+        if tile_id not in FIRE_CONTAINER_TILE_IDS:
             return 0.0, False
         for fuel_item, fuel_gain in (
             ("log", FIRE_FUEL_PER_LOG),
@@ -1824,7 +1825,7 @@ class MultiAgentRLRLGym:
             if occupied:
                 continue
             self.state.grid[nr][nc] = recipe.build_tile_id
-            if recipe.build_tile_id == "campfire":
+            if recipe.build_tile_id in FIRE_CONTAINER_TILE_IDS:
                 self.state.tile_interactions[(nr, nc)] = max(
                     1, int(self.state.tile_interactions.get((nr, nc), 0)) + FIRE_FUEL_PER_STICK
                 )
@@ -4862,7 +4863,7 @@ class MultiAgentRLRLGym:
         to_extinguish: List[Tuple[int, int]] = []
         for r, row in enumerate(self.state.grid):
             for c, tile_id in enumerate(row):
-                if tile_id != "campfire":
+                if tile_id not in FIRE_CONTAINER_TILE_IDS:
                     continue
                 fuel = int(self.state.tile_interactions.get((r, c), 0))
                 fuel = max(0, fuel - FIRE_FUEL_DECAY_PER_STEP)
