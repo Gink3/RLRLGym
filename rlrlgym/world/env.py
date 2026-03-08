@@ -123,16 +123,7 @@ PROFILE_ALIASES: Dict[str, str] = {
     "human": "reward_explorer_policy_v1",
     "orc": "reward_brawler_policy_v1",
 }
-WATER_TILE_IDS = {"water", "shallow_water", "deep_water"}
-MINABLE_WALL_TILE_IDS = {"rock_wall", "stone_wall"}
-MINABLE_GROUND_TILE_IDS = {"stone_floor"}
-TREE_TILE_IDS = {"tree"}
-HARVESTS_PER_TILE_LIMIT = 12
-TREE_CHOP_PROGRESS_REQUIRED = 10
-STONE_FLOOR_FLINT_CHANCE = 0.18
-TREE_SAPLING_DROP_CHANCE = 0.2
 DEFAULT_VISION_RANGE = 20
-PREY_SCORE_HUNT_MARGIN = 2
 FIRE_FUEL_MAX = 20
 FIRE_FUEL_PER_STICK = 2
 FIRE_FUEL_PER_WOOD = 5
@@ -152,29 +143,6 @@ TOOL_DURABILITY_USE_BY_CATEGORY: Dict[str, int] = {
     "shovel": 1,
     "handaxe": 1,
     "knife": 1,
-}
-PLANT_TYPES: Dict[str, Dict[str, object]] = {
-    "berry": {
-        "seed_item": "berry_seed",
-        "crop_tile": "berry_plant",
-        "food_item": "berries",
-        "food_qty": (1, 3),
-        "seed_qty": (1, 2),
-    },
-    "grain": {
-        "seed_item": "grain_seed",
-        "crop_tile": "grain_plant",
-        "food_item": "grain_bundle",
-        "food_qty": (1, 2),
-        "seed_qty": (1, 3),
-    },
-    "herb": {
-        "seed_item": "herb_seed",
-        "crop_tile": "herb_plant",
-        "food_item": "herb_leaf",
-        "food_qty": (1, 2),
-        "seed_qty": (1, 2),
-    },
 }
 
 @dataclass
@@ -390,11 +358,62 @@ class MultiAgentRLRLGym:
         self.edible_items = set(self.items.edible_items)
         self.treasure_items = set(self.items.treasure_items)
         self.chest_loot_table = list(self.items.chest_loot_table)
-        self._validate_item_references()
         if self.config.mapgen_config_data:
             self.mapgen_cfg = parse_mapgen_config(self.config.mapgen_config_data)
         else:
             self.mapgen_cfg = load_mapgen_config(self.config.mapgen_config_path)
+        self.resource_rules = dict(getattr(self.mapgen_cfg, "resource_rules", {}) or {})
+        self.water_tile_ids = {
+            str(x).strip()
+            for x in list(self.resource_rules.get("water_tile_ids", []))
+            if str(x).strip()
+        }
+        self.minable_wall_tile_ids = {
+            str(x).strip()
+            for x in list(self.resource_rules.get("minable_wall_tile_ids", []))
+            if str(x).strip()
+        }
+        self.minable_ground_tile_ids = {
+            str(x).strip()
+            for x in list(self.resource_rules.get("minable_ground_tile_ids", []))
+            if str(x).strip()
+        }
+        self.tree_tile_ids = {
+            str(x).strip()
+            for x in list(self.resource_rules.get("tree_tile_ids", []))
+            if str(x).strip()
+        }
+        self.forage_tile_ids = {
+            str(x).strip()
+            for x in list(self.resource_rules.get("forage_tile_ids", []))
+            if str(x).strip()
+        }
+        self.animal_forage_tile_ids = {
+            str(x).strip()
+            for x in list(self.resource_rules.get("animal_forage_tile_ids", []))
+            if str(x).strip()
+        }
+        self.harvests_per_tile_limit = max(
+            1, int(self.resource_rules.get("harvests_per_tile_limit", 12))
+        )
+        self.tree_chop_progress_required = max(
+            1, int(self.resource_rules.get("tree_chop_progress_required", 10))
+        )
+        self.stone_floor_flint_chance = max(
+            0.0, float(self.resource_rules.get("stone_floor_flint_chance", 0.18))
+        )
+        self.tree_sapling_drop_chance = max(
+            0.0, float(self.resource_rules.get("tree_sapling_drop_chance", 0.2))
+        )
+        self.prey_score_hunt_margin = max(
+            0, int(self.resource_rules.get("prey_score_hunt_margin", 2))
+        )
+        self.plant_types = {
+            str(k): dict(v)
+            for k, v in dict(getattr(self.mapgen_cfg, "plant_types", {}) or {}).items()
+            if isinstance(v, dict)
+        }
+        self._validate_item_references()
         if self.config.map_structures_data:
             self.structure_defs = parse_structures_config(self.config.map_structures_data)
         else:
@@ -1246,7 +1265,7 @@ class MultiAgentRLRLGym:
             return reward + chest_reward
         if self.state.grid[actor.position[0]][actor.position[1]] == "shrine":
             return reward + self._interact_shrine(actor=actor, events=events)
-        if self.state.grid[actor.position[0]][actor.position[1]] in WATER_TILE_IDS:
+        if self.state.grid[actor.position[0]][actor.position[1]] in self.water_tile_ids:
             return reward + self._interact_drink(actor=actor, events=events)
         return reward + self._interact_generic_tile(actor, actor_id, events)
 
@@ -1265,7 +1284,7 @@ class MultiAgentRLRLGym:
                 actor.hp = min(actor.max_hp, actor.hp + 1)
                 reward += 0.1
                 events.append("interact:shrine")
-            elif tile_id in WATER_TILE_IDS:
+            elif tile_id in self.water_tile_ids:
                 actor.hunger = min(actor.max_hunger, actor.hunger + 1)
                 reward += 0.04
                 events.append("interact:water")
@@ -1309,7 +1328,7 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         r, c = actor.position
         tile_id = self.state.grid[r][c]
-        if tile_id not in WATER_TILE_IDS:
+        if tile_id not in self.water_tile_ids:
             events.append("interact_drink_fail")
             return -0.01
         tile = self.tiles.get(tile_id)
@@ -1372,7 +1391,7 @@ class MultiAgentRLRLGym:
             if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
                 continue
             adj_tile = self.state.grid[nr][nc]
-            if adj_tile not in TREE_TILE_IDS:
+            if adj_tile not in self.tree_tile_ids:
                 continue
             if self._harvest_exhausted((nr, nc), adj_tile, events):
                 return -0.02, True
@@ -1393,8 +1412,8 @@ class MultiAgentRLRLGym:
             progress = 1 + axe_bonus + max(0, woodcutting // 5)
             used = int(self.state.tile_interactions.get((nr, nc), 0)) + progress
             self.state.tile_interactions[(nr, nc)] = used
-            events.append(f"chop_tree_progress:{nr}:{nc}:{used}/{TREE_CHOP_PROGRESS_REQUIRED}")
-            if used >= TREE_CHOP_PROGRESS_REQUIRED:
+            events.append(f"chop_tree_progress:{nr}:{nc}:{used}/{self.tree_chop_progress_required}")
+            if used >= self.tree_chop_progress_required:
                 floor_id = (
                     self.mapgen_cfg.floor_fallback_id
                     if self.mapgen_cfg.floor_fallback_id in self.tiles
@@ -1405,7 +1424,7 @@ class MultiAgentRLRLGym:
                 log_qty = 1 + max(0, axe_bonus // 2)
                 log_added = self._add_item_or_drop(actor, "log", log_qty, events)
                 events.append(f"chop_tree_felled:{nr}:{nc}:log:{log_qty}:{log_added}")
-                if self._rng.random() < TREE_SAPLING_DROP_CHANCE:
+                if self._rng.random() < self.tree_sapling_drop_chance:
                     sapling_added = self._add_item_or_drop(actor, "sapling", 1, events)
                     events.append(f"chop_tree_sapling:{nr}:{nc}:{sapling_added}")
                 reward += 0.08 + (0.02 * float(log_qty))
@@ -1421,7 +1440,7 @@ class MultiAgentRLRLGym:
             if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
                 continue
             adj_tile = self.state.grid[nr][nc]
-            if adj_tile not in MINABLE_WALL_TILE_IDS:
+            if adj_tile not in self.minable_wall_tile_ids:
                 continue
             if self._harvest_exhausted((nr, nc), adj_tile, events):
                 return -0.02, True
@@ -1453,7 +1472,7 @@ class MultiAgentRLRLGym:
 
         # Mine stone floor underfoot. It depletes after 5 interactions but remains stone.
         tile_id = self.state.grid[r][c]
-        if tile_id in MINABLE_GROUND_TILE_IDS:
+        if tile_id in self.minable_ground_tile_ids:
             if self._harvest_exhausted((r, c), tile_id, events):
                 return -0.02, True
             used = int(self.state.tile_interactions.get((r, c), 0))
@@ -1467,7 +1486,7 @@ class MultiAgentRLRLGym:
             added = self._add_item_or_drop(actor, "stone", max(1, qty), events)
             self._record_harvest((r, c))
             flint_added = 0
-            flint_chance = min(0.35, STONE_FLOOR_FLINT_CHANCE + (0.01 * float(mining_tool_bonus)))
+            flint_chance = min(0.35, self.stone_floor_flint_chance + (0.01 * float(mining_tool_bonus)))
             if self._rng.random() < flint_chance:
                 flint_added = self._add_item_or_drop(actor, "flint", 1, events)
             self._gain_skill_xp(actor, "mining", max(1, qty * 2), events)
@@ -1490,7 +1509,7 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         pos = actor.position
         tile_id = self.state.grid[pos[0]][pos[1]]
-        forage_tiles = {"grass", "bush"}
+        forage_tiles = set(self.forage_tile_ids)
         if tile_id not in forage_tiles:
             return 0.0, False
         tile = self.tiles.get(tile_id)
@@ -1556,7 +1575,7 @@ class MultiAgentRLRLGym:
         crop_id = self._first_plantable_crop(actor.inventory)
         if not crop_id:
             return 0.0, False
-        crop = PLANT_TYPES[crop_id]
+        crop = self.plant_types[crop_id]
         seed_item = str(crop["seed_item"])
         if self._pop_first_base_item(actor.inventory, seed_item) is None:
             return 0.0, False
@@ -1585,9 +1604,9 @@ class MultiAgentRLRLGym:
             return -0.02, True
         plot = self.state.plant_plots.get(pos)
         crop_id = plot.crop_id if plot is not None else self._crop_from_tile(self.state.grid[pos[0]][pos[1]])
-        if not crop_id or crop_id not in PLANT_TYPES:
+        if not crop_id or crop_id not in self.plant_types:
             return 0.0, False
-        crop = PLANT_TYPES[crop_id]
+        crop = self.plant_types[crop_id]
         food_item = str(crop["food_item"])
         seed_item = str(crop["seed_item"])
         food_min, food_max = tuple(crop["food_qty"])
@@ -1625,14 +1644,14 @@ class MultiAgentRLRLGym:
 
     def _first_plantable_crop(self, inventory: List[str]) -> str:
         counts = self._count_base_items(inventory)
-        for crop_id, row in sorted(PLANT_TYPES.items()):
+        for crop_id, row in sorted(self.plant_types.items()):
             seed_item = str(row.get("seed_item", "")).strip()
             if seed_item and int(counts.get(seed_item, 0)) > 0:
                 return crop_id
         return ""
 
     def _crop_from_tile(self, tile_id: str) -> str:
-        for crop_id, row in PLANT_TYPES.items():
+        for crop_id, row in self.plant_types.items():
             if str(row.get("crop_tile", "")).strip() == str(tile_id):
                 return crop_id
         return ""
@@ -1920,7 +1939,7 @@ class MultiAgentRLRLGym:
     def _harvest_exhausted(self, pos: Tuple[int, int], tile_id: str, events: List[str]) -> bool:
         assert self.state is not None
         used = int(self.state.tile_harvest_counts.get(pos, 0))
-        if used >= HARVESTS_PER_TILE_LIMIT:
+        if used >= self.harvests_per_tile_limit:
             events.append(f"harvest_tile_exhausted:{tile_id}:{pos[0]}:{pos[1]}")
             return True
         return False
@@ -4058,7 +4077,7 @@ class MultiAgentRLRLGym:
                 self._assert_item_known(
                     animal.shear_item, f"animal '{animal_id}' shear_item"
                 )
-        for crop_id, row in sorted(PLANT_TYPES.items()):
+        for crop_id, row in sorted(self.plant_types.items()):
             seed_item = str(row.get("seed_item", "")).strip()
             food_item = str(row.get("food_item", "")).strip()
             crop_tile = str(row.get("crop_tile", "")).strip()
@@ -4897,7 +4916,7 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         if bool(animal.carnivore):
             return self._animal_find_prey(animal) is not None
-        forage_tiles = {"grass", "bush", "tree"}
+        forage_tiles = set(self.animal_forage_tile_ids)
         for nr, nc in self._animal_neighborhood(pos):
             if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
                 continue
@@ -4917,7 +4936,7 @@ class MultiAgentRLRLGym:
 
     def _animal_consume_forage(self, pos: Tuple[int, int]) -> bool:
         assert self.state is not None
-        forage_tiles = {"grass", "bush", "tree"}
+        forage_tiles = set(self.animal_forage_tile_ids)
         candidates = self._animal_neighborhood(pos)
         self._rng.shuffle(candidates)
         for nr, nc in candidates:
@@ -4951,12 +4970,12 @@ class MultiAgentRLRLGym:
     def _animal_can_drink(self, pos: Tuple[int, int]) -> bool:
         assert self.state is not None
         r, c = pos
-        if self.state.grid[r][c] in WATER_TILE_IDS:
+        if self.state.grid[r][c] in self.water_tile_ids:
             return True
         for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
             if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
                 continue
-            if self.state.grid[nr][nc] in WATER_TILE_IDS:
+            if self.state.grid[nr][nc] in self.water_tile_ids:
                 return True
         return False
 
@@ -4992,7 +5011,7 @@ class MultiAgentRLRLGym:
                 continue
             if other.animal_id == predator.animal_id:
                 continue
-            if int(predator.prey_score) < int(other.prey_score) + PREY_SCORE_HUNT_MARGIN:
+            if int(predator.prey_score) < int(other.prey_score) + self.prey_score_hunt_margin:
                 continue
             dist = self._manhattan(predator.position, other.position)
             if dist > max(4, int(self.config.monster_sight_range)):

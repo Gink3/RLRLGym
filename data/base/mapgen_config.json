@@ -97,6 +97,42 @@
       "dirt_cluster_noise_scale": 18.0,
       "dirt_cluster_roughness": 0.28
     },
+    "resource_rules": {
+      "water_tile_ids": ["water", "shallow_water", "deep_water"],
+      "minable_wall_tile_ids": ["rock_wall", "stone_wall"],
+      "minable_ground_tile_ids": ["stone_floor"],
+      "tree_tile_ids": ["tree"],
+      "forage_tile_ids": ["grass", "bush"],
+      "animal_forage_tile_ids": ["grass", "bush", "tree"],
+      "harvests_per_tile_limit": 12,
+      "tree_chop_progress_required": 10,
+      "stone_floor_flint_chance": 0.18,
+      "tree_sapling_drop_chance": 0.2,
+      "prey_score_hunt_margin": 2
+    },
+    "plant_types": {
+      "berry": {
+        "seed_item": "berry_seed",
+        "crop_tile": "berry_plant",
+        "food_item": "berries",
+        "food_qty": [1, 3],
+        "seed_qty": [1, 2]
+      },
+      "grain": {
+        "seed_item": "grain_seed",
+        "crop_tile": "grain_plant",
+        "food_item": "grain_bundle",
+        "food_qty": [1, 2],
+        "seed_qty": [1, 3]
+      },
+      "herb": {
+        "seed_item": "herb_seed",
+        "crop_tile": "herb_plant",
+        "food_item": "herb_leaf",
+        "food_qty": [1, 2],
+        "seed_qty": [1, 2]
+      }
+    },
     "resource_nodes": [
       {
         "id": "stone_vein",
