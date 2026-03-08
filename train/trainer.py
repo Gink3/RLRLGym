@@ -931,6 +931,18 @@ class MultiAgentTrainer:
                 }
                 for (r, c), plot in sorted(state.plant_plots.items())
             ],
+            "resource_nodes": [
+                {
+                    "position": [r, c],
+                    "node_id": str(node.node_id),
+                    "skill": str(node.skill),
+                    "drop_item": str(node.drop_item),
+                    "remaining": int(node.remaining),
+                    "max_yield": int(node.max_yield),
+                    "biome": str(node.biome),
+                }
+                for (r, c), node in sorted(state.resource_nodes.items())
+            ],
             "agents": {
                 aid: {
                     "agent_id": agent.agent_id,

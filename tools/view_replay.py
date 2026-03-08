@@ -212,6 +212,23 @@ class ReplayWindow(QMainWindow):
         color.setAlpha(120)
         return color
 
+    def _resource_node_style(self, node_id: str, drop_item: str) -> tuple[str, QColor]:
+        node = str(node_id).strip().lower()
+        drop = str(drop_item).strip().lower()
+        if "timber" in node:
+            return "T", QColor("#c5904a")
+        if "berry" in node:
+            return "B", QColor("#d28be0")
+        if "grain" in node:
+            return "G", QColor("#e3c66d")
+        if "herb" in node:
+            return "H", QColor("#79c66a")
+        if drop in {"stone", "clay", "flint"}:
+            return "R", QColor("#aeb9c7")
+        if drop.endswith("_ore"):
+            return "O", QColor("#d9b062")
+        return "N", QColor("#9bc4df")
+
     def _set_frame(self, idx: int) -> None:
         if not self.frames:
             return
@@ -258,6 +275,27 @@ class ReplayWindow(QMainWindow):
             outline = QPen(QColor("#44d1d1"))
             outline.setWidth(2)
             self.scene.addRect(x + 1, y + 1, self.tile_px - 2, self.tile_px - 2, outline)
+
+        # Resource nodes
+        for row in frame.get("resource_nodes", []):
+            if not isinstance(row, dict):
+                continue
+            pos = row.get("position", [])
+            if not isinstance(pos, list) or len(pos) != 2:
+                continue
+            r = int(pos[0])
+            c = int(pos[1])
+            x = c * self.tile_px
+            y = r * self.tile_px
+            glyph, color = self._resource_node_style(
+                node_id=str(row.get("node_id", "")),
+                drop_item=str(row.get("drop_item", "")),
+            )
+            t = QGraphicsSimpleTextItem(glyph)
+            t.setBrush(color)
+            t.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
+            t.setPos(x + 4, y + 2)
+            self.scene.addItem(t)
 
         # Chests
         for row in frame.get("chests", []):
@@ -342,12 +380,14 @@ class ReplayWindow(QMainWindow):
         monsters_count = len([x for x in frame.get("monsters", []) if isinstance(x, dict) and bool(x.get("alive", True))])
         animals_count = len([x for x in frame.get("animals", []) if isinstance(x, dict) and bool(x.get("alive", True))])
         plants_count = len(frame.get("plant_plots", [])) if isinstance(frame.get("plant_plots", []), list) else 0
+        resource_nodes_count = len(frame.get("resource_nodes", [])) if isinstance(frame.get("resource_nodes", []), list) else 0
         summary_lines = [
             f"size: {w}x{h}",
             f"agents: {agents_count}",
             f"monsters(alive): {monsters_count}",
             f"animals(alive): {animals_count}",
             f"plant_plots: {plants_count}",
+            f"resource_nodes: {resource_nodes_count}",
         ]
         self.summary.setPlainText("\n".join(summary_lines))
 

@@ -18,8 +18,8 @@
           "sand_floor": 0.03,
           "stone_floor": 0.10,
           "bush": 0.09,
-          "berry_plant": 0.05,
-          "grain_plant": 0.04,
+          "berry_plant": 0.0,
+          "grain_plant": 0.0,
           "shallow_water": 0.03,
           "deep_water": 0.01,
           "shrine": 0.0002
@@ -33,9 +33,9 @@
           "dirt_floor": 0.07,
           "stone_floor": 0.03,
           "bush": 0.2,
-          "tree": 0.2,
-          "berry_plant": 0.05,
-          "herb_plant": 0.05,
+          "tree": 0.0,
+          "berry_plant": 0.0,
+          "herb_plant": 0.0,
           "shallow_water": 0.03,
           "deep_water": 0.01,
           "shrine": 0.0001
@@ -61,7 +61,7 @@
       "biome_smooth_passes": 2,
       "shallow_water_tile_id": "shallow_water",
       "deep_water_tile_id": "deep_water",
-      "tree_tile_id": "tree",
+      "tree_tile_id": "grass",
       "dirt_tile_id": "dirt_floor",
       "sand_tile_id": "sand_floor",
       "stone_tile_id": "rock_wall",
@@ -160,6 +160,33 @@
         "min_yield": 2,
         "max_yield": 5,
         "biomes": ["forest", "plains"]
+      },
+      {
+        "id": "berry_patch",
+        "skill": "foraging",
+        "drop_item": "berries",
+        "density": 0.03,
+        "min_yield": 1,
+        "max_yield": 3,
+        "biomes": ["plains", "forest"]
+      },
+      {
+        "id": "grain_patch",
+        "skill": "foraging",
+        "drop_item": "grain_bundle",
+        "density": 0.02,
+        "min_yield": 1,
+        "max_yield": 3,
+        "biomes": ["plains"]
+      },
+      {
+        "id": "herb_patch",
+        "skill": "foraging",
+        "drop_item": "herb_leaf",
+        "density": 0.02,
+        "min_yield": 1,
+        "max_yield": 2,
+        "biomes": ["forest", "rocky"]
       }
     ],
     "station_spawns": [
