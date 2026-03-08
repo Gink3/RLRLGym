@@ -12,6 +12,7 @@ from ..content.names import generate_full_name, load_name_table
 
 SCENARIO_ENV_FILE = "env_config.json"
 SCENARIO_AGENTS_FILE = "agents.json"
+SUPPORTED_AGENT_POLICIES = {"ppo", "ppo_masked", "recurrent_ppo", "dqn_masked"}
 
 
 @dataclass
@@ -24,6 +25,7 @@ class ScenarioAgent:
     name: Optional[str] = None
     profile: Optional[str] = None
     network: Optional[str] = None
+    policy: Optional[str] = None
     observation_config: Dict[str, object] = field(default_factory=dict)
 
 
@@ -52,11 +54,21 @@ def _agent_from_row(row: Dict[str, object], index: int) -> ScenarioAgent:
     name_raw = row.get("name")
     profile_raw = row.get("profile")
     network_raw = row.get("network")
+    policy_raw = row.get("policy")
     obs_raw = row.get("observation_config", {})
     if obs_raw is None:
         obs_raw = {}
     if not isinstance(obs_raw, dict):
         raise ValueError(f"scenario.agents[{index}].observation_config must be an object")
+    policy = (
+        str(policy_raw).strip().lower()
+        if policy_raw not in (None, "")
+        else None
+    )
+    if policy is not None and policy not in SUPPORTED_AGENT_POLICIES:
+        raise ValueError(
+            f"scenario.agents[{index}].policy '{policy}' must be one of {sorted(SUPPORTED_AGENT_POLICIES)}"
+        )
     return ScenarioAgent(
         agent_id=_normalize_agent_id(index),
         race=race,
@@ -64,6 +76,7 @@ def _agent_from_row(row: Dict[str, object], index: int) -> ScenarioAgent:
         name=(str(name_raw).strip() if name_raw not in (None, "") else None),
         profile=(str(profile_raw).strip() if profile_raw not in (None, "") else None),
         network=(str(network_raw).strip() if network_raw not in (None, "") else None),
+        policy=policy,
         observation_config=dict(obs_raw),
     )
 
@@ -156,6 +169,7 @@ def save_scenario(path: str | Path, scenario: Scenario) -> Path:
                 "name": agent.name,
                 "profile": agent.profile,
                 "network": agent.network,
+                "policy": agent.policy,
                 "observation_config": dict(agent.observation_config),
             }
             for agent in scenario.agents
@@ -176,6 +190,7 @@ def make_all_race_class_combinations(
     *,
     default_profile_by_race: Optional[Dict[str, str]] = None,
     default_network: Optional[str] = None,
+    default_policy: Optional[str] = None,
 ) -> List[ScenarioAgent]:
     out: List[ScenarioAgent] = []
     for race in sorted(str(r).strip() for r in races if str(r).strip()):
@@ -189,6 +204,7 @@ def make_all_race_class_combinations(
                     name=None,
                     profile=(default_profile_by_race or {}).get(race),
                     network=default_network,
+                    policy=default_policy,
                     observation_config={},
                 )
             )
@@ -203,6 +219,7 @@ def agent_combined_payload(
     name: Optional[str],
     profile: Optional[str],
     network: Optional[str],
+    policy: Optional[str],
     observation_config: Optional[Dict[str, object]],
     race_row: Optional[Dict[str, object]] = None,
     class_row: Optional[Dict[str, object]] = None,
@@ -214,6 +231,7 @@ def agent_combined_payload(
         "name": name,
         "profile": profile,
         "network": network,
+        "policy": policy,
         "observation_config": dict(observation_config or {}),
         "race_def": dict(race_row or {}),
         "class_def": dict(class_row or {}),
@@ -263,6 +281,7 @@ def apply_scenario_to_env_config(env_config, scenario: Scenario):
                 "name": normalized_name,
                 "profile": agent.profile,
                 "network": agent.network,
+                "policy": agent.policy,
                 "observation_config": dict(agent.observation_config),
             }
         )

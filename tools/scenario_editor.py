@@ -40,6 +40,7 @@ from rlrlgym.systems.scenario import (  # noqa: E402
     SCENARIO_ENV_FILE,
     Scenario,
     ScenarioAgent,
+    SUPPORTED_AGENT_POLICIES,
     agent_combined_payload,
     load_scenario,
     make_all_race_class_combinations,
@@ -131,6 +132,11 @@ class AgentDialog(QDialog):
         self.network_combo.addItems(["<none>"] + sorted(self._networks.keys()))
         top.addWidget(self.network_combo)
 
+        top.addWidget(QLabel("Policy"))
+        self.policy_combo = QComboBox()
+        self.policy_combo.addItems(["<none>"] + sorted(SUPPORTED_AGENT_POLICIES))
+        top.addWidget(self.policy_combo)
+
         self.json_edit = QPlainTextEdit()
         self.json_edit.setFont(QFont("DejaVu Sans Mono", 10))
         layout.addWidget(self.json_edit, stretch=1)
@@ -150,11 +156,14 @@ class AgentDialog(QDialog):
             self.profile_combo.setCurrentText(existing.profile)
         if existing and existing.network:
             self.network_combo.setCurrentText(existing.network)
+        if existing and existing.policy:
+            self.policy_combo.setCurrentText(existing.policy)
 
         self.race_combo.currentTextChanged.connect(self._write_template)
         self.class_combo.currentTextChanged.connect(self._write_template)
         self.profile_combo.currentTextChanged.connect(self._write_template)
         self.network_combo.currentTextChanged.connect(self._write_template)
+        self.policy_combo.currentTextChanged.connect(self._write_template)
         self.name_edit.textChanged.connect(self._write_template)
         save_btn.clicked.connect(self._on_save)
         cancel_btn.clicked.connect(self.reject)
@@ -172,6 +181,7 @@ class AgentDialog(QDialog):
             name=(self.name_edit.text().strip() or None),
             profile=None if self.profile_combo.currentText() == "<none>" else self.profile_combo.currentText(),
             network=None if self.network_combo.currentText() == "<none>" else self.network_combo.currentText(),
+            policy=None if self.policy_combo.currentText() == "<none>" else self.policy_combo.currentText(),
             observation_config=obs,
             race_row=getattr(self._races.get(race), "__dict__", {}),
             class_row=getattr(self._classes.get(class_name), "__dict__", {}),
@@ -196,6 +206,10 @@ class AgentDialog(QDialog):
             profile = None if profile in (None, "") else str(profile)
             network = payload.get("network")
             network = None if network in (None, "") else str(network)
+            policy = payload.get("policy")
+            policy = None if policy in (None, "") else str(policy).strip().lower()
+            if policy is not None and policy not in SUPPORTED_AGENT_POLICIES:
+                raise ValueError(f"Unknown policy '{policy}'")
             name = payload.get("name")
             name = None if name in (None, "") else str(name)
             self.result_agent = ScenarioAgent(
@@ -205,6 +219,7 @@ class AgentDialog(QDialog):
                 name=name,
                 profile=profile,
                 network=network,
+                policy=policy,
                 observation_config=dict(obs),
             )
             self.accept()

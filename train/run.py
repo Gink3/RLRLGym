@@ -22,6 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--agents", type=int, default=None)
     p.add_argument("--networks-path", type=str, default="data/base/agent/agent_networks.json")
     p.add_argument("--iterations", type=int, default=50)
+    p.add_argument(
+        "--algo",
+        choices=["ppo", "ppo_masked", "recurrent_ppo", "dqn_masked"],
+        default="ppo",
+        help="RLlib algorithm/policy mode.",
+    )
     p.add_argument("--framework", type=str, default="torch")
     p.add_argument("--num-gpus", type=float, default=0.0)
     p.add_argument("--num-rollout-workers", type=int, default=0)
@@ -129,6 +135,7 @@ def main() -> None:
         n_agents=args.agents,
         max_steps=args.max_steps,
         framework=args.framework,
+        algo=args.algo,
         num_gpus=args.num_gpus,
         num_rollout_workers=args.num_rollout_workers,
         train_batch_size=args.train_batch_size,

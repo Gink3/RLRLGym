@@ -46,6 +46,11 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         self.observation_spaces = {aid: self._obs_space for aid in self.possible_agents}
         self.action_spaces = {aid: self._action_space for aid in self.possible_agents}
         self._done_agents: set[str] = set()
+        self._enable_action_masking = bool(cfg.get("enable_action_masking", False))
+        self._last_action_masks: Dict[str, np.ndarray] = {
+            aid: np.ones((int(ACTION_MAX) + 1,), dtype=np.int8)
+            for aid in self.possible_agents
+        }
         self._episode_counter = 0
         self._replay_save_every = int(cfg.get("replay_save_every", 5000))
         out_dir = cfg.get("replay_output_dir", "")
@@ -96,7 +101,43 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             aid: np.array(vectorize_observation(o), dtype=np.float32)
             for aid, o in obs.items()
         }
+        self._update_action_masks(info)
         return vec_obs, info
+
+    def _update_action_masks(self, info: Dict[str, Dict[str, object]]) -> None:
+        for aid in self.possible_agents:
+            row = info.get(aid, {})
+            if not isinstance(row, dict):
+                continue
+            raw = row.get("action_mask")
+            if not isinstance(raw, (list, tuple)):
+                continue
+            vals = np.asarray(raw, dtype=np.int8)
+            if vals.shape != (int(ACTION_MAX) + 1,):
+                continue
+            if int(np.sum(vals)) <= 0:
+                vals = np.ones((int(ACTION_MAX) + 1,), dtype=np.int8)
+            self._last_action_masks[aid] = vals
+
+    def _apply_action_masks(self, action_dict: Dict[str, int]) -> Dict[str, int]:
+        if not self._enable_action_masking:
+            return dict(action_dict)
+        out: Dict[str, int] = {}
+        for aid, action in dict(action_dict).items():
+            try:
+                a = int(action)
+            except Exception:
+                a = 0
+            mask = self._last_action_masks.get(aid)
+            if mask is None or mask.shape != (int(ACTION_MAX) + 1,):
+                out[aid] = a
+                continue
+            if 0 <= a < len(mask) and int(mask[a]) > 0:
+                out[aid] = a
+                continue
+            valid = np.flatnonzero(mask > 0)
+            out[aid] = int(valid[0]) if len(valid) > 0 else 0
+        return out
 
     def _parse_curriculum_phases(self, raw) -> list[Dict[str, object]]:
         if not isinstance(raw, list):
@@ -139,22 +180,26 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                     setattr(self.base.config, key, value)
 
     def step(self, action_dict):
-        obs, rewards, terminations, truncations, info = self.base.step(action_dict)
+        applied_actions = self._apply_action_masks(action_dict)
+        obs, rewards, terminations, truncations, info = self.base.step(applied_actions)
+        self._update_action_masks(info)
         for aid in self.possible_agents:
             info.setdefault(aid, {})
             if isinstance(info[aid], dict):
                 info[aid]["phase_name"] = self._active_phase_name
                 info[aid]["phase_index"] = self._active_phase_index
+                if self._enable_action_masking:
+                    info[aid]["action_masking_applied"] = True
         if self._replay_states:
             self._replay_states.append(self.base.capture_playback_state())
             self._replay_actions.append(
-                {aid: int(a) for aid, a in dict(action_dict).items()}
+                {aid: int(a) for aid, a in dict(applied_actions).items()}
             )
             prev_state = self._replay_states[-2] if len(self._replay_states) >= 2 else None
             curr_state = self._replay_states[-1]
             self._replay_step_logs.append(
                 self._build_replay_step_log(
-                    actions=dict(action_dict),
+                    actions=dict(applied_actions),
                     rewards=rewards,
                     terminations=terminations,
                     truncations=truncations,

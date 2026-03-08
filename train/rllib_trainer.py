@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import numbers
@@ -16,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 from rlrlgym.systems.curriculum import load_curriculum_phases
+from rlrlgym.systems.scenario import SUPPORTED_AGENT_POLICIES, load_scenario
 
 from .aim_logger import AimLogger
 from .data_archive import archive_training_inputs
@@ -30,6 +32,7 @@ class RLlibTrainConfig:
     n_agents: Optional[int] = None
     max_steps: Optional[int] = None
     framework: str = "torch"
+    algo: str = "ppo"
     num_gpus: int = 0
     num_rollout_workers: int = 0
     train_batch_size: int = 4000
@@ -57,6 +60,7 @@ class RLlibTrainer:
             import ray
             from ray import air
             from ray.rllib.algorithms.callbacks import DefaultCallbacks
+            from ray.rllib.algorithms.dqn import DQNConfig
             from ray.rllib.algorithms.ppo import PPOConfig
             from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec
             from ray.rllib.core.rl_module.rl_module import RLModuleSpec
@@ -72,6 +76,7 @@ class RLlibTrainer:
         self._air = air
         self._DefaultCallbacks = DefaultCallbacks
         self._PPOConfig = PPOConfig
+        self._DQNConfig = DQNConfig
         self._MultiRLModuleSpec = MultiRLModuleSpec
         self._RLModuleSpec = RLModuleSpec
         self._register_env = register_env
@@ -93,6 +98,7 @@ class RLlibTrainer:
                 "n_agents": None if config.n_agents is None else int(config.n_agents),
                 "max_steps": None if config.max_steps is None else int(config.max_steps),
                 "framework": str(config.framework),
+                "algo": str(config.algo),
                 "num_gpus": float(config.num_gpus),
                 "num_rollout_workers": int(config.num_rollout_workers),
                 "train_batch_size": int(config.train_batch_size),
@@ -116,6 +122,60 @@ class RLlibTrainer:
         logging.getLogger("ray.rllib.core.rl_module.rl_module").setLevel(logging.ERROR)
         logging.getLogger("ray.rllib.utils.sgd").setLevel(logging.ERROR)
 
+    def _scenario_policy_mode(self) -> str | None:
+        path = str(self.config.scenario_path or "").strip()
+        if not path:
+            return None
+        scenario = load_scenario(path)
+        modes = {
+            str(agent.policy).strip().lower()
+            for agent in scenario.agents
+            if str(agent.policy or "").strip()
+        }
+        if not modes:
+            return None
+        unsupported = [m for m in sorted(modes) if m not in SUPPORTED_AGENT_POLICIES]
+        if unsupported:
+            raise RuntimeError(f"Unsupported scenario policy mode(s): {unsupported}")
+        if len(modes) > 1:
+            raise RuntimeError(
+                f"Mixed scenario policy modes are not supported in one run: {sorted(modes)}"
+            )
+        return next(iter(modes))
+
+    def _resolved_algo_mode(self) -> str:
+        requested = str(self.config.algo or "ppo").strip().lower()
+        scenario_mode = self._scenario_policy_mode()
+        if scenario_mode is None:
+            return requested
+        if requested not in {"", "ppo", scenario_mode}:
+            raise RuntimeError(
+                f"Requested --algo='{requested}' conflicts with scenario policy '{scenario_mode}'."
+            )
+        return scenario_mode
+
+    def _training_with_supported_keys(
+        self,
+        cfg,
+        *,
+        train_batch_size: int,
+        minibatch_size: int,
+        num_epochs: int,
+    ):
+        params = set(inspect.signature(cfg.training).parameters.keys())
+        kwargs: Dict[str, object] = {}
+        if "train_batch_size" in params:
+            kwargs["train_batch_size"] = int(train_batch_size)
+        if "minibatch_size" in params:
+            kwargs["minibatch_size"] = int(minibatch_size)
+        elif "sgd_minibatch_size" in params:
+            kwargs["sgd_minibatch_size"] = int(minibatch_size)
+        if "num_epochs" in params:
+            kwargs["num_epochs"] = int(num_epochs)
+        elif "num_sgd_iter" in params:
+            kwargs["num_sgd_iter"] = int(num_epochs)
+        return cfg.training(**kwargs)
+
     def _configure_ray_storage_defaults(self) -> None:
         """Force Ray result storage into workspace-writable path."""
         storage_root = (Path(self.config.output_dir) / "ray_results").resolve()
@@ -132,6 +192,9 @@ class RLlibTrainer:
 
     def train(self) -> Dict[str, object]:
         env_name = "RLRLGymRLlib-v0"
+        algo_mode = self._resolved_algo_mode()
+        use_action_masking = algo_mode in {"ppo_masked", "dqn_masked"}
+        use_recurrent = algo_mode == "recurrent_ppo"
         window = 50
         recent_returns: deque[float] = deque(maxlen=window)
         recent_survival: deque[float] = deque(maxlen=window)
@@ -151,6 +214,7 @@ class RLlibTrainer:
             "env_config_path": self.config.env_config_path,
             "scenario_path": str(self.config.scenario_path or ""),
             "curriculum_phases": curriculum_phases,
+            "enable_action_masking": bool(use_action_masking),
         }
         if self.config.width is not None:
             env_config["width"] = int(self.config.width)
@@ -548,6 +612,10 @@ class RLlibTrainer:
         warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"ray\..*")
         warnings.filterwarnings("ignore", category=FutureWarning, module=r"ray\..*")
 
+        model_cfg: Dict[str, object] = {}
+        if use_recurrent:
+            model_cfg = {"use_lstm": True, "max_seq_len": 20}
+
         if self.config.shared_policy:
             policy_ids = ["shared_policy"]
             rl_module_spec = self._MultiRLModuleSpec(
@@ -556,7 +624,7 @@ class RLlibTrainer:
                         observation_space=sample_obs_space,
                         action_space=sample_action_space,
                         inference_only=False,
-                        model_config={},
+                        model_config=dict(model_cfg),
                     )
                 }
             )
@@ -571,13 +639,13 @@ class RLlibTrainer:
                         observation_space=sample_obs_space,
                         action_space=sample_action_space,
                         inference_only=False,
-                        model_config={},
+                        model_config=dict(model_cfg),
                     ),
                     "orc_policy": self._RLModuleSpec(
                         observation_space=sample_obs_space,
                         action_space=sample_action_space,
                         inference_only=False,
-                        model_config={},
+                        model_config=dict(model_cfg),
                     ),
                 }
             )
@@ -592,8 +660,8 @@ class RLlibTrainer:
             train_batch_size = 8192
             sgd_minibatch_size = max(sgd_minibatch_size, 1024)
 
-        ppo = (
-            self._PPOConfig()
+        base_cfg = (
+            (self._DQNConfig() if algo_mode == "dqn_masked" else self._PPOConfig())
             .environment(env=env_name, env_config=env_config)
             .api_stack(
                 enable_rl_module_and_learner=True,
@@ -602,11 +670,6 @@ class RLlibTrainer:
             .framework(self.config.framework)
             .resources(num_gpus=self.config.num_gpus)
             .env_runners(num_env_runners=self.config.num_rollout_workers)
-            .training(
-                train_batch_size=train_batch_size,
-                sgd_minibatch_size=sgd_minibatch_size,
-                num_sgd_iter=int(self.config.num_sgd_iter),
-            )
             .rl_module(rl_module_spec=rl_module_spec)
             .callbacks(MetricsCallbacks)
             .multi_agent(
@@ -616,8 +679,14 @@ class RLlibTrainer:
             )
             .debugging(seed=self.config.seed, log_sys_usage=False)
         )
+        base_cfg = self._training_with_supported_keys(
+            base_cfg,
+            train_batch_size=train_batch_size,
+            minibatch_size=sgd_minibatch_size,
+            num_epochs=int(self.config.num_sgd_iter),
+        )
 
-        algo = ppo.build_algo()
+        algo = base_cfg.build_algo()
 
         out = Path(self.config.output_dir)
         out.mkdir(parents=True, exist_ok=True)

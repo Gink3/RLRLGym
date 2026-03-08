@@ -8,6 +8,7 @@ from rlrlgym.world.env import PettingZooParallelRLRLGym
 from rlrlgym.systems.scenario import (
     SCENARIO_AGENTS_FILE,
     SCENARIO_ENV_FILE,
+    SUPPORTED_AGENT_POLICIES,
     apply_scenario_to_env_config,
     load_scenario,
     make_all_race_class_combinations,
@@ -31,8 +32,20 @@ class TestScenario(unittest.TestCase):
                 "name": "smoke",
                 "env_config": {"width": 22, "height": 18},
                 "agents": [
-                    {"race": "human", "class": "fighter", "profile": "human", "network": "default"},
-                    {"race": "orc", "class": "rogue", "profile": "orc", "network": "default"},
+                    {
+                        "race": "human",
+                        "class": "fighter",
+                        "profile": "human",
+                        "network": "default",
+                        "policy": "ppo_masked",
+                    },
+                    {
+                        "race": "orc",
+                        "class": "rogue",
+                        "profile": "orc",
+                        "network": "default",
+                        "policy": "ppo_masked",
+                    },
                 ],
             },
         }
@@ -48,7 +61,44 @@ class TestScenario(unittest.TestCase):
             self.assertEqual(cfg.agent_race_map["agent_0"], "human")
             self.assertEqual(cfg.agent_class_map["agent_1"], "rogue")
             self.assertEqual(cfg.agent_profile_map["agent_1"], "orc")
+            self.assertEqual(str(cfg.agent_scenario[0].get("policy", "")), "ppo_masked")
             self.assertTrue(str(cfg.agent_scenario[0].get("name", "")).strip())
+
+    def test_rejects_unknown_policy(self):
+        payload = {
+            "schema_version": 1,
+            "scenario": {
+                "name": "bad_policy",
+                "env_config": {},
+                "agents": [
+                    {"race": "human", "class": "fighter", "policy": "invalid_policy"}
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "scenario.json"
+            p.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_scenario(p)
+
+    def test_save_and_load_policy_field(self):
+        policy = sorted(SUPPORTED_AGENT_POLICIES)[0]
+        scenario = Scenario(
+            name="policy_roundtrip",
+            env_config={},
+            agents=[
+                ScenarioAgent(
+                    agent_id="agent_0",
+                    race="human",
+                    class_name="fighter",
+                    policy=policy,
+                )
+            ],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = save_scenario(Path(tmp) / "policy_roundtrip", scenario)
+            loaded = load_scenario(out_dir)
+            self.assertEqual(loaded.agents[0].policy, policy)
 
     def test_default_or_blank_names_are_auto_generated(self):
         scenario = Scenario(
