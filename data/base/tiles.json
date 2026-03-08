@@ -189,6 +189,42 @@
       "spawn_weight": 0.0,
       "max_interactions": 5,
       "loot_table": []
+    },
+    {
+      "id": "wood_door",
+      "glyph": "+",
+      "color": "yellow",
+      "walkable": true,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
+      "id": "spike_trap",
+      "glyph": "^",
+      "color": "bright_red",
+      "walkable": true,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
+      "id": "campfire",
+      "glyph": "*",
+      "color": "bright_yellow",
+      "walkable": true,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
+    },
+    {
+      "id": "clay_forge",
+      "glyph": "F",
+      "color": "yellow",
+      "walkable": false,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
     }
   ]
 }

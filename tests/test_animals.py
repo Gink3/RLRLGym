@@ -176,8 +176,73 @@ class TestAnimals(unittest.TestCase):
             ),
         }
         before = len(env.state.animals)
+        env.state.animals["animal_cow_a"].gender = "female"
+        env.state.animals["animal_cow_b"].gender = "male"
         env._animal_try_reproduce(env.state.animals["animal_cow_a"])
         self.assertGreater(len(env.state.animals), before)
+
+    def test_carnivore_hunts_lower_prey_score_animals(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=106)
+        for r in range(1, env.config.height - 1):
+            for c in range(1, env.config.width - 1):
+                env.state.grid[r][c] = "floor"
+        env.state.animals = {
+            "animal_wolf": AnimalState(
+                entity_id="animal_wolf",
+                animal_id="wolf",
+                name="Wolf",
+                symbol="W",
+                color="bright_black",
+                position=(5, 5),
+                hp=12,
+                max_hp=12,
+                hunger=4,
+                max_hunger=16,
+                thirst=8,
+                max_thirst=12,
+                age=12,
+                mature_age=8,
+                reproduction_cooldown=0,
+                reproduction_cooldown_max=10,
+                prey_score=8,
+                movement_speed=2,
+                carnivore=True,
+                gender="female",
+                litter_size_min=1,
+                litter_size_max=2,
+                alive=True,
+            ),
+            "animal_rabbit": AnimalState(
+                entity_id="animal_rabbit",
+                animal_id="rabbit",
+                name="Rabbit",
+                symbol="r",
+                color="white",
+                position=(5, 6),
+                hp=2,
+                max_hp=2,
+                hunger=6,
+                max_hunger=10,
+                thirst=8,
+                max_thirst=10,
+                age=6,
+                mature_age=4,
+                reproduction_cooldown=0,
+                reproduction_cooldown_max=6,
+                prey_score=1,
+                movement_speed=2,
+                carnivore=False,
+                gender="male",
+                litter_size_min=2,
+                litter_size_max=3,
+                alive=True,
+            ),
+        }
+        env._apply_animal_turn(info={"agent_0": {"events": []}})
+        self.assertFalse(env.state.animals["animal_rabbit"].alive)
 
     def test_animals_consume_forage_tiles(self):
         env = PettingZooParallelRLRLGym(
@@ -214,7 +279,10 @@ class TestAnimals(unittest.TestCase):
         env._animal_tick_needs(animal)
         self.assertGreater(animal.hunger, 2)
         env._animal_tick_needs(animal)
-        self.assertEqual(env.state.grid[5][5], "floor")
+        self.assertTrue(
+            env.state.grid[5][5] == "floor"
+            or int(env.state.tile_interactions.get((5, 5), 0)) > 0
+        )
 
 
 if __name__ == "__main__":

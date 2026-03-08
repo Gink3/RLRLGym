@@ -1,7 +1,7 @@
 import unittest
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
-from rlrlgym.systems.constants import ACTION_EQUIP, ACTION_INTERACT, ACTION_INTERACT_MINE, ACTION_INTERACT_STATION
+from rlrlgym.systems.constants import ACTION_EQUIP, ACTION_INTERACT, ACTION_INTERACT_MINE, ACTION_INTERACT_STATION, ACTION_MOVE_EAST
 from rlrlgym.systems.models import ResourceNodeState, StationState
 
 
@@ -141,6 +141,79 @@ class TestGatherAndCrafting(unittest.TestCase):
         self.assertTrue(
             any(str(evt).startswith("harvest_tile_exhausted:stone_floor") for evt in info[aid]["events"])
         )
+
+    def test_tool_durability_decreases_on_mining_use(self):
+        cfg = EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
+        env = PettingZooParallelRLRLGym(cfg)
+        env.reset(seed=23)
+        aid = "agent_0"
+        env.state.agents[aid].position = (4, 4)
+        env.state.grid[4][4] = "stone_floor"
+        env.state.agents[aid].inventory.insert(0, "stone_pickaxe")
+        env.step({aid: ACTION_EQUIP})
+        equipped = env.state.agents[aid].equipped[-1]
+        before = env._item_current_durability(equipped)
+        env.step({aid: ACTION_INTERACT_MINE})
+        equipped_after = env.state.agents[aid].equipped[-1]
+        after = env._item_current_durability(equipped_after)
+        self.assertLess(after, before)
+
+    def test_build_campfire_and_refuel(self):
+        recipes_data = {
+            "schema_version": 1,
+            "recipes": [
+                {
+                    "id": "build_fire_test",
+                    "inputs": {"campfire_kit": 1},
+                    "outputs": {},
+                    "skill": "crafting",
+                    "station": "workbench",
+                    "build_tile_id": "campfire",
+                }
+            ],
+        }
+        cfg = EnvConfig(
+            width=12,
+            height=10,
+            n_agents=1,
+            max_steps=8,
+            render_enabled=False,
+            recipes_data=recipes_data,
+        )
+        env = PettingZooParallelRLRLGym(cfg)
+        env.reset(seed=24)
+        aid = "agent_0"
+        pos = env.state.agents[aid].position
+        env.state.stations[pos] = StationState(
+            station_id="workbench",
+            position=pos,
+            speed_multiplier=1.0,
+            quality_tier=0,
+            unlock_recipes=["build_fire_test"],
+        )
+        env.state.agents[aid].inventory.append("campfire_kit")
+        env.step({aid: ACTION_INTERACT_STATION})
+        fire_pos = None
+        for nr, nc in ((pos[0] - 1, pos[1]), (pos[0] + 1, pos[1]), (pos[0], pos[1] - 1), (pos[0], pos[1] + 1)):
+            if env.state.grid[nr][nc] == "campfire":
+                fire_pos = (nr, nc)
+                break
+        self.assertIsNotNone(fire_pos)
+        env.state.agents[aid].position = fire_pos
+        env.state.agents[aid].inventory.append("stick")
+        _, _, _, _, info = env.step({aid: ACTION_INTERACT})
+        self.assertTrue(any(str(evt).startswith("fire_refuel:stick:") for evt in info[aid]["events"]))
+
+    def test_spike_trap_damages_on_move(self):
+        cfg = EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)
+        env = PettingZooParallelRLRLGym(cfg)
+        env.reset(seed=25)
+        aid = "agent_0"
+        env.state.agents[aid].position = (5, 5)
+        env.state.grid[5][6] = "spike_trap"
+        hp_before = env.state.agents[aid].hp
+        env.step({aid: ACTION_MOVE_EAST})
+        self.assertLess(env.state.agents[aid].hp, hp_before)
 
 
 if __name__ == "__main__":

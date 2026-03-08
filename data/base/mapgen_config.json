@@ -200,10 +200,23 @@
           "craft_stone_axe",
           "craft_stone_shovel",
           "craft_stone_handaxe",
+          "craft_stone_knife",
           "craft_wood_planks",
           "craft_wood_from_log",
+          "craft_sticks_from_log",
+          "craft_wood_wall_kit",
+          "build_wood_wall",
+          "craft_wood_door_kit",
+          "build_wood_door",
+          "craft_spike_trap_kit",
+          "build_spike_trap",
+          "craft_campfire_kit",
+          "build_campfire",
+          "craft_clay_forge_kit",
+          "build_clay_forge",
           "craft_wood_wall",
-          "craft_rock_wall"
+          "craft_rock_wall",
+          "build_rock_wall"
         ]
       },
       {

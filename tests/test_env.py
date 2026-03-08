@@ -67,6 +67,25 @@ class TestEnv(unittest.TestCase):
         env.reset(seed=3)
         self.assertIsNone(env.render())
 
+    def test_los_blocks_observation_and_default_vision_is_20(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=30, height=30, n_agents=1, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=33)
+        aid = "agent_0"
+        env.state.agents[aid].position = (10, 10)
+        env.state.grid[10][11] = "rock_wall"
+        env.state.grid[10][12] = "grass"
+        h, w = env._observation_window_dims(aid)
+        self.assertGreaterEqual(h, 20)
+        self.assertGreaterEqual(w, 20)
+        obs = env._build_observation(aid)
+        local = obs.get("local_tiles", [])
+        row = len(local) // 2
+        col = len(local[0]) // 2
+        self.assertEqual(local[row][col + 1], "rock_wall")
+        self.assertEqual(local[row][col + 2], "fog")
+
     def test_attack_can_attack_adjacent_agent(self):
         env = PettingZooParallelRLRLGym(
             EnvConfig(width=12, height=10, n_agents=2, max_steps=20, render_enabled=False)
@@ -927,6 +946,10 @@ class TestEnv(unittest.TestCase):
         a1.faction_id = 7
         a0.position = (5, 5)
         a1.position = (6, 6)
+        env.state.grid[5][5] = "floor"
+        env.state.chests.pop((5, 5), None)
+        env.state.resource_nodes.pop((5, 5), None)
+        env.state.stations.pop((5, 5), None)
         a0.inventory.extend(["berry_seed"])
         env.step({"agent_0": ACTION_INTERACT, "agent_1": ACTION_WAIT})
         a1.position = (5, 5)

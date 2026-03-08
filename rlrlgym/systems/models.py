@@ -155,6 +155,12 @@ class AnimalState:
     mature_age: int
     reproduction_cooldown: int
     reproduction_cooldown_max: int
+    prey_score: int = 1
+    movement_speed: int = 1
+    carnivore: bool = False
+    gender: str = "female"
+    litter_size_min: int = 1
+    litter_size_max: int = 1
     can_shear: bool = False
     sheared: bool = False
     shear_item: str = ""

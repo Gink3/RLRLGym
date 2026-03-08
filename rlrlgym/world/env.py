@@ -130,6 +130,29 @@ TREE_TILE_IDS = {"tree"}
 HARVESTS_PER_TILE_LIMIT = 12
 TREE_CHOP_PROGRESS_REQUIRED = 10
 STONE_FLOOR_FLINT_CHANCE = 0.18
+TREE_SAPLING_DROP_CHANCE = 0.2
+DEFAULT_VISION_RANGE = 20
+PREY_SCORE_HUNT_MARGIN = 2
+FIRE_FUEL_MAX = 20
+FIRE_FUEL_PER_STICK = 2
+FIRE_FUEL_PER_WOOD = 5
+FIRE_FUEL_PER_LOG = 8
+FIRE_FUEL_DECAY_PER_STEP = 1
+OPAQUE_TILE_IDS = {
+    "wall",
+    "indestructible_wall",
+    "wood_wall",
+    "rock_wall",
+    "stone_wall",
+    "tree",
+}
+TOOL_DURABILITY_USE_BY_CATEGORY: Dict[str, int] = {
+    "axe": 1,
+    "pickaxe": 1,
+    "shovel": 1,
+    "handaxe": 1,
+    "knife": 1,
+}
 PLANT_TYPES: Dict[str, Dict[str, object]] = {
     "berry": {
         "seed_item": "berry_seed",
@@ -246,6 +269,8 @@ class EnvConfig:
     invalid_faction_action_penalty: float = 0.03
     defend_unarmed_dr_bonus: int = 2
     render_enabled: bool = True
+    vision_range_default: int = DEFAULT_VISION_RANGE
+    enable_los: bool = True
 
     @classmethod
     def from_json(cls, path: str | Path) -> "EnvConfig":
@@ -358,6 +383,7 @@ class MultiAgentRLRLGym:
         self.tool_category_by_item = dict(self.items.tool_category_by_item)
         self.tool_skill_by_item = dict(self.items.tool_skill_by_item)
         self.tool_skill_bonus_by_item = dict(self.items.tool_skill_bonus_by_item)
+        self.base_durability_by_item = dict(self.items.base_durability_by_item)
         self.armor_slot_by_item = dict(self.items.armor_slot_by_item)
         self.armor_class_by_item = dict(self.items.armor_class_by_item)
         self.item_weight = dict(self.items.item_weight)
@@ -668,6 +694,7 @@ class MultiAgentRLRLGym:
 
         self._apply_monster_turn(rewards, terminations, info)
         self._apply_animal_turn(info=info)
+        self._tick_fires()
         self.state.step_count += 1
 
         if self.state.step_count >= self.config.max_steps:
@@ -923,6 +950,12 @@ class MultiAgentRLRLGym:
                 old_pos = agent.position
                 agent.position = (nr, nc)
                 events.append(f"move:{old_pos}->{agent.position}")
+                tile_here = self.state.grid[nr][nc]
+                if tile_here == "spike_trap":
+                    trap_damage = 2
+                    agent.hp = max(0, int(agent.hp) - trap_damage)
+                    events.append(f"trap_hit:spike:{trap_damage}")
+                    reward -= 0.03 * float(trap_damage)
                 self._gain_skill_xp(agent, "athletics", 1, events)
                 self._gain_skill_xp(agent, "exploration", 1, events)
                 reward += MOVE_VALID_REWARD
@@ -1014,6 +1047,19 @@ class MultiAgentRLRLGym:
             if agent.inventory:
                 item = agent.inventory.pop(0)
                 base_item = self._item_base_id(item)
+                if int(self.base_durability_by_item.get(base_item, 0)) > 0 and item not in self.state.item_metadata:
+                    crafting_skill = self._skill_level(agent, "crafting")
+                    token = self._make_item_instance(
+                        base_id=base_item,
+                        kind="durable_item",
+                        metadata={
+                            "durability": int(self.base_durability_by_item.get(base_item, 0)) + max(0, crafting_skill // 2),
+                            "max_durability": int(self.base_durability_by_item.get(base_item, 0)) + max(0, crafting_skill // 2),
+                            "crafted_by_skill": int(crafting_skill),
+                        },
+                    )
+                    item = token
+                    base_item = self._item_base_id(item)
                 armor_slot = self.armor_slot_by_item.get(base_item)
                 if armor_slot is not None:
                     target_slot = armor_slot
@@ -1162,6 +1208,11 @@ class MultiAgentRLRLGym:
         )
         if station_handled:
             return reward + station_reward
+        fire_reward, fire_handled = self._interact_fire(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if fire_handled:
+            return reward + fire_reward
         shear_reward, shear_handled = self._interact_shear(actor=actor, actor_id=actor_id, events=events)
         if shear_handled:
             return reward + shear_reward
@@ -1274,6 +1325,30 @@ class MultiAgentRLRLGym:
         events.append("interact:water")
         return 0.04
 
+    def _interact_fire(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        assert self.state is not None
+        r, c = actor.position
+        tile_id = self.state.grid[r][c]
+        if tile_id != "campfire":
+            return 0.0, False
+        for fuel_item, fuel_gain in (
+            ("log", FIRE_FUEL_PER_LOG),
+            ("wood", FIRE_FUEL_PER_WOOD),
+            ("stick", FIRE_FUEL_PER_STICK),
+        ):
+            taken = self._pop_first_base_item(actor.inventory, fuel_item)
+            if taken is None:
+                continue
+            fuel = int(self.state.tile_interactions.get((r, c), 0))
+            fuel = min(FIRE_FUEL_MAX, fuel + int(fuel_gain))
+            self.state.tile_interactions[(r, c)] = fuel
+            events.append(f"fire_refuel:{fuel_item}:{fuel}")
+            return 0.08, True
+        events.append("fire_refuel_fail:no_fuel")
+        return -0.01, True
+
     def _is_unbreakable_edge(self, pos: Tuple[int, int]) -> bool:
         assert self.state is not None
         r, c = pos
@@ -1308,6 +1383,7 @@ class MultiAgentRLRLGym:
             )
             if axe_bonus <= 0:
                 continue
+            used_tool = self._equipped_tool_for_category(actor, "axe") or self._equipped_tool_for_category(actor, "handaxe")
             stick_qty = 1 + (woodcutting // 6) + (axe_bonus // 3)
             stick_added = self._add_item_or_drop(actor, "stick", max(1, stick_qty), events)
             self._record_harvest((nr, nc))
@@ -1329,7 +1405,12 @@ class MultiAgentRLRLGym:
                 log_qty = 1 + max(0, axe_bonus // 2)
                 log_added = self._add_item_or_drop(actor, "log", log_qty, events)
                 events.append(f"chop_tree_felled:{nr}:{nc}:log:{log_qty}:{log_added}")
+                if self._rng.random() < TREE_SAPLING_DROP_CHANCE:
+                    sapling_added = self._add_item_or_drop(actor, "sapling", 1, events)
+                    events.append(f"chop_tree_sapling:{nr}:{nc}:{sapling_added}")
                 reward += 0.08 + (0.02 * float(log_qty))
+            if used_tool is not None:
+                self._consume_item_durability(actor, used_tool, 1, events)
             if stick_added <= 0:
                 reward -= 0.02
                 events.append("carry_blocked")
@@ -1353,6 +1434,9 @@ class MultiAgentRLRLGym:
             added = self._add_item_or_drop(actor, "stone", max(1, qty), events)
             self._record_harvest((nr, nc))
             self._gain_skill_xp(actor, "mining", max(1, qty * 2), events)
+            used_pickaxe = self._equipped_tool_for_category(actor, "pickaxe")
+            if used_pickaxe is not None:
+                self._consume_item_durability(actor, used_pickaxe, 1, events)
             if used >= 5:
                 self.state.grid[nr][nc] = "stone_floor" if "stone_floor" in self.tiles else (
                     self.mapgen_cfg.floor_fallback_id if self.mapgen_cfg.floor_fallback_id in self.tiles else "floor"
@@ -1387,6 +1471,9 @@ class MultiAgentRLRLGym:
             if self._rng.random() < flint_chance:
                 flint_added = self._add_item_or_drop(actor, "flint", 1, events)
             self._gain_skill_xp(actor, "mining", max(1, qty * 2), events)
+            used_pickaxe = self._equipped_tool_for_category(actor, "pickaxe")
+            if used_pickaxe is not None:
+                self._consume_item_durability(actor, used_pickaxe, 1, events)
             events.append(
                 f"mine_ground:{tile_id}:stone={qty}:{added}:flint={flint_added}:used={used}/5"
             )
@@ -1462,7 +1549,7 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         r, c = actor.position
         tile_id = self.state.grid[r][c]
-        if tile_id not in {"stone_floor", "grass", "bush"}:
+        if tile_id not in {"floor", "stone_floor", "grass", "bush"}:
             return 0.0, False
         if (r, c) in self.state.plant_plots:
             return 0.0, False
@@ -1627,9 +1714,31 @@ class MultiAgentRLRLGym:
         else:
             for item_id, qty in recipe.outputs.items():
                 bonus = max(0, int(station.quality_tier))
-                self._add_item_or_drop(actor, item_id, int(qty) + bonus, events)
+                added_qty = self._add_item_or_drop(actor, item_id, int(qty) + bonus, events)
+                if added_qty > 0 and int(self.base_durability_by_item.get(item_id, 0)) > 0:
+                    crafting_level = self._skill_level(actor, "crafting")
+                    created = 0
+                    for idx in range(len(actor.inventory) - 1, -1, -1):
+                        if created >= added_qty:
+                            break
+                        if self._item_base_id(actor.inventory[idx]) != item_id:
+                            continue
+                        self._ensure_durable_item_instance(
+                            actor.inventory, idx, crafting_skill=crafting_level
+                        )
+                        created += 1
         craft_skill = recipe.skill or "crafting"
         self._gain_skill_xp(actor, craft_skill, max(1, 2 + recipe.min_skill), events)
+        required_tool = str(recipe.required_tool_category).strip().lower()
+        if required_tool:
+            used_tool = self._equipped_tool_for_category(actor, required_tool)
+            if used_tool is not None:
+                self._consume_item_durability(
+                    actor,
+                    used_tool,
+                    TOOL_DURABILITY_USE_BY_CATEGORY.get(required_tool, 1),
+                    events,
+                )
         speed = max(0.1, float(station.speed_multiplier) * float(recipe.speed_multiplier))
         events.append(f"craft:{recipe.recipe_id}:station={station.station_id}:speed={speed:.2f}")
         return 0.14 + (0.02 * float(station.quality_tier)), True
@@ -1696,6 +1805,10 @@ class MultiAgentRLRLGym:
             if occupied:
                 continue
             self.state.grid[nr][nc] = recipe.build_tile_id
+            if recipe.build_tile_id == "campfire":
+                self.state.tile_interactions[(nr, nc)] = max(
+                    1, int(self.state.tile_interactions.get((nr, nc), 0)) + FIRE_FUEL_PER_STICK
+                )
             events.append(f"build:{recipe.build_tile_id}:{nr}:{nc}")
             return True
         return False
@@ -1705,6 +1818,63 @@ class MultiAgentRLRLGym:
         meta = self.state.item_metadata.get(str(item_id), {})
         base = str(meta.get("base_id", "")).strip()
         return base or str(item_id)
+
+    def _item_current_durability(self, item_id: str) -> int:
+        assert self.state is not None
+        row = self.state.item_metadata.get(str(item_id), {})
+        if "durability" in row:
+            return int(row.get("durability", 0))
+        base = self._item_base_id(item_id)
+        return int(self.base_durability_by_item.get(base, 0))
+
+    def _ensure_durable_item_instance(
+        self, bag: List[str], index: int, *, crafting_skill: int = 0
+    ) -> str:
+        assert self.state is not None
+        item_id = str(bag[index])
+        base = self._item_base_id(item_id)
+        max_durability = int(self.base_durability_by_item.get(base, 0))
+        if max_durability <= 0:
+            return item_id
+        if item_id in self.state.item_metadata and "durability" in self.state.item_metadata[item_id]:
+            return item_id
+        bonus = max(0, int(crafting_skill) // 2)
+        token = self._make_item_instance(
+            base_id=base,
+            kind="durable_item",
+            metadata={
+                "durability": max_durability + bonus,
+                "max_durability": max_durability + bonus,
+                "crafted_by_skill": int(crafting_skill),
+            },
+        )
+        bag[index] = token
+        return token
+
+    def _consume_item_durability(
+        self, agent: AgentState, equipped_item: str, amount: int, events: List[str]
+    ) -> None:
+        assert self.state is not None
+        base = self._item_base_id(equipped_item)
+        max_durability = int(self.base_durability_by_item.get(base, 0))
+        if max_durability <= 0:
+            return
+        for idx in range(len(agent.equipped) - 1, -1, -1):
+            if agent.equipped[idx] != equipped_item:
+                continue
+            token = self._ensure_durable_item_instance(agent.equipped, idx)
+            row = self.state.item_metadata.setdefault(token, {"base_id": base, "kind": "durable_item"})
+            row["durability"] = max(0, int(row.get("durability", max_durability)) - max(1, int(amount)))
+            self.state.item_metadata[token] = row
+            events.append(f"durability_use:{base}:{int(row['durability'])}")
+            if int(row["durability"]) <= 0:
+                broken = agent.equipped.pop(idx)
+                for slot_name, slot_item in list(agent.armor_slots.items()):
+                    if slot_item == broken:
+                        agent.armor_slots[slot_name] = None
+                self.state.item_metadata.pop(broken, None)
+                events.append(f"item_broken:{base}")
+            return
 
     def _max_equipped_tool_bonus(
         self,
@@ -1736,6 +1906,16 @@ class MultiAgentRLRLGym:
             if str(self.tool_category_by_item.get(base, "")).strip().lower() == required:
                 return True
         return False
+
+    def _equipped_tool_for_category(self, agent: AgentState, category: str) -> str | None:
+        required = str(category).strip().lower()
+        if not required:
+            return None
+        for item in reversed(agent.equipped):
+            base = self._item_base_id(item)
+            if str(self.tool_category_by_item.get(base, "")).strip().lower() == required:
+                return item
+        return None
 
     def _harvest_exhausted(self, pos: Tuple[int, int], tile_id: str, events: List[str]) -> bool:
         assert self.state is not None
@@ -2869,6 +3049,7 @@ class MultiAgentRLRLGym:
         if self._rng.random() > hit_chance:
             events.append(f"agent_interact:attack_animal:{target.animal_id}:{weapon}:{damage_type}")
             events.append(f"agent_interact:miss_animal:{target.entity_id}")
+            self._consume_attack_weapon_durability(attacker, weapon, events)
             return -0.01
 
         raw_damage = self._rng.randint(damage_range[0], damage_range[1])
@@ -2890,6 +3071,7 @@ class MultiAgentRLRLGym:
             events.append(f"agent_interact:kill_animal:{target.animal_id}")
             self._drop_animal_material(target, events)
             reward += 0.2
+        self._consume_attack_weapon_durability(attacker, weapon, events)
         return reward
 
     def _attack_agent(
@@ -2906,6 +3088,7 @@ class MultiAgentRLRLGym:
                 f"agent_interact:attack:{target.agent_id}:{weapon}:{damage_type}"
             )
             events.append(f"agent_interact:miss:{target.agent_id}")
+            self._consume_attack_weapon_durability(attacker, weapon, events)
             return -0.01
 
         raw_damage = self._rng.randint(damage_range[0], damage_range[1])
@@ -2970,6 +3153,7 @@ class MultiAgentRLRLGym:
         else:
             events.append(f"agent_interact:blocked:{target.agent_id}")
             reward -= 0.01
+        self._consume_attack_weapon_durability(attacker, weapon, events)
         return reward
 
     def _attack_monster(
@@ -2987,6 +3171,7 @@ class MultiAgentRLRLGym:
                 f"agent_interact:attack_monster:{target.monster_id}:{weapon}:{damage_type}"
             )
             events.append(f"agent_interact:miss_monster:{target.entity_id}")
+            self._consume_attack_weapon_durability(attacker, weapon, events)
             return -0.01
 
         raw_damage = self._rng.randint(damage_range[0], damage_range[1])
@@ -3018,7 +3203,19 @@ class MultiAgentRLRLGym:
         else:
             events.append(f"agent_interact:blocked_monster:{target.entity_id}")
             reward -= 0.01
+        self._consume_attack_weapon_durability(attacker, weapon, events)
         return reward
+
+    def _consume_attack_weapon_durability(
+        self, attacker: AgentState, weapon_base: str, events: List[str]
+    ) -> None:
+        if weapon_base == "unarmed":
+            return
+        for item in reversed(attacker.equipped):
+            if self._item_base_id(item) != weapon_base:
+                continue
+            self._consume_item_durability(attacker, item, 1, events)
+            return
 
     def _equipped_weapon(self, agent: AgentState) -> Tuple[str, str, Tuple[int, int], str]:
         for item in reversed(agent.equipped):
@@ -3081,7 +3278,7 @@ class MultiAgentRLRLGym:
         base_max = int(race.base_dr_max)
         if base_max < base_min:
             base_max = base_min
-        dr = self._rng.randint(base_min, base_max)
+        dr = (base_min + base_max) // 2
         dr += int(race.dr_bonus_vs.get(damage_type, 0))
         dr += armor_mitigation
         if target.agent_id in self._defending_agents:
@@ -3499,9 +3696,53 @@ class MultiAgentRLRLGym:
         agent = self.state.agents[aid]
         profile = self._profile_for_agent(aid)
         exploration_bonus = max(0, self._skill_level(agent, "exploration"))
-        view_width = int(cfg.get("view_width", profile.view_width)) + exploration_bonus
-        view_height = int(cfg.get("view_height", profile.view_height)) + exploration_bonus
+        base_vision = max(1, int(self.config.vision_range_default))
+        view_width = max(base_vision, int(cfg.get("view_width", profile.view_width))) + exploration_bonus
+        view_height = max(base_vision, int(cfg.get("view_height", profile.view_height))) + exploration_bonus
         return max(1, view_height), max(1, view_width)
+
+    def _tile_blocks_los(self, tile_id: str) -> bool:
+        if str(tile_id) in OPAQUE_TILE_IDS:
+            return True
+        if tile_id in self.tiles:
+            return not bool(self.tiles[tile_id].walkable)
+        return False
+
+    def _line_points(self, a: Tuple[int, int], b: Tuple[int, int]) -> List[Tuple[int, int]]:
+        x0, y0 = int(a[0]), int(a[1])
+        x1, y1 = int(b[0]), int(b[1])
+        points: List[Tuple[int, int]] = []
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        while True:
+            points.append((x0, y0))
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x0 += sx
+            if e2 < dx:
+                err += dx
+                y0 += sy
+        return points
+
+    def _has_line_of_sight(self, src: Tuple[int, int], dst: Tuple[int, int]) -> bool:
+        assert self.state is not None
+        if src == dst:
+            return True
+        if not bool(self.config.enable_los):
+            return True
+        ray = self._line_points(src, dst)
+        for rr, cc in ray[1:-1]:
+            if rr < 0 or cc < 0 or rr >= len(self.state.grid) or cc >= len(self.state.grid[0]):
+                return False
+            if self._tile_blocks_los(self.state.grid[rr][cc]):
+                return False
+        return True
 
     def _visible_tile_coords(self, aid: str) -> List[Tuple[int, int]]:
         assert self.state is not None
@@ -3524,7 +3765,8 @@ class MultiAgentRLRLGym:
                     or c >= len(self.state.grid[0])
                 ):
                     continue
-                out.append((r, c))
+                if self._has_line_of_sight(agent.position, (r, c)):
+                    out.append((r, c))
         return out
 
     def _is_frontier_tile(self, pos: Tuple[int, int], seen_before: set[Tuple[int, int]]) -> bool:
@@ -3574,7 +3816,7 @@ class MultiAgentRLRLGym:
                 continue
             dr = abs(other.position[0] - ar)
             dc = abs(other.position[1] - ac)
-            if dr <= half_h and dc <= half_w:
+            if dr <= half_h and dc <= half_w and self._has_line_of_sight(actor.position, other.position):
                 return True
         return False
 
@@ -3644,7 +3886,7 @@ class MultiAgentRLRLGym:
 
         if include_grid:
             obs["local_tiles"] = self._local_view_dims(
-                agent.position, height=view_height, width=view_width
+                agent.position, height=view_height, width=view_width, aid=aid
             )
         if include_stats:
             nearby_item_counts = self._nearby_item_counts(
@@ -3890,11 +4132,12 @@ class MultiAgentRLRLGym:
                 self._assert_item_known(item_id, source)
 
     def _local_view_dims(
-        self, center: Tuple[int, int], height: int, width: int
+        self, center: Tuple[int, int], height: int, width: int, aid: str = ""
     ) -> List[List[str]]:
         assert self.state is not None
         height = max(1, int(height))
         width = max(1, int(width))
+        visible = set(self._visible_tile_coords(aid)) if aid else None
         cr, cc = center
         start_r = cr - (height // 2)
         start_c = cc - (width // 2)
@@ -3911,7 +4154,10 @@ class MultiAgentRLRLGym:
                     row.append("void")
                 else:
                     tile_id = self.state.grid[r][c]
-                    row.append(tile_id)
+                    if visible is not None and (r, c) not in visible:
+                        row.append("fog")
+                    else:
+                        row.append(tile_id)
             view.append(row)
         return view
 
@@ -4238,14 +4484,20 @@ class MultiAgentRLRLGym:
                 position=pos,
                 hp=adef.hp,
                 max_hp=adef.hp,
-                hunger=max(2, adef.hp),
-                max_hunger=max(3, adef.hp + 4),
-                thirst=max(2, adef.hp),
-                max_thirst=max(3, adef.hp + 4),
+                hunger=max(2, int(adef.max_hunger // 2)),
+                max_hunger=max(3, int(adef.max_hunger)),
+                thirst=max(2, int(adef.max_thirst // 2)),
+                max_thirst=max(3, int(adef.max_thirst)),
                 age=self._rng.randint(0, max(1, adef.mature_age)),
                 mature_age=adef.mature_age,
                 reproduction_cooldown=self._rng.randint(0, max(1, adef.reproduction_cooldown)),
                 reproduction_cooldown_max=adef.reproduction_cooldown,
+                prey_score=adef.prey_score,
+                movement_speed=adef.movement_speed,
+                carnivore=adef.carnivore,
+                gender=str(self._rng.choice(["female", "male"])),
+                litter_size_min=adef.litter_size_min,
+                litter_size_max=adef.litter_size_max,
                 can_shear=adef.can_shear,
                 sheared=False,
                 shear_item=adef.shear_item,
@@ -4581,6 +4833,28 @@ class MultiAgentRLRLGym:
             else:
                 self._monster_move_toward_target(monster, target.position, info)
 
+    def _tick_fires(self) -> None:
+        assert self.state is not None
+        floor_id = (
+            self.mapgen_cfg.floor_fallback_id
+            if self.mapgen_cfg.floor_fallback_id in self.tiles
+            else "floor"
+        )
+        to_extinguish: List[Tuple[int, int]] = []
+        for r, row in enumerate(self.state.grid):
+            for c, tile_id in enumerate(row):
+                if tile_id != "campfire":
+                    continue
+                fuel = int(self.state.tile_interactions.get((r, c), 0))
+                fuel = max(0, fuel - FIRE_FUEL_DECAY_PER_STEP)
+                if fuel <= 0:
+                    to_extinguish.append((r, c))
+                    continue
+                self.state.tile_interactions[(r, c)] = fuel
+        for pos in to_extinguish:
+            self.state.grid[pos[0]][pos[1]] = floor_id
+            self.state.tile_interactions.pop(pos, None)
+
     def _apply_animal_turn(self, info: Dict[str, Dict[str, object]]) -> None:
         assert self.state is not None
         if not self.state.animals:
@@ -4596,8 +4870,12 @@ class MultiAgentRLRLGym:
                 animal.wool_regrow = int(animal.wool_regrow) - 1
                 if animal.wool_regrow <= 0:
                     animal.sheared = False
-
-            self._animal_move(animal)
+            steps = max(1, int(animal.movement_speed))
+            for _ in range(steps):
+                if not animal.alive:
+                    break
+                if not self._animal_hunt_step(animal):
+                    self._animal_move(animal)
             self._animal_tick_needs(animal)
             if not animal.alive:
                 continue
@@ -4607,7 +4885,7 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         animal.hunger = max(0, int(animal.hunger) - 1)
         animal.thirst = max(0, int(animal.thirst) - 1)
-        if self._animal_consume_forage(animal.position):
+        if self._animal_consume_food(animal):
             animal.hunger = min(int(animal.max_hunger), int(animal.hunger) + 2)
         if self._animal_can_drink(animal.position):
             animal.thirst = min(int(animal.max_thirst), int(animal.thirst) + 2)
@@ -4615,8 +4893,10 @@ class MultiAgentRLRLGym:
             animal.alive = False
             self._drop_animal_material(animal, [])
 
-    def _animal_can_eat(self, pos: Tuple[int, int]) -> bool:
+    def _animal_can_eat(self, animal: AnimalState, pos: Tuple[int, int]) -> bool:
         assert self.state is not None
+        if bool(animal.carnivore):
+            return self._animal_find_prey(animal) is not None
         forage_tiles = {"grass", "bush", "tree"}
         for nr, nc in self._animal_neighborhood(pos):
             if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
@@ -4629,6 +4909,11 @@ class MultiAgentRLRLGym:
             if used < max_interactions:
                 return True
         return False
+
+    def _animal_consume_food(self, animal: AnimalState) -> bool:
+        if bool(animal.carnivore):
+            return False
+        return self._animal_consume_forage(animal.position)
 
     def _animal_consume_forage(self, pos: Tuple[int, int]) -> bool:
         assert self.state is not None
@@ -4690,11 +4975,69 @@ class MultiAgentRLRLGym:
                 animal.position = self._rng.choice(near_water)
                 return
         if hungry:
-            near_food = [p for p in walkable if self._animal_can_eat(p)]
+            near_food = [p for p in walkable if self._animal_can_eat(animal, p)]
             if near_food:
                 animal.position = self._rng.choice(near_food)
                 return
         animal.position = self._rng.choice(walkable)
+
+    def _animal_find_prey(self, predator: AnimalState) -> AnimalState | None:
+        assert self.state is not None
+        if not bool(predator.carnivore):
+            return None
+        best: AnimalState | None = None
+        best_dist: int | None = None
+        for other in self.state.animals.values():
+            if not other.alive or other.entity_id == predator.entity_id:
+                continue
+            if other.animal_id == predator.animal_id:
+                continue
+            if int(predator.prey_score) < int(other.prey_score) + PREY_SCORE_HUNT_MARGIN:
+                continue
+            dist = self._manhattan(predator.position, other.position)
+            if dist > max(4, int(self.config.monster_sight_range)):
+                continue
+            if not self._has_line_of_sight(predator.position, other.position):
+                continue
+            if best_dist is None or dist < best_dist:
+                best = other
+                best_dist = dist
+        return best
+
+    def _animal_hunt_step(self, predator: AnimalState) -> bool:
+        assert self.state is not None
+        target = self._animal_find_prey(predator)
+        if target is None:
+            return False
+        dist = self._manhattan(predator.position, target.position)
+        if dist <= 1:
+            self._animal_attack_animal(predator, target)
+            return True
+        pr, pc = predator.position
+        tr, tc = target.position
+        candidates = [(pr - 1, pc), (pr + 1, pc), (pr, pc - 1), (pr, pc + 1)]
+        walkable = [
+            (nr, nc)
+            for nr, nc in candidates
+            if self._walkable_for_animal(nr, nc, predator.entity_id)
+        ]
+        if not walkable:
+            return True
+        walkable.sort(key=lambda p: self._manhattan(p, (tr, tc)))
+        predator.position = walkable[0]
+        if self._manhattan(predator.position, target.position) <= 1:
+            self._animal_attack_animal(predator, target)
+        return True
+
+    def _animal_attack_animal(self, predator: AnimalState, prey: AnimalState) -> None:
+        if not predator.alive or not prey.alive:
+            return
+        damage = max(1, int(predator.hp // 2) + int(predator.prey_score // 2))
+        prey.hp = max(0, int(prey.hp) - damage)
+        if prey.hp > 0:
+            return
+        prey.alive = False
+        predator.hunger = min(int(predator.max_hunger), int(predator.hunger) + max(3, int(prey.max_hunger // 3)))
 
     def _animal_try_reproduce(self, animal: AnimalState) -> None:
         assert self.state is not None
@@ -4714,6 +5057,8 @@ class MultiAgentRLRLGym:
                 continue
             if other.animal_id != animal.animal_id:
                 continue
+            if str(other.gender) == str(animal.gender):
+                continue
             if other.age < other.mature_age or other.reproduction_cooldown > 0:
                 continue
             if self._manhattan(animal.position, other.position) <= 1:
@@ -4721,42 +5066,56 @@ class MultiAgentRLRLGym:
                 break
         if partner is None:
             return
-        ar, ac = animal.position
-        spawn_pos = None
-        for nr, nc in ((ar - 1, ac), (ar + 1, ac), (ar, ac - 1), (ar, ac + 1)):
-            if self._walkable_for_animal(nr, nc, moving_entity_id=""):
-                spawn_pos = (nr, nc)
-                break
-        if spawn_pos is None:
-            return
-        entity_id = f"animal_{len(self.state.animals)}"
+        litter_min = max(1, int(min(animal.litter_size_min, animal.litter_size_max)))
+        litter_max = max(1, int(max(animal.litter_size_min, animal.litter_size_max)))
+        litter = self._rng.randint(litter_min, litter_max)
         parent_def = self.animals.get(animal.animal_id)
         if parent_def is None:
             return
-        self.state.animals[entity_id] = AnimalState(
-            entity_id=entity_id,
-            animal_id=parent_def.animal_id,
-            name=parent_def.name,
-            symbol=parent_def.symbol,
-            color=parent_def.color,
-            position=spawn_pos,
-            hp=parent_def.hp,
-            max_hp=parent_def.hp,
-            hunger=max(2, parent_def.hp),
-            max_hunger=max(3, parent_def.hp + 4),
-            thirst=max(2, parent_def.hp),
-            max_thirst=max(3, parent_def.hp + 4),
-            age=0,
-            mature_age=parent_def.mature_age,
-            reproduction_cooldown=parent_def.reproduction_cooldown,
-            reproduction_cooldown_max=parent_def.reproduction_cooldown,
-            can_shear=parent_def.can_shear,
-            sheared=False,
-            shear_item=parent_def.shear_item,
-            wool_regrow=0,
-            shear_regrow_max=parent_def.shear_regrow_steps,
-            alive=True,
-        )
+        ar, ac = animal.position
+        offsets = [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (-1, -1), (1, -1), (-1, 1)]
+        self._rng.shuffle(offsets)
+        spawned = 0
+        for dr, dc in offsets:
+            if spawned >= litter:
+                break
+            nr, nc = ar + dr, ac + dc
+            if not self._walkable_for_animal(nr, nc, moving_entity_id=""):
+                continue
+            entity_id = f"animal_{len(self.state.animals)}"
+            self.state.animals[entity_id] = AnimalState(
+                entity_id=entity_id,
+                animal_id=parent_def.animal_id,
+                name=parent_def.name,
+                symbol=parent_def.symbol,
+                color=parent_def.color,
+                position=(nr, nc),
+                hp=parent_def.hp,
+                max_hp=parent_def.hp,
+                hunger=max(2, int(parent_def.max_hunger // 2)),
+                max_hunger=parent_def.max_hunger,
+                thirst=max(2, int(parent_def.max_thirst // 2)),
+                max_thirst=parent_def.max_thirst,
+                age=0,
+                mature_age=parent_def.mature_age,
+                reproduction_cooldown=parent_def.reproduction_cooldown,
+                reproduction_cooldown_max=parent_def.reproduction_cooldown,
+                prey_score=parent_def.prey_score,
+                movement_speed=parent_def.movement_speed,
+                carnivore=parent_def.carnivore,
+                gender=str(self._rng.choice(["female", "male"])),
+                litter_size_min=parent_def.litter_size_min,
+                litter_size_max=parent_def.litter_size_max,
+                can_shear=parent_def.can_shear,
+                sheared=False,
+                shear_item=parent_def.shear_item,
+                wool_regrow=0,
+                shear_regrow_max=parent_def.shear_regrow_steps,
+                alive=True,
+            )
+            spawned += 1
+        if spawned <= 0:
+            return
         animal.reproduction_cooldown = animal.reproduction_cooldown_max
         partner.reproduction_cooldown = partner.reproduction_cooldown_max
 

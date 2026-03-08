@@ -17,6 +17,13 @@ class AnimalDef:
     spawn_weight: float
     hp: int
     drop_item: str
+    max_hunger: int
+    max_thirst: int
+    movement_speed: int
+    prey_score: int
+    carnivore: bool
+    litter_size_min: int
+    litter_size_max: int
     mature_age: int
     reproduction_cooldown: int
     can_shear: bool = False
@@ -51,10 +58,19 @@ def parse_animals(raw: object) -> Dict[str, AnimalDef]:
             spawn_weight=max(0.0, float(row.get("spawn_weight", 1.0))),
             hp=max(1, int(row.get("hp", 4))),
             drop_item=str(row.get("drop_item", "")).strip(),
+            max_hunger=max(2, int(row.get("max_hunger", max(3, int(row.get("hp", 4)) + 4)))),
+            max_thirst=max(2, int(row.get("max_thirst", max(3, int(row.get("hp", 4)) + 4)))),
+            movement_speed=max(1, int(row.get("movement_speed", 1))),
+            prey_score=max(0, int(row.get("prey_score", 1))),
+            carnivore=bool(row.get("carnivore", False)),
+            litter_size_min=max(1, int(row.get("litter_size_min", 1))),
+            litter_size_max=max(1, int(row.get("litter_size_max", row.get("litter_size_min", 1)))),
             mature_age=max(1, int(row.get("mature_age", 8))),
             reproduction_cooldown=max(1, int(row.get("reproduction_cooldown", 8))),
             can_shear=bool(row.get("can_shear", False)),
             shear_item=str(row.get("shear_item", "")).strip(),
             shear_regrow_steps=max(1, int(row.get("shear_regrow_steps", 6))),
         )
+        if out[animal_id].litter_size_max < out[animal_id].litter_size_min:
+            out[animal_id].litter_size_max = out[animal_id].litter_size_min
     return out

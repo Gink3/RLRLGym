@@ -27,7 +27,7 @@ ARMOR_SLOTS = {
 }
 WEAPON_SKILLS = {"melee", "archery", "thrown_weapons"}
 ARMOR_CLASSES = {"light", "medium", "heavy"}
-TOOL_CATEGORIES = {"axe", "pickaxe", "shovel", "handaxe"}
+TOOL_CATEGORIES = {"axe", "pickaxe", "shovel", "handaxe", "knife"}
 
 
 @dataclass
@@ -54,6 +54,7 @@ class ItemDef:
     tool_category: Optional[str] = None
     tool_skill: str = ""
     tool_skill_bonus: int = 0
+    base_durability: int = 0
 
 
 @dataclass
@@ -176,6 +177,14 @@ class ItemCatalog:
             if int(item.tool_skill_bonus) > 0
         }
 
+    @property
+    def base_durability_by_item(self) -> Dict[str, int]:
+        return {
+            item_id: int(item.base_durability)
+            for item_id, item in self.items.items()
+            if int(item.base_durability) > 0
+        }
+
 
 REQUIRED_ITEM_FIELDS = {"id", "weight"}
 
@@ -251,8 +260,11 @@ def parse_items(raw: object) -> ItemCatalog:
                 )
         tool_skill = str(row.get("tool_skill", "")).strip().lower()
         tool_skill_bonus = int(row.get("tool_skill_bonus", 0))
+        base_durability = int(row.get("base_durability", 0))
         if tool_skill_bonus < 0:
             raise ValueError(f"item[{idx}].tool_skill_bonus must be >= 0")
+        if base_durability < 0:
+            raise ValueError(f"item[{idx}].base_durability must be >= 0")
         if tool_skill and tool_skill_bonus <= 0:
             raise ValueError(f"item[{idx}].tool_skill requires tool_skill_bonus > 0")
         if tool_skill_bonus > 0 and not tool_skill:
@@ -316,6 +328,7 @@ def parse_items(raw: object) -> ItemCatalog:
             tool_category=tool_category,
             tool_skill=tool_skill,
             tool_skill_bonus=tool_skill_bonus,
+            base_durability=base_durability,
         )
 
     if not items:
