@@ -219,7 +219,7 @@ class MapCanvas(QWidget):
 
         self.zoom = 1.0
         self.min_zoom = 0.25
-        self.max_zoom = 4.0
+        self.max_zoom = 8.0
         self.offset_x = 0.0
         self.offset_y = 0.0
         self.dragging = False
