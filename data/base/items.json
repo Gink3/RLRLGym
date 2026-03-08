@@ -72,6 +72,7 @@
     {"id": "ring_of_the_bulwark", "weight": 0.05, "is_treasure": true, "armor_slot": "ring", "dr_bonus_vs": {"slash": 2, "pierce": 1, "blunt": 1}},
 
     {"id": "stone", "weight": 1.2},
+    {"id": "clay", "weight": 1.0},
     {"id": "flint", "weight": 0.4},
     {"id": "stick", "weight": 0.25},
     {"id": "log", "weight": 2.0},
