@@ -79,6 +79,8 @@
     {"id": "sapling", "weight": 0.4},
     {"id": "wood_plank", "weight": 0.8},
     {"id": "wood", "weight": 1.0},
+    {"id": "glass", "weight": 0.7},
+    {"id": "window_kit", "weight": 1.3},
     {"id": "wood_wall_kit", "weight": 2.0},
     {"id": "rock_wall_kit", "weight": 2.6},
     {"id": "wood_door_kit", "weight": 1.8},

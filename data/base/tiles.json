@@ -243,6 +243,15 @@
       "spawn_weight": 0.0,
       "max_interactions": 0,
       "loot_table": []
+    },
+    {
+      "id": "glass_window",
+      "glyph": "=",
+      "color": "cyan",
+      "walkable": true,
+      "spawn_weight": 0.0,
+      "max_interactions": 0,
+      "loot_table": []
     }
   ]
 }

@@ -207,6 +207,29 @@
       "speed_multiplier": 1.0,
       "quality_bonus": 0.0,
       "tags": ["construction", "wall"]
+    },
+    {
+      "id": "craft_window_kit",
+      "inputs": {"glass": 2, "wood_plank": 1},
+      "outputs": {"window_kit": 1},
+      "skill": "crafting",
+      "min_skill": 1,
+      "craft_time": 1,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "kit", "window"]
+    },
+    {
+      "id": "build_glass_window",
+      "inputs": {"window_kit": 1},
+      "outputs": {},
+      "skill": "crafting",
+      "min_skill": 1,
+      "craft_time": 1,
+      "build_tile_id": "glass_window",
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "window"]
     }
   ]
 }
