@@ -1,16 +1,11 @@
 {
   "schema_version": 1,
-  "name": "crafting_curriculum_10_agents",
+  "name": "crafting_curriculum_5_agents",
   "agents": [
-    {"agent_id": "agent_0", "race": "human", "class": "fighter", "profile": "human", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_1", "race": "orc", "class": "barbarian", "profile": "orc", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_2", "race": "elf", "class": "rogue", "profile": "human", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_3", "race": "dwarf", "class": "monk", "profile": "orc", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_4", "race": "gnome", "class": "rogue", "profile": "human", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_5", "race": "half_orc", "class": "fighter", "profile": "orc", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_6", "race": "tiefling", "class": "monk", "profile": "human", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_7", "race": "dragonborn", "class": "barbarian", "profile": "orc", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_8", "race": "halfling", "class": "rogue", "profile": "human", "network": "default", "policy": "ppo_masked", "observation_config": {}},
-    {"agent_id": "agent_9", "race": "half_elf", "class": "fighter", "profile": "orc", "network": "default", "policy": "ppo_masked", "observation_config": {}}
+    {"agent_id": "agent_0", "race": "human", "class": "fighter", "profile": "reward_explorer_policy_v1", "network": "default", "policy": "ppo_masked", "observation_config": {}},
+    {"agent_id": "agent_1", "race": "orc", "class": "barbarian", "profile": "reward_brawler_policy_v1", "network": "default", "policy": "ppo_masked", "observation_config": {}},
+    {"agent_id": "agent_2", "race": "elf", "class": "rogue", "profile": "reward_explorer_policy_v1", "network": "default", "policy": "ppo_masked", "observation_config": {}},
+    {"agent_id": "agent_3", "race": "dwarf", "class": "monk", "profile": "reward_brawler_policy_v1", "network": "default", "policy": "ppo_masked", "observation_config": {}},
+    {"agent_id": "agent_4", "race": "gnome", "class": "rogue", "profile": "reward_explorer_policy_v1", "network": "default", "policy": "ppo_masked", "observation_config": {}}
   ]
 }
