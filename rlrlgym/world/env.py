@@ -1778,9 +1778,11 @@ class MultiAgentRLRLGym:
             if "workstation_first_build" in events:
                 reward += float(self.config.workstation_first_build_reward)
         else:
+            quality_bonus_units = 0
             for item_id, qty in recipe.outputs.items():
                 bonus = max(0, int(station.quality_tier))
                 added_qty = self._add_item_or_drop(actor, item_id, int(qty) + bonus, events)
+                quality_bonus_units += max(0, int(added_qty) - int(qty))
                 if added_qty > 0 and int(self.base_durability_by_item.get(item_id, 0)) > 0:
                     crafting_level = self._skill_level(actor, "crafting")
                     created = 0
@@ -1793,6 +1795,10 @@ class MultiAgentRLRLGym:
                             actor.inventory, idx, crafting_skill=crafting_level
                         )
                         created += 1
+            if int(station.quality_tier) > 0 and quality_bonus_units > 0:
+                events.append(
+                    f"craft_quality:tier={int(station.quality_tier)}:bonus_units={quality_bonus_units}"
+                )
         craft_skill = recipe.skill or "crafting"
         self._gain_skill_xp(actor, craft_skill, max(1, 2 + recipe.min_skill), events)
         required_tool = str(recipe.required_tool_category).strip().lower()

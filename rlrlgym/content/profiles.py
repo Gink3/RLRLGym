@@ -41,6 +41,12 @@ class AgentProfile:
                 delta += w.get("explore", 0.0)
             elif event.startswith("loot:") or event.startswith("pickup:"):
                 delta += w.get("loot", 0.0)
+            elif event.startswith("craft:"):
+                delta += w.get("craft", 0.0)
+            elif event.startswith("craft_quality:"):
+                delta += w.get("craft_quality", 0.0)
+            elif event.startswith("skill_up:"):
+                delta += w.get("skill_up", 0.0)
             elif event.startswith("interact:") or event.startswith("agent_interact:"):
                 delta += w.get("interact", 0.0)
             elif event.startswith("eat:"):

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rlrlgym.content.profiles import load_profiles
+from rlrlgym.content.profiles import AgentProfile, load_profiles
 
 
 class TestProfilesJson(unittest.TestCase):
@@ -37,6 +37,29 @@ class TestProfilesJson(unittest.TestCase):
             p.write_text(json.dumps(data), encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_profiles(p)
+
+    def test_reward_adjustment_supports_crafting_signals(self):
+        profile = AgentProfile(
+            name="artisan_test",
+            max_hp=10,
+            max_hunger=30,
+            view_width=8,
+            view_height=8,
+            reward_weights={
+                "craft": 0.1,
+                "craft_quality": 0.2,
+                "skill_up": 0.05,
+            },
+        )
+        delta = profile.reward_adjustment(
+            events=[
+                "craft:smelt_copper_ingot:station=smelter:speed=1.00",
+                "craft_quality:tier=1:bonus_units=1",
+                "skill_up:smithing:1",
+            ],
+            died=False,
+        )
+        self.assertAlmostEqual(delta, 0.35, places=6)
 
 
 if __name__ == "__main__":
