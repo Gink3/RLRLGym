@@ -85,6 +85,7 @@ class ReplayWindow(QMainWindow):
         self.frames: List[dict] = []
         self.step_logs: List[dict] = []
         self.tile_defs = load_tileset("data/base/tiles.json")
+        self._current_frame_idx = 0
 
         self.tile_px = 24
         self.playing = False
@@ -133,6 +134,10 @@ class ReplayWindow(QMainWindow):
         right_col.addWidget(self.summary, stretch=1)
 
         right_col.addWidget(QLabel("Action / Events"))
+        right_col.addWidget(QLabel("Log Agent Filter"))
+        self.log_agent_list = QListWidget()
+        self.log_agent_list.setMaximumHeight(140)
+        right_col.addWidget(self.log_agent_list)
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         right_col.addWidget(self.log_text, stretch=1)
@@ -148,6 +153,7 @@ class ReplayWindow(QMainWindow):
         self.prev_ep_btn.clicked.connect(lambda: self._load_replay(self.replay_index - 1))
         self.next_ep_btn.clicked.connect(lambda: self._load_replay(self.replay_index + 1))
         self.replay_list.currentRowChanged.connect(self._load_replay)
+        self.log_agent_list.itemChanged.connect(self._on_log_filter_changed)
 
         self._reload_replay_list()
         self._load_replay(self.replay_index)
@@ -172,6 +178,7 @@ class ReplayWindow(QMainWindow):
         self.frames = [dict(row) for row in frames_raw if isinstance(row, dict)]
         step_logs = payload.get("step_logs", [])
         self.step_logs = [dict(row) for row in step_logs if isinstance(row, dict)] if isinstance(step_logs, list) else []
+        self._rebuild_log_agent_filter()
         self.setWindowTitle(f"RLRLGym Replay Viewer - {path.name}")
         self.slider.blockSignals(True)
         self.slider.setMinimum(0)
@@ -182,6 +189,61 @@ class ReplayWindow(QMainWindow):
         self.replay_list.blockSignals(True)
         self.replay_list.setCurrentRow(idx)
         self.replay_list.blockSignals(False)
+
+    def _on_log_filter_changed(self, _item: QListWidgetItem) -> None:
+        self._refresh_log_text(self._current_frame_idx)
+
+    def _rebuild_log_agent_filter(self) -> None:
+        agent_ids = set()
+        if self.frames:
+            first_agents = self.frames[0].get("agents", {})
+            if isinstance(first_agents, dict):
+                agent_ids.update(str(aid) for aid in first_agents.keys())
+        for row in self.step_logs:
+            agents = row.get("agents", {})
+            if isinstance(agents, dict):
+                agent_ids.update(str(aid) for aid in agents.keys())
+
+        self.log_agent_list.blockSignals(True)
+        self.log_agent_list.clear()
+        for aid in sorted(agent_ids):
+            item = QListWidgetItem(aid)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self.log_agent_list.addItem(item)
+        self.log_agent_list.blockSignals(False)
+
+    def _selected_log_agents(self) -> set[str]:
+        out: set[str] = set()
+        for idx in range(self.log_agent_list.count()):
+            item = self.log_agent_list.item(idx)
+            if item.checkState() == Qt.CheckState.Checked:
+                out.add(item.text().strip())
+        return out
+
+    def _refresh_log_text(self, idx: int) -> None:
+        selected_agents = self._selected_log_agents()
+        if idx > 0 and idx - 1 < len(self.step_logs):
+            step = self.step_logs[idx - 1]
+            lines: List[str] = []
+            if isinstance(step.get("agents"), dict):
+                for aid, row in sorted(step["agents"].items()):
+                    if not isinstance(row, dict):
+                        continue
+                    if selected_agents and aid not in selected_agents:
+                        continue
+                    action = row.get("action", -1)
+                    reward = row.get("reward", 0.0)
+                    events = row.get("events", [])
+                    lines.append(f"{aid}: action={action} reward={reward:.3f}")
+                    if isinstance(events, list) and events:
+                        lines.extend([f"  - {e}" for e in events])
+            if not lines:
+                self.log_text.setPlainText("(no matching agent logs for current filter)")
+            else:
+                self.log_text.setPlainText("\n".join(lines))
+        else:
+            self.log_text.setPlainText("(no step log for first frame)")
 
     def _toggle_play(self) -> None:
         self.playing = not self.playing
@@ -375,6 +437,7 @@ class ReplayWindow(QMainWindow):
 
         self.scene.setSceneRect(0, 0, max(1, w * self.tile_px), max(1, h * self.tile_px))
         self.frame_label.setText(f"frame {idx + 1}/{len(self.frames)}")
+        self._current_frame_idx = idx
 
         agents_count = len(frame.get("agents", {})) if isinstance(frame.get("agents", {}), dict) else 0
         monsters_count = len([x for x in frame.get("monsters", []) if isinstance(x, dict) and bool(x.get("alive", True))])
@@ -391,22 +454,7 @@ class ReplayWindow(QMainWindow):
         ]
         self.summary.setPlainText("\n".join(summary_lines))
 
-        if idx > 0 and idx - 1 < len(self.step_logs):
-            step = self.step_logs[idx - 1]
-            lines: List[str] = []
-            if isinstance(step.get("agents"), dict):
-                for aid, row in sorted(step["agents"].items()):
-                    if not isinstance(row, dict):
-                        continue
-                    action = row.get("action", -1)
-                    reward = row.get("reward", 0.0)
-                    events = row.get("events", [])
-                    lines.append(f"{aid}: action={action} reward={reward:.3f}")
-                    if isinstance(events, list) and events:
-                        lines.extend([f"  - {e}" for e in events])
-            self.log_text.setPlainText("\n".join(lines))
-        else:
-            self.log_text.setPlainText("(no step log for first frame)")
+        self._refresh_log_text(idx)
 
 
 def main() -> None:
