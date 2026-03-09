@@ -16,6 +16,7 @@
     "mapgen_config_path": "data/base/mapgen_config.json",
     "map_structures_path": "data/base/structures.json",
     "recipes_path": "data/base/recipes.json",
+    "construction_recipes_path": "data/base/construction_recipes.json",
     "statuses_path": "data/base/statuses.json",
     "spells_path": "data/base/spells.json",
     "enchantments_path": "data/base/enchantments.json",

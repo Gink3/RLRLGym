@@ -67,6 +67,13 @@ class TestEnv(unittest.TestCase):
         env.reset(seed=3)
         self.assertIsNone(env.render())
 
+    def test_default_map_does_not_spawn_stations(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=18, height=14, n_agents=1, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=301)
+        self.assertEqual(env.state.stations, {})
+
     def test_los_blocks_observation_and_default_vision_is_20(self):
         env = PettingZooParallelRLRLGym(
             EnvConfig(width=30, height=30, n_agents=1, max_steps=5, render_enabled=False)

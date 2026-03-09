@@ -41,6 +41,24 @@ class TestRecipesJson(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_recipes(p)
 
+    def test_allows_build_station_recipe(self):
+        payload = {
+            "schema_version": 1,
+            "recipes": [
+                {
+                    "id": "build_workbench_test",
+                    "inputs": {"wood": 2},
+                    "outputs": {},
+                    "build_station_id": "workbench",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "recipes.json"
+            p.write_text(json.dumps(payload), encoding="utf-8")
+            out = load_recipes(p)
+            self.assertEqual(out["build_workbench_test"].build_station_id, "workbench")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,13 +6,13 @@ This document describes how construction currently works in the environment.
 
 Construction is implemented as a recipe variant:
 
-- A construction recipe sets `build_tile_id` (and may leave `outputs` empty).
-- Construction is triggered through station interaction via `ACTION_INTERACT`.
-- Current base construction recipes are wall placements (`wood_wall`, `rock_wall`).
+- A construction recipe sets `build_tile_id` or `build_station_id` (and may leave `outputs` empty).
+- Construction is triggered by local interaction (`ACTION_INTERACT`) and no longer requires standing on a station.
+- Construction recipes are loaded from `data/base/construction_recipes.json`.
 
 Core runtime logic is in:
 
-- `MultiAgentRLRLGym._interact_station(...)`
+- `MultiAgentRLRLGym._interact_construction(...)`
 - `MultiAgentRLRLGym._build_from_recipe(...)`
 
 ## Construction Recipe Fields
@@ -20,6 +20,7 @@ Core runtime logic is in:
 Construction uses standard recipe fields plus:
 
 - `build_tile_id`: tile id to place in the world.
+- `build_station_id`: station id to place on the current tile.
 
 Validation guarantees:
 
@@ -28,12 +29,12 @@ Validation guarantees:
 
 ## Runtime Build Flow
 
-When a station selects a recipe with `build_tile_id`:
+When construction selects a build recipe:
 
 1. Recipe inputs are consumed.
-2. Build placement is attempted on adjacent tiles (N/S/E/W) around the builder.
+2. Build placement is attempted on the builder's current tile.
 3. On success:
-   - target tile is replaced with `build_tile_id`
+   - target tile is replaced with `build_tile_id`, or station state is created for `build_station_id`
    - event emitted: `build:<tile_id>:<r>:<c>`
 4. On failure:
    - inputs are refunded
@@ -45,20 +46,22 @@ A build target must:
 
 - Be inside non-border map coordinates.
 - Not be occupied by:
-  - living agent
+  - living agent (other than the builder)
   - living monster
   - chest
-  - station
   - resource node
+- Existing station blocks tile-building recipes.
 
 ## Current Base Construction Content
 
-Base recipes:
+Base recipes include:
 
-- `craft_wood_wall` -> places `wood_wall`
-- `craft_rock_wall` -> places `rock_wall`
+- `build_workbench` -> creates `workbench` station on the tile
+- `build_wood_wall`, `build_rock_wall`
+- `build_wood_door`, `build_spike_trap`
+- `build_campfire`, `build_firepit`, `build_fireplace`, `build_clay_forge`
 
-Both are currently unlocked through `workbench` station spawns.
+Workstations are not auto-spawned in base mapgen; agents construct them.
 
 ## Skills and Progression
 
@@ -72,6 +75,6 @@ Skill XP is granted when construction succeeds.
 
 For scenario-driven construction content:
 
-- Define build recipes in bundled `recipes_data`.
+- Define build recipes in bundled `construction_recipes_data` (or `construction_recipes_path`).
 - Ensure `build_tile_id` entries exist in bundled `structures_data` (tiles).
-- Ensure station spawns unlock the intended construction recipes.
+- Ensure `build_station_id` entries map to known station definitions in `mapgen.station_spawns`.

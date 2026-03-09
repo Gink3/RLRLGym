@@ -18,6 +18,7 @@ class RecipeDef:
     station: str = ""
     craft_time: int = 1
     build_tile_id: str = ""
+    build_station_id: str = ""
     required_tool_category: str = ""
     speed_multiplier: float = 1.0
     quality_bonus: float = 0.0
@@ -54,10 +55,15 @@ def parse_recipes(raw: object) -> Dict[str, RecipeDef]:
         if not isinstance(outputs_raw, dict):
             raise ValueError(f"recipes[{idx}].outputs must be an object")
         build_tile_id = str(row.get("build_tile_id", "")).strip()
+        build_station_id = str(row.get("build_station_id", "")).strip()
         required_tool_category = str(row.get("required_tool_category", "")).strip().lower()
-        if not outputs_raw and not build_tile_id:
+        if build_tile_id and build_station_id:
             raise ValueError(
-                f"recipes[{idx}] must define non-empty outputs or build_tile_id"
+                f"recipes[{idx}] cannot define both build_tile_id and build_station_id"
+            )
+        if not outputs_raw and not build_tile_id and not build_station_id:
+            raise ValueError(
+                f"recipes[{idx}] must define non-empty outputs, build_tile_id, or build_station_id"
             )
 
         inputs = {str(k): max(1, int(v)) for k, v in inputs_raw.items()}
@@ -71,6 +77,7 @@ def parse_recipes(raw: object) -> Dict[str, RecipeDef]:
             station=str(row.get("station", "")).strip(),
             craft_time=max(1, int(row.get("craft_time", 1))),
             build_tile_id=build_tile_id,
+            build_station_id=build_station_id,
             required_tool_category=required_tool_category,
             speed_multiplier=max(0.1, float(row.get("speed_multiplier", 1.0))),
             quality_bonus=float(row.get("quality_bonus", 0.0)),

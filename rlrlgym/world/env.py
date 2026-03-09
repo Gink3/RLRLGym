@@ -164,6 +164,7 @@ class EnvConfig:
     map_structures_path: str = str(Path("data") / "base" / "structures.json")
     static_map_path: str = ""
     recipes_path: str = str(Path("data") / "base" / "recipes.json")
+    construction_recipes_path: str = str(Path("data") / "base" / "construction_recipes.json")
     statuses_path: str = str(Path("data") / "base" / "statuses.json")
     spells_path: str = str(Path("data") / "base" / "spells.json")
     enchantments_path: str = str(Path("data") / "base" / "enchantments.json")
@@ -178,6 +179,7 @@ class EnvConfig:
     map_structures_data: Dict[str, object] = field(default_factory=dict)
     static_map_data: Dict[str, object] = field(default_factory=dict)
     recipes_data: Dict[str, object] = field(default_factory=dict)
+    construction_recipes_data: Dict[str, object] = field(default_factory=dict)
     statuses_data: Dict[str, object] = field(default_factory=dict)
     spells_data: Dict[str, object] = field(default_factory=dict)
     enchantments_data: Dict[str, object] = field(default_factory=dict)
@@ -240,6 +242,7 @@ class EnvConfig:
     render_enabled: bool = True
     vision_range_default: int = DEFAULT_VISION_RANGE
     enable_los: bool = True
+    workstation_first_build_reward: float = 0.5
 
     @classmethod
     def from_json(cls, path: str | Path) -> "EnvConfig":
@@ -280,6 +283,9 @@ class EnvConfig:
         )
         merged["static_map_data"] = dict(merged.get("static_map_data", {}) or {})
         merged["recipes_data"] = dict(merged.get("recipes_data", {}) or {})
+        merged["construction_recipes_data"] = dict(
+            merged.get("construction_recipes_data", {}) or {}
+        )
         merged["statuses_data"] = dict(merged.get("statuses_data", {}) or {})
         merged["spells_data"] = dict(merged.get("spells_data", {}) or {})
         merged["enchantments_data"] = dict(merged.get("enchantments_data", {}) or {})
@@ -426,9 +432,19 @@ class MultiAgentRLRLGym:
             self.static_map_layout = load_map_layout(self.config.static_map_path)
         self._validate_static_map_references()
         if self.config.recipes_data:
-            self.recipes = parse_recipes(self.config.recipes_data)
+            crafting_recipes = parse_recipes(self.config.recipes_data)
         else:
-            self.recipes = load_recipes(self.config.recipes_path)
+            crafting_recipes = load_recipes(self.config.recipes_path)
+        if self.config.construction_recipes_data:
+            construction_recipes = parse_recipes(self.config.construction_recipes_data)
+        else:
+            construction_recipes = load_recipes(self.config.construction_recipes_path)
+        duplicate_recipe_ids = set(crafting_recipes).intersection(construction_recipes)
+        if duplicate_recipe_ids:
+            dup = ", ".join(sorted(duplicate_recipe_ids))
+            raise ValueError(f"Duplicate recipe ids across crafting/construction files: {dup}")
+        self.recipes = dict(crafting_recipes)
+        self.recipes.update(construction_recipes)
         if self.config.statuses_data:
             self.status_defs = parse_statuses(self.config.statuses_data)
         else:
@@ -467,6 +483,7 @@ class MultiAgentRLRLGym:
         self._team_pair_reward_counts: Dict[str, int] = {}
         self._team_pair_last_reward_step: Dict[str, int] = {}
         self._defending_agents: set[str] = set()
+        self._workstation_rewarded_agents: set[str] = set()
 
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
@@ -560,6 +577,7 @@ class MultiAgentRLRLGym:
         self._faction_action_next_step = {}
         self._team_pair_reward_counts = {}
         self._team_pair_last_reward_step = {}
+        self._workstation_rewarded_agents = set()
         self.state.chests = self._spawn_chests(starts)
         occupied = starts + list(self.state.chests.keys())
         self.state.resource_nodes = self._spawn_resource_nodes(occupied=occupied)
@@ -1223,6 +1241,11 @@ class MultiAgentRLRLGym:
         )
         if resource_handled:
             return reward + resource_reward
+        construction_reward, construction_handled = self._interact_construction(
+            actor=actor, actor_id=actor_id, events=events
+        )
+        if construction_handled:
+            return reward + construction_reward
         station_reward, station_handled = self._interact_station(
             actor=actor, actor_id=actor_id, events=events
         )
@@ -1723,14 +1746,17 @@ class MultiAgentRLRLGym:
             events.append(f"station_idle:{station.station_id}")
             return -0.01, True
         self._consume_recipe_inputs(actor, recipe)
-        if recipe.build_tile_id:
-            built = self._build_from_recipe(actor, recipe, events)
+        reward = 0.14 + (0.02 * float(station.quality_tier))
+        if recipe.build_tile_id or recipe.build_station_id:
+            built = self._build_from_recipe(actor, actor_id, recipe, events)
             if not built:
                 # Refund inputs if no valid build location.
                 for item_id, qty in recipe.inputs.items():
                     self._add_item_or_drop(actor, item_id, qty, events)
                 events.append("build_fail:no_space")
                 return -0.02, True
+            if "workstation_first_build" in events:
+                reward += float(self.config.workstation_first_build_reward)
         else:
             for item_id, qty in recipe.outputs.items():
                 bonus = max(0, int(station.quality_tier))
@@ -1761,7 +1787,42 @@ class MultiAgentRLRLGym:
                 )
         speed = max(0.1, float(station.speed_multiplier) * float(recipe.speed_multiplier))
         events.append(f"craft:{recipe.recipe_id}:station={station.station_id}:speed={speed:.2f}")
-        return 0.14 + (0.02 * float(station.quality_tier)), True
+        return reward, True
+
+    def _interact_construction(
+        self, actor: AgentState, actor_id: str, events: List[str]
+    ) -> Tuple[float, bool]:
+        recipe = self._best_construction_recipe(actor)
+        if recipe is None:
+            return 0.0, False
+        self._consume_recipe_inputs(actor, recipe)
+        reward = 0.12
+        if recipe.build_tile_id or recipe.build_station_id:
+            built = self._build_from_recipe(actor, actor_id, recipe, events)
+            if not built:
+                for item_id, qty in recipe.inputs.items():
+                    self._add_item_or_drop(actor, item_id, qty, events)
+                events.append("build_fail:no_space")
+                return -0.02, True
+            if "workstation_first_build" in events:
+                reward += float(self.config.workstation_first_build_reward)
+        else:
+            for item_id, qty in recipe.outputs.items():
+                self._add_item_or_drop(actor, item_id, int(qty), events)
+        craft_skill = recipe.skill or "crafting"
+        self._gain_skill_xp(actor, craft_skill, max(1, 2 + recipe.min_skill), events)
+        required_tool = str(recipe.required_tool_category).strip().lower()
+        if required_tool:
+            used_tool = self._equipped_tool_for_category(actor, required_tool)
+            if used_tool is not None:
+                self._consume_item_durability(
+                    actor,
+                    used_tool,
+                    TOOL_DURABILITY_USE_BY_CATEGORY.get(required_tool, 1),
+                    events,
+                )
+        events.append(f"craft:{recipe.recipe_id}:site=local:speed=1.00")
+        return reward, True
 
     def _consume_recipe_inputs(self, agent: AgentState, recipe: RecipeDef) -> None:
         for item_id, qty in recipe.inputs.items():
@@ -1796,6 +1857,31 @@ class MultiAgentRLRLGym:
         candidates.sort(key=lambda r: (r.min_skill, r.recipe_id), reverse=True)
         return candidates[0]
 
+    def _best_construction_recipe(self, agent: AgentState) -> RecipeDef | None:
+        candidates: List[RecipeDef] = []
+        for rid in self._recipe_ids:
+            recipe = self.recipes[rid]
+            if recipe.station:
+                continue
+            is_construction = (
+                bool(recipe.build_tile_id)
+                or bool(recipe.build_station_id)
+                or ("construction" in set(recipe.tags))
+            )
+            if not is_construction:
+                continue
+            if self._skill_level(agent, recipe.skill or "crafting") < recipe.min_skill:
+                continue
+            if not self._has_required_recipe_tool(agent, recipe):
+                continue
+            if not self._has_recipe_inputs(agent, recipe):
+                continue
+            candidates.append(recipe)
+        if not candidates:
+            return None
+        candidates.sort(key=lambda r: (r.min_skill, r.recipe_id), reverse=True)
+        return candidates[0]
+
     def _has_recipe_inputs(self, agent: AgentState, recipe: RecipeDef) -> bool:
         counts = self._count_base_items(agent.inventory)
         for item_id, qty in recipe.inputs.items():
@@ -1804,34 +1890,71 @@ class MultiAgentRLRLGym:
         return True
 
     def _build_from_recipe(
-        self, actor: AgentState, recipe: RecipeDef, events: List[str]
+        self, actor: AgentState, actor_id: str, recipe: RecipeDef, events: List[str]
     ) -> bool:
         assert self.state is not None
-        if recipe.build_tile_id not in self.tiles:
-            return False
         ar, ac = actor.position
-        for nr, nc in ((ar - 1, ac), (ar + 1, ac), (ar, ac - 1), (ar, ac + 1)):
-            if nr <= 0 or nc <= 0:
-                continue
-            if nr >= (len(self.state.grid) - 1) or nc >= (len(self.state.grid[0]) - 1):
-                continue
-            occupied = any(a.alive and a.position == (nr, nc) for a in self.state.agents.values())
-            occupied = occupied or any(
-                m.alive and m.position == (nr, nc) for m in self.state.monsters.values()
-            )
-            occupied = occupied or ((nr, nc) in self.state.chests)
-            occupied = occupied or ((nr, nc) in self.state.stations)
-            occupied = occupied or ((nr, nc) in self.state.resource_nodes)
-            if occupied:
-                continue
-            self.state.grid[nr][nc] = recipe.build_tile_id
+        if ar <= 0 or ac <= 0:
+            return False
+        if ar >= (len(self.state.grid) - 1) or ac >= (len(self.state.grid[0]) - 1):
+            return False
+        occupied = any(
+            a.alive and a.position == (ar, ac) and a.agent_id != actor_id
+            for a in self.state.agents.values()
+        )
+        occupied = occupied or any(
+            m.alive and m.position == (ar, ac) for m in self.state.monsters.values()
+        )
+        occupied = occupied or ((ar, ac) in self.state.chests)
+        occupied = occupied or ((ar, ac) in self.state.resource_nodes)
+        if recipe.build_tile_id and (ar, ac) in self.state.stations:
+            occupied = True
+        if occupied:
+            return False
+        if recipe.build_tile_id:
+            if recipe.build_tile_id not in self.tiles:
+                return False
+            self.state.grid[ar][ac] = recipe.build_tile_id
             if recipe.build_tile_id in FIRE_CONTAINER_TILE_IDS:
-                self.state.tile_interactions[(nr, nc)] = max(
-                    1, int(self.state.tile_interactions.get((nr, nc), 0)) + FIRE_FUEL_PER_STICK
+                self.state.tile_interactions[(ar, ac)] = max(
+                    1, int(self.state.tile_interactions.get((ar, ac), 0)) + FIRE_FUEL_PER_STICK
                 )
-            events.append(f"build:{recipe.build_tile_id}:{nr}:{nc}")
-            return True
-        return False
+            events.append(f"build:{recipe.build_tile_id}:{ar}:{ac}")
+        if recipe.build_station_id:
+            if (ar, ac) in self.state.stations:
+                return False
+            station_def = self._station_spawn_row(recipe.build_station_id)
+            unlock_fallback = sorted(
+                rid
+                for rid, row in self.recipes.items()
+                if str(row.station).strip() == recipe.build_station_id
+            )
+            station_speed = 1.0
+            station_quality = 0
+            station_unlock = unlock_fallback
+            if station_def is not None:
+                station_speed = float(station_def.get("speed_multiplier", 1.0))
+                station_quality = max(0, int(station_def.get("quality_tier", 0)))
+                station_unlock = [
+                    str(x).strip()
+                    for x in station_def.get("unlock_recipes", [])
+                    if str(x).strip()
+                ]
+            self.state.stations[(ar, ac)] = StationState(
+                station_id=recipe.build_station_id,
+                position=(ar, ac),
+                speed_multiplier=station_speed,
+                quality_tier=station_quality,
+                unlock_recipes=station_unlock,
+            )
+            events.append(f"build_station:{recipe.build_station_id}:{ar}:{ac}")
+            if (
+                recipe.build_station_id == "workbench"
+                and actor_id not in self._workstation_rewarded_agents
+            ):
+                self._workstation_rewarded_agents.add(actor_id)
+                events.append("workstation_first_build")
+        return True
 
     def _item_base_id(self, item_id: str) -> str:
         assert self.state is not None
@@ -4113,6 +4236,19 @@ class MultiAgentRLRLGym:
                 raise ValueError(
                     f"recipe '{recipe_id}' build_tile_id '{recipe.build_tile_id}' is unknown"
                 )
+            if recipe.build_station_id:
+                known_station_ids = {
+                    str(r.station).strip()
+                    for r in self.recipes.values()
+                    if str(r.station).strip()
+                }
+                if (
+                    self._station_spawn_row(recipe.build_station_id) is None
+                    and recipe.build_station_id not in known_station_ids
+                ):
+                    raise ValueError(
+                        f"recipe '{recipe_id}' build_station_id '{recipe.build_station_id}' is unknown"
+                    )
             if recipe.required_tool_category:
                 categories = set(self.tool_category_by_item.values())
                 if recipe.required_tool_category not in categories:
@@ -4393,6 +4529,17 @@ class MultiAgentRLRLGym:
                 )
                 placed += 1
         return out
+
+    def _station_spawn_row(self, station_id: str) -> Dict[str, object] | None:
+        sid = str(station_id).strip()
+        if not sid:
+            return None
+        for row in self.mapgen_cfg.station_spawns:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("id", "")).strip() == sid:
+                return dict(row)
+        return None
 
     def _spawn_chests(self, occupied: List[Tuple[int, int]]) -> Dict[Tuple[int, int], ChestState]:
         assert self.state is not None
