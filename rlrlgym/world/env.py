@@ -2900,7 +2900,8 @@ class MultiAgentRLRLGym:
             return 0.0
         return float(self.config.team_guard_reward)
 
-    def _defend(self, _actor: AgentState, actor_id: str, events: List[str]) -> float:
+    def _defend(self, actor: AgentState, actor_id: str, events: List[str]) -> float:
+        del actor
         self._defending_agents.add(actor_id)
         defend_bonus, weapon_id, shield_bonus = self._defend_dr_bonus_for(actor_id)
         events.append(f"defend:dr_bonus:{defend_bonus}")
