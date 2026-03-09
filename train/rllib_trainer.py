@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import math
 import numbers
 import os
 import shutil
@@ -1002,6 +1003,8 @@ class RLlibTrainer:
                 ],
                 default=0.0,
             )
+            if not math.isfinite(phase_index):
+                phase_index = 0.0
             if phase_index <= 0.0:
                 phase_index = float(
                     self._phase_index_for_episode(
@@ -1324,7 +1327,9 @@ class RLlibTrainer:
                     break
                 cur = cur[key]
             if ok and isinstance(cur, numbers.Real):
-                return float(cur)
+                val = float(cur)
+                if math.isfinite(val):
+                    return val
         return default
 
     def _extract_loss(self, result: Dict[str, object]) -> float:
@@ -1371,7 +1376,9 @@ class RLlibTrainer:
             if isinstance(values, list) and values:
                 last = values[-1]
                 if isinstance(last, numbers.Real):
-                    return float(last) / float(n)
+                    val = float(last)
+                    if math.isfinite(val):
+                        return val / float(n)
         return float(default)
 
     def _extract_last_hist_stat(
@@ -1394,7 +1401,9 @@ class RLlibTrainer:
             if isinstance(cur, list) and cur:
                 last = cur[-1]
                 if isinstance(last, numbers.Real):
-                    return float(last)
+                    val = float(last)
+                    if math.isfinite(val):
+                        return val
         return float(default)
 
     def _extract_custom_metric_map(self, result: Dict[str, object]) -> Dict[str, float]:
