@@ -10,8 +10,9 @@ CURRICULUM_PATH="${1:-data/base/curriculum_phases_crafting_1000.json}"
 SCENARIO_PATH="${2:-data/scenarios/crafting_curriculum_10_agents}"
 OUTPUT_DIR="${3:-${SCENARIO_PATH%/}/maps}"
 BASE_SEED="${4:-7000}"
+CURRICULUM_WITH_MAPS_PATH="${5:-${SCENARIO_PATH%/}/curriculum_with_static_maps.json}"
 
-"$PY_BIN" - "$CURRICULUM_PATH" "$SCENARIO_PATH" "$OUTPUT_DIR" "$BASE_SEED" << 'PY'
+"$PY_BIN" - "$CURRICULUM_PATH" "$SCENARIO_PATH" "$OUTPUT_DIR" "$BASE_SEED" "$CURRICULUM_WITH_MAPS_PATH" << 'PY'
 from __future__ import annotations
 
 import copy
@@ -50,21 +51,29 @@ def _map_payload(*, name: str, seed: int, grid: list[list[str]], biomes: dict[tu
 
 
 def main() -> None:
-    if len(sys.argv) < 5:
-        raise SystemExit("Usage: <curriculum_path> <scenario_path> <output_dir> <base_seed>")
+    if len(sys.argv) < 6:
+        raise SystemExit(
+            "Usage: <curriculum_path> <scenario_path> <output_dir> <base_seed> <curriculum_with_maps_path>"
+        )
     curriculum_path = Path(sys.argv[1]).resolve()
     scenario_path = Path(sys.argv[2]).resolve()
     output_dir = Path(sys.argv[3]).resolve()
     base_seed = int(sys.argv[4])
+    curriculum_with_maps_path = Path(sys.argv[5]).resolve()
 
     raw = json.loads(curriculum_path.read_text(encoding="utf-8"))
     phases = raw.get("phases", [])
     if not isinstance(phases, list) or not phases:
         raise ValueError("Curriculum must contain non-empty phases array")
+    updated_curriculum = dict(raw)
+    updated_curriculum["phases"] = [
+        dict(x) for x in phases if isinstance(x, dict)
+    ]
 
     base_cfg = EnvConfig.from_json(Path("data/env_config.json"))
     scenario = load_scenario(scenario_path)
     base_cfg = apply_scenario_to_env_config(base_cfg, scenario)
+    scenario_dir = scenario_path if scenario_path.is_dir() else scenario_path.parent
 
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, object] = {
@@ -75,7 +84,8 @@ def main() -> None:
         "maps": [],
     }
 
-    for idx, phase_any in enumerate(phases):
+    phase_rows = updated_curriculum.get("phases", [])
+    for idx, phase_any in enumerate(phase_rows):
         if not isinstance(phase_any, dict):
             continue
         phase = dict(phase_any)
@@ -105,6 +115,11 @@ def main() -> None:
             biomes=biomes,
         )
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        try:
+            rel_for_phase = out_path.relative_to(scenario_dir).as_posix()
+        except Exception:
+            rel_for_phase = out_path.as_posix()
+        phase_rows[idx]["static_map_path"] = rel_for_phase
 
         manifest["maps"].append(
             {
@@ -121,6 +136,11 @@ def main() -> None:
     manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"wrote {manifest_path}")
+    curriculum_with_maps_path.parent.mkdir(parents=True, exist_ok=True)
+    curriculum_with_maps_path.write_text(
+        json.dumps(updated_curriculum, indent=2), encoding="utf-8"
+    )
+    print(f"wrote {curriculum_with_maps_path}")
 
 
 if __name__ == "__main__":

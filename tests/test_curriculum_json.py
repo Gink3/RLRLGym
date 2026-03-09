@@ -36,6 +36,7 @@ class TestCurriculumJson(unittest.TestCase):
                     "max_steps": 120,
                     "monster_density": 0.03,
                     "chest_density": 0.05,
+                    "static_map_path": "maps/p2.json",
                 },
             ],
         }
@@ -46,6 +47,7 @@ class TestCurriculumJson(unittest.TestCase):
             self.assertEqual(len(phases), 2)
             self.assertEqual(phases[0]["name"], "p1")
             self.assertEqual(phases[1]["monster_density"], 0.03)
+            self.assertEqual(phases[1]["static_map_path"], "maps/p2.json")
 
 
 if __name__ == "__main__":

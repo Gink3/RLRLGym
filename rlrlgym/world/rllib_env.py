@@ -11,6 +11,7 @@ from gymnasium import spaces
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 from .env import EnvConfig, PettingZooParallelRLRLGym
+from .map_layout import load_map_layout
 from ..systems.featurize import observation_vector_size, vectorize_observation
 from ..systems.constants import ACTION_MAX
 
@@ -178,6 +179,28 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                     setattr(self.base.config, key, float(value))
                 else:
                     setattr(self.base.config, key, value)
+        if "static_map_path" in selected:
+            raw = str(selected.get("static_map_path", "") or "").strip()
+            if not raw:
+                self.base.config.static_map_path = ""
+                self.base.static_map_layout = None
+            else:
+                resolved = self._resolve_phase_map_path(raw)
+                self.base.config.static_map_path = resolved.as_posix()
+                self.base.static_map_layout = load_map_layout(resolved)
+
+    def _resolve_phase_map_path(self, raw_path: str) -> Path:
+        p = Path(str(raw_path)).expanduser()
+        if p.is_absolute():
+            return p
+        scenario_raw = str(self.base.config.scenario_path or "").strip()
+        if scenario_raw:
+            scenario_path = Path(scenario_raw)
+            base_dir = scenario_path if scenario_path.is_dir() else scenario_path.parent
+            cand = (base_dir / p).resolve()
+            if cand.exists():
+                return cand
+        return p.resolve()
 
     def step(self, action_dict):
         applied_actions = self._apply_action_masks(action_dict)

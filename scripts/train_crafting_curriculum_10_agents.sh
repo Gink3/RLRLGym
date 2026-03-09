@@ -6,12 +6,18 @@ if [[ -x ".venv/bin/python" ]]; then
   PY_BIN=".venv/bin/python"
 fi
 
+SCENARIO_DIR="data/scenarios/crafting_curriculum_10_agents"
+CURRICULUM_PATH="data/base/curriculum_phases_crafting_1000.json"
+if [[ -f "${SCENARIO_DIR}/curriculum_with_static_maps.json" ]]; then
+  CURRICULUM_PATH="${SCENARIO_DIR}/curriculum_with_static_maps.json"
+fi
+
 "$PY_BIN" -m train \
   --backend rllib \
   --algo ppo_masked \
   --iterations 200 \
-  --scenario-path data/scenarios/crafting_curriculum_10_agents \
-  --curriculum-path data/base/curriculum_phases_crafting_1000.json \
+  --scenario-path "${SCENARIO_DIR}" \
+  --curriculum-path "${CURRICULUM_PATH}" \
   --shared-policy \
   --num-rollout-workers 2 \
   --train-batch-size 8000 \

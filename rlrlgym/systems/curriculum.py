@@ -37,6 +37,7 @@ OPTIONAL_PHASE_FIELDS = {
     "timeout_tie_penalty": float,
     "engagement_bonus": float,
     "monster_sight_range": int,
+    "static_map_path": str,
 }
 
 
