@@ -41,6 +41,7 @@ class TestScenario(unittest.TestCase):
                         "profile": "human",
                         "network": "default",
                         "policy": "ppo_masked",
+                        "policy_id": "explorer_shared",
                     },
                     {
                         "race": "orc",
@@ -48,6 +49,7 @@ class TestScenario(unittest.TestCase):
                         "profile": "orc",
                         "network": "default",
                         "policy": "ppo_masked",
+                        "policy_id": "explorer_shared",
                     },
                 ],
             },
@@ -65,6 +67,9 @@ class TestScenario(unittest.TestCase):
             self.assertEqual(cfg.agent_class_map["agent_1"], "rogue")
             self.assertEqual(cfg.agent_profile_map["agent_1"], "orc")
             self.assertEqual(str(cfg.agent_scenario[0].get("policy", "")), "ppo_masked")
+            self.assertEqual(
+                str(cfg.agent_scenario[0].get("policy_id", "")), "explorer_shared"
+            )
             self.assertTrue(str(cfg.agent_scenario[0].get("name", "")).strip())
 
     def test_rejects_unknown_policy(self):
@@ -95,6 +100,7 @@ class TestScenario(unittest.TestCase):
                     race="human",
                     class_name="fighter",
                     policy=policy,
+                    policy_id="group_alpha",
                 )
             ],
         )
@@ -102,6 +108,7 @@ class TestScenario(unittest.TestCase):
             out_dir = save_scenario(Path(tmp) / "policy_roundtrip", scenario)
             loaded = load_scenario(out_dir)
             self.assertEqual(loaded.agents[0].policy, policy)
+            self.assertEqual(loaded.agents[0].policy_id, "group_alpha")
 
     def test_default_or_blank_names_are_auto_generated(self):
         scenario = Scenario(

@@ -182,6 +182,7 @@ class AgentDialog(QDialog):
             profile=None if self.profile_combo.currentText() == "<none>" else self.profile_combo.currentText(),
             network=None if self.network_combo.currentText() == "<none>" else self.network_combo.currentText(),
             policy=None if self.policy_combo.currentText() == "<none>" else self.policy_combo.currentText(),
+            policy_id=(self._existing.policy_id if self._existing else None),
             observation_config=obs,
             race_row=getattr(self._races.get(race), "__dict__", {}),
             class_row=getattr(self._classes.get(class_name), "__dict__", {}),
@@ -210,6 +211,8 @@ class AgentDialog(QDialog):
             policy = None if policy in (None, "") else str(policy).strip().lower()
             if policy is not None and policy not in SUPPORTED_AGENT_POLICIES:
                 raise ValueError(f"Unknown policy '{policy}'")
+            policy_id = payload.get("policy_id")
+            policy_id = None if policy_id in (None, "") else str(policy_id).strip()
             name = payload.get("name")
             name = None if name in (None, "") else str(name)
             self.result_agent = ScenarioAgent(
@@ -220,6 +223,7 @@ class AgentDialog(QDialog):
                 profile=profile,
                 network=network,
                 policy=policy,
+                policy_id=policy_id,
                 observation_config=dict(obs),
             )
             self.accept()

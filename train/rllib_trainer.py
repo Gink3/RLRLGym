@@ -143,6 +143,23 @@ class RLlibTrainer:
             )
         return next(iter(modes))
 
+    def _scenario_policy_ids(self) -> Dict[str, str] | None:
+        path = str(self.config.scenario_path or "").strip()
+        if not path:
+            return None
+        scenario = load_scenario(path)
+        out: Dict[str, str] = {}
+        for idx, agent in enumerate(scenario.agents):
+            aid = f"agent_{idx}"
+            raw = str(getattr(agent, "policy_id", "") or "").strip()
+            out[aid] = raw if raw else aid
+        if not out:
+            return None
+        # If every policy id is the default per-agent id, treat as not configured.
+        if all(out.get(aid, "") == aid for aid in sorted(out.keys())):
+            return None
+        return out
+
     def _resolved_algo_mode(self) -> str:
         requested = str(self.config.algo or "ppo").strip().lower()
         scenario_mode = self._scenario_policy_mode()
@@ -616,6 +633,8 @@ class RLlibTrainer:
         if use_recurrent:
             model_cfg = {"use_lstm": True, "max_seq_len": 20}
 
+        scenario_policy_ids = self._scenario_policy_ids()
+
         if self.config.shared_policy:
             policy_ids = ["shared_policy"]
             rl_module_spec = self._MultiRLModuleSpec(
@@ -631,6 +650,23 @@ class RLlibTrainer:
 
             def policy_mapping_fn(agent_id, *args, **kwargs):
                 return "shared_policy"
+        elif scenario_policy_ids:
+            unique_ids = sorted(set(str(v) for v in scenario_policy_ids.values()))
+            policy_ids = list(unique_ids)
+            rl_module_spec = self._MultiRLModuleSpec(
+                rl_module_specs={
+                    pid: self._RLModuleSpec(
+                        observation_space=sample_obs_space,
+                        action_space=sample_action_space,
+                        inference_only=False,
+                        model_config=dict(model_cfg),
+                    )
+                    for pid in policy_ids
+                }
+            )
+
+            def policy_mapping_fn(agent_id, *args, **kwargs):
+                return str(scenario_policy_ids.get(str(agent_id), policy_ids[0]))
         else:
             policy_ids = ["human_policy", "orc_policy"]
             rl_module_spec = self._MultiRLModuleSpec(

@@ -26,6 +26,7 @@ class ScenarioAgent:
     profile: Optional[str] = None
     network: Optional[str] = None
     policy: Optional[str] = None
+    policy_id: Optional[str] = None
     observation_config: Dict[str, object] = field(default_factory=dict)
 
 
@@ -55,6 +56,7 @@ def _agent_from_row(row: Dict[str, object], index: int) -> ScenarioAgent:
     profile_raw = row.get("profile")
     network_raw = row.get("network")
     policy_raw = row.get("policy")
+    policy_id_raw = row.get("policy_id", row.get("policy_group"))
     obs_raw = row.get("observation_config", {})
     if obs_raw is None:
         obs_raw = {}
@@ -77,6 +79,11 @@ def _agent_from_row(row: Dict[str, object], index: int) -> ScenarioAgent:
         profile=(str(profile_raw).strip() if profile_raw not in (None, "") else None),
         network=(str(network_raw).strip() if network_raw not in (None, "") else None),
         policy=policy,
+        policy_id=(
+            str(policy_id_raw).strip()
+            if policy_id_raw not in (None, "")
+            else None
+        ),
         observation_config=dict(obs_raw),
     )
 
@@ -170,6 +177,7 @@ def save_scenario(path: str | Path, scenario: Scenario) -> Path:
                 "profile": agent.profile,
                 "network": agent.network,
                 "policy": agent.policy,
+                "policy_id": agent.policy_id,
                 "observation_config": dict(agent.observation_config),
             }
             for agent in scenario.agents
@@ -220,6 +228,7 @@ def agent_combined_payload(
     profile: Optional[str],
     network: Optional[str],
     policy: Optional[str],
+    policy_id: Optional[str],
     observation_config: Optional[Dict[str, object]],
     race_row: Optional[Dict[str, object]] = None,
     class_row: Optional[Dict[str, object]] = None,
@@ -232,6 +241,7 @@ def agent_combined_payload(
         "profile": profile,
         "network": network,
         "policy": policy,
+        "policy_id": policy_id,
         "observation_config": dict(observation_config or {}),
         "race_def": dict(race_row or {}),
         "class_def": dict(class_row or {}),
@@ -282,6 +292,7 @@ def apply_scenario_to_env_config(env_config, scenario: Scenario):
                 "profile": agent.profile,
                 "network": agent.network,
                 "policy": agent.policy,
+                "policy_id": agent.policy_id,
                 "observation_config": dict(agent.observation_config),
             }
         )
