@@ -12,7 +12,6 @@ import subprocess
 import sys
 import warnings
 from collections.abc import MutableMapping
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -212,9 +211,6 @@ class RLlibTrainer:
         algo_mode = self._resolved_algo_mode()
         use_action_masking = algo_mode in {"ppo_masked", "dqn_masked"}
         use_recurrent = algo_mode == "recurrent_ppo"
-        window = 50
-        recent_returns: deque[float] = deque(maxlen=window)
-        recent_survival: deque[float] = deque(maxlen=window)
 
         curriculum_phases = (
             load_curriculum_phases(self.config.curriculum_path)
@@ -386,6 +382,8 @@ class RLlibTrainer:
                 first_seen_count = 0
                 combat_exchange_counts = []
                 timeout_no_contact_flags = []
+                survival_lengths = []
+                overall_levels = []
                 for aid in agent_ids:
                     info = episode.last_info_for(aid)
                     if not info:
@@ -423,6 +421,12 @@ class RLlibTrainer:
                     tnc = info.get("timeout_no_contact")
                     if tnc is not None:
                         timeout_no_contact_flags.append(1.0 if bool(tnc) else 0.0)
+                    surv_steps = info.get("survival_steps")
+                    if isinstance(surv_steps, numbers.Real):
+                        survival_lengths.append(float(surv_steps))
+                    lvl = info.get("overall_level")
+                    if isinstance(lvl, numbers.Real):
+                        overall_levels.append(float(lvl))
                     if not alive:
                         death_reason = str(info.get("death_reason", ""))
                         if starved:
@@ -533,6 +537,22 @@ class RLlibTrainer:
                     "timeout_no_contact_rate",
                     (sum(timeout_no_contact_flags) / len(timeout_no_contact_flags))
                     if timeout_no_contact_flags
+                    else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "mean_survival_length",
+                    (sum(survival_lengths) / len(survival_lengths))
+                    if survival_lengths
+                    else 0.0,
+                )
+                self._emit_metric(
+                    episode,
+                    metrics_logger,
+                    "mean_level",
+                    (sum(overall_levels) / len(overall_levels))
+                    if overall_levels
                     else 0.0,
                 )
                 self._emit_metric(
@@ -1068,6 +1088,34 @@ class RLlibTrainer:
                 n_agents=max(1, n_agents),
                 default=(reward_mean / float(max(1, n_agents))),
             )
+            mean_survival_last_episode = self._extract_last_hist_stat(
+                result=result,
+                key="custom_metrics/mean_survival_length",
+                default=self._extract_float(
+                    result,
+                    [
+                        ("custom_metrics", "mean_survival_length_mean"),
+                        ("custom_metrics", "mean_survival_length"),
+                        ("env_runners", "custom_metrics", "mean_survival_length_mean"),
+                        ("env_runners", "custom_metrics", "mean_survival_length"),
+                    ],
+                    default=0.0,
+                ),
+            )
+            mean_level_last_episode = self._extract_last_hist_stat(
+                result=result,
+                key="custom_metrics/mean_level",
+                default=self._extract_float(
+                    result,
+                    [
+                        ("custom_metrics", "mean_level_mean"),
+                        ("custom_metrics", "mean_level"),
+                        ("env_runners", "custom_metrics", "mean_level_mean"),
+                        ("env_runners", "custom_metrics", "mean_level"),
+                    ],
+                    default=0.0,
+                ),
+            )
             if episodes_this_iter > 0:
                 deaths_scale = int(round(episodes_this_iter)) * max(1, n_agents)
                 death_histogram["starvation"] += int(round(death_starvation_rate * deaths_scale))
@@ -1085,13 +1133,12 @@ class RLlibTrainer:
                         + int(round(float(value) * deaths_scale))
                     )
 
-            recent_returns.append(reward_mean)
-            recent_survival.append(survival_mean)
-
             row = {
                 "iteration": i + 1,
                 "episode_reward_mean": reward_mean,
                 "mean_reward_last_episode": mean_reward_last_episode,
+                "mean_survival_last_episode": mean_survival_last_episode,
+                "mean_level_last_episode": mean_level_last_episode,
                 "episodes_total": episodes_total,
                 "timesteps_total": result.get("timesteps_total"),
                 "survival_mean": survival_mean,
@@ -1115,6 +1162,26 @@ class RLlibTrainer:
                 "kill_event_count": kill_event_count,
                 "phase_index": int(round(phase_index)),
                 "phase_name": phase_name,
+                "mean_survival_length": self._extract_float(
+                    result,
+                    [
+                        ("custom_metrics", "mean_survival_length_mean"),
+                        ("custom_metrics", "mean_survival_length"),
+                        ("env_runners", "custom_metrics", "mean_survival_length_mean"),
+                        ("env_runners", "custom_metrics", "mean_survival_length"),
+                    ],
+                    default=0.0,
+                ),
+                "mean_level": self._extract_float(
+                    result,
+                    [
+                        ("custom_metrics", "mean_level_mean"),
+                        ("custom_metrics", "mean_level"),
+                        ("env_runners", "custom_metrics", "mean_level_mean"),
+                        ("env_runners", "custom_metrics", "mean_level"),
+                    ],
+                    default=0.0,
+                ),
                 "reward_comp_action_total": reward_comp_action_total,
                 "reward_comp_survival": reward_comp_survival,
                 "reward_comp_search_explore": reward_comp_search_explore,
@@ -1151,10 +1218,9 @@ class RLlibTrainer:
             self._print_live_progress(
                 iteration=i + 1,
                 total=self.config.iterations,
-                window=window,
-                ret=sum(recent_returns) / len(recent_returns),
-                surv=sum(recent_survival) / len(recent_survival),
                 mean_reward=mean_reward_last_episode,
+                mean_sur=mean_survival_last_episode,
+                mean_level=mean_level_last_episode,
                 episodes_total=int(episodes_total),
             )
 
@@ -1274,6 +1340,29 @@ class RLlibTrainer:
                 last = values[-1]
                 if isinstance(last, numbers.Real):
                     return float(last) / float(n)
+        return float(default)
+
+    def _extract_last_hist_stat(
+        self,
+        result: Dict[str, object],
+        key: str,
+        default: float = 0.0,
+    ) -> float:
+        candidates = (
+            ("hist_stats", key),
+            ("env_runners", "hist_stats", key),
+        )
+        for path in candidates:
+            cur: object = result
+            for p in path:
+                if not isinstance(cur, dict) or p not in cur:
+                    cur = None
+                    break
+                cur = cur[p]
+            if isinstance(cur, list) and cur:
+                last = cur[-1]
+                if isinstance(last, numbers.Real):
+                    return float(last)
         return float(default)
 
     def _extract_custom_metric_map(self, result: Dict[str, object]) -> Dict[str, float]:
@@ -1493,10 +1582,9 @@ class RLlibTrainer:
         self,
         iteration: int,
         total: int,
-        window: int,
-        ret: float,
-        surv: float,
         mean_reward: float,
+        mean_sur: float,
+        mean_level: float,
         episodes_total: int,
     ) -> None:
         bar_width = 26
@@ -1505,9 +1593,9 @@ class RLlibTrainer:
         bar = "#" * filled + "-" * (bar_width - filled)
         line = (
             f"\r[{bar}] {iteration}/{total} "
-            f"ret{window}={ret:.3f} "
-            f"surv{window}={surv:.1f} "
             f"meanReward={mean_reward:.3f} "
+            f"meanSur={mean_sur:.1f} "
+            f"meanLevel={mean_level:.2f} "
             f"episodes_total={episodes_total}"
         )
         print(line, end="", flush=True)

@@ -488,6 +488,7 @@ class MultiAgentRLRLGym:
         self._render_window: Optional[RenderWindow] = None
         self._winner_announced: bool = False
         self._episode_metrics: Dict[str, Dict[str, object]] = {}
+        self._episode_survival_steps: Dict[str, int] = {}
         self._walkable_tile_count: int = 1
         self._episode_combat_exchanges: int = 0
         self._episode_any_enemy_seen: bool = False
@@ -625,6 +626,7 @@ class MultiAgentRLRLGym:
         self._episode_timeout_no_contact = False
         self._episode_terminal_rewards_applied = False
         self._episode_metrics = {}
+        self._episode_survival_steps = {aid: 0 for aid in self.possible_agents}
         for aid in self.possible_agents:
             visible = self._visible_tile_coords(aid)
             first_enemy_visible = self._enemy_visible(aid)
@@ -697,6 +699,10 @@ class MultiAgentRLRLGym:
 
         for aid in self.possible_agents:
             agent = self.state.agents[aid]
+            if agent.alive and agent.hp > 0:
+                self._episode_survival_steps[aid] = (
+                    int(self._episode_survival_steps.get(aid, 0)) + 1
+                )
             if agent.hp <= 0 or not agent.alive:
                 if agent.alive and agent.hp <= 0:
                     rewards[aid] -= 1.0
@@ -773,6 +779,8 @@ class MultiAgentRLRLGym:
             info[aid]["race"] = agent.race_name
             info[aid]["class"] = agent.class_name
             info[aid]["faction_id"] = int(agent.faction_id)
+            info[aid]["overall_level"] = int(self._overall_level(agent))
+            info[aid]["survival_steps"] = int(self._episode_survival_steps.get(aid, 0))
             info[aid]["is_faction_leader"] = bool(self._is_faction_leader(aid))
             info[aid]["pending_invite_from_faction"] = self._pending_invite_faction_id(aid)
             info[aid]["teammate_distance"] = self._nearest_teammate_distance(aid)
