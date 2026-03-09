@@ -2,7 +2,7 @@ import unittest
 
 from rlrlgym import EnvConfig, PettingZooParallelRLRLGym
 from rlrlgym.systems.constants import ACTION_EQUIP, ACTION_INTERACT, ACTION_INTERACT_MINE, ACTION_INTERACT_STATION, ACTION_MOVE_EAST
-from rlrlgym.systems.models import ResourceNodeState, StationState
+from rlrlgym.systems.models import AnimalState, ResourceNodeState, StationState
 
 
 class TestGatherAndCrafting(unittest.TestCase):
@@ -265,6 +265,98 @@ class TestGatherAndCrafting(unittest.TestCase):
         _, rewards, _, _, info = env.step({aid: ACTION_INTERACT})
         self.assertNotIn("workstation_first_build", info[aid]["events"])
         self.assertLess(rewards[aid], 0.25)
+
+    def test_build_fails_when_animal_on_construction_tile(self):
+        construction_recipes_data = {
+            "schema_version": 1,
+            "recipes": [
+                {
+                    "id": "build_fire_test",
+                    "inputs": {"campfire_kit": 1},
+                    "outputs": {},
+                    "skill": "crafting",
+                    "build_tile_id": "campfire",
+                }
+            ],
+        }
+        cfg = EnvConfig(
+            width=12,
+            height=10,
+            n_agents=1,
+            max_steps=8,
+            render_enabled=False,
+            construction_recipes_data=construction_recipes_data,
+        )
+        env = PettingZooParallelRLRLGym(cfg)
+        env.reset(seed=31)
+        aid = "agent_0"
+        pos = env.state.agents[aid].position
+        env.state.grid[pos[0]][pos[1]] = "grass"
+        env.state.agents[aid].inventory.append("campfire_kit")
+        env.state.animals["animal_test"] = AnimalState(
+            entity_id="animal_test",
+            animal_id="rabbit",
+            name="Rabbit",
+            symbol="r",
+            color="white",
+            position=pos,
+            hp=4,
+            max_hp=4,
+            hunger=5,
+            max_hunger=10,
+            thirst=5,
+            max_thirst=10,
+            age=6,
+            mature_age=5,
+            reproduction_cooldown=0,
+            reproduction_cooldown_max=6,
+            prey_score=1,
+            movement_speed=1,
+            carnivore=False,
+            gender="female",
+            litter_size_min=1,
+            litter_size_max=2,
+            can_shear=False,
+            sheared=False,
+            shear_item="",
+            wool_regrow=0,
+            shear_regrow_max=0,
+            alive=True,
+        )
+        _, _, _, _, info = env.step({aid: ACTION_INTERACT})
+        self.assertIn("build_fail:no_space", info[aid]["events"])
+        self.assertEqual(env.state.grid[pos[0]][pos[1]], "grass")
+
+    def test_build_fails_on_existing_construct_tile(self):
+        construction_recipes_data = {
+            "schema_version": 1,
+            "recipes": [
+                {
+                    "id": "build_fire_test",
+                    "inputs": {"campfire_kit": 1},
+                    "outputs": {},
+                    "skill": "crafting",
+                    "build_tile_id": "campfire",
+                }
+            ],
+        }
+        cfg = EnvConfig(
+            width=12,
+            height=10,
+            n_agents=1,
+            max_steps=8,
+            render_enabled=False,
+            construction_recipes_data=construction_recipes_data,
+        )
+        env = PettingZooParallelRLRLGym(cfg)
+        env.reset(seed=32)
+        aid = "agent_0"
+        pos = env.state.agents[aid].position
+        env.state.grid[pos[0]][pos[1]] = "wood_door"
+        env.state.agents[aid].inventory.append("campfire_kit")
+        _, _, _, _, info = env.step({aid: ACTION_INTERACT})
+        self.assertIn("build_fail:no_space", info[aid]["events"])
+        self.assertEqual(env.state.grid[pos[0]][pos[1]], "wood_door")
 
     def test_spike_trap_damages_on_move(self):
         cfg = EnvConfig(width=12, height=10, n_agents=1, max_steps=5, render_enabled=False)

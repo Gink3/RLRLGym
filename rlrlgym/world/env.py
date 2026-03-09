@@ -130,6 +130,18 @@ FIRE_FUEL_PER_WOOD = 5
 FIRE_FUEL_PER_LOG = 8
 FIRE_FUEL_DECAY_PER_STEP = 1
 FIRE_CONTAINER_TILE_IDS = {"campfire", "firepit", "fireplace"}
+DEFAULT_CONSTRUCT_TILE_IDS = {
+    "wood_wall",
+    "rock_wall",
+    "stone_wall",
+    "wood_door",
+    "spike_trap",
+    "campfire",
+    "firepit",
+    "fireplace",
+    "clay_forge",
+    "glass_window",
+}
 OPAQUE_TILE_IDS = {
     "wall",
     "indestructible_wall",
@@ -445,6 +457,12 @@ class MultiAgentRLRLGym:
             raise ValueError(f"Duplicate recipe ids across crafting/construction files: {dup}")
         self.recipes = dict(crafting_recipes)
         self.recipes.update(construction_recipes)
+        self._construct_tile_ids = set(DEFAULT_CONSTRUCT_TILE_IDS)
+        self._construct_tile_ids.update(
+            str(r.build_tile_id).strip()
+            for r in self.recipes.values()
+            if str(r.build_tile_id).strip()
+        )
         if self.config.statuses_data:
             self.status_defs = parse_statuses(self.config.statuses_data)
         else:
@@ -1905,8 +1923,13 @@ class MultiAgentRLRLGym:
         occupied = occupied or any(
             m.alive and m.position == (ar, ac) for m in self.state.monsters.values()
         )
+        occupied = occupied or any(
+            a.alive and a.position == (ar, ac) for a in self.state.animals.values()
+        )
         occupied = occupied or ((ar, ac) in self.state.chests)
         occupied = occupied or ((ar, ac) in self.state.resource_nodes)
+        if self.state.grid[ar][ac] in self._construct_tile_ids:
+            occupied = True
         if recipe.build_tile_id and (ar, ac) in self.state.stations:
             occupied = True
         if occupied:
