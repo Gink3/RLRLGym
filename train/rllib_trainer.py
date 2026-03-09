@@ -215,7 +215,6 @@ class RLlibTrainer:
         window = 50
         recent_returns: deque[float] = deque(maxlen=window)
         recent_survival: deque[float] = deque(maxlen=window)
-        recent_loss: deque[float] = deque(maxlen=window)
 
         curriculum_phases = (
             load_curriculum_phases(self.config.curriculum_path)
@@ -1064,6 +1063,11 @@ class RLlibTrainer:
             )
             custom_metrics = self._extract_custom_metric_map(result)
             loss = self._extract_loss(result)
+            mean_reward_last_episode = self._extract_last_episode_mean_reward(
+                result=result,
+                n_agents=max(1, n_agents),
+                default=(reward_mean / float(max(1, n_agents))),
+            )
             if episodes_this_iter > 0:
                 deaths_scale = int(round(episodes_this_iter)) * max(1, n_agents)
                 death_histogram["starvation"] += int(round(death_starvation_rate * deaths_scale))
@@ -1083,11 +1087,11 @@ class RLlibTrainer:
 
             recent_returns.append(reward_mean)
             recent_survival.append(survival_mean)
-            recent_loss.append(loss)
 
             row = {
                 "iteration": i + 1,
                 "episode_reward_mean": reward_mean,
+                "mean_reward_last_episode": mean_reward_last_episode,
                 "episodes_total": episodes_total,
                 "timesteps_total": result.get("timesteps_total"),
                 "survival_mean": survival_mean,
@@ -1150,7 +1154,7 @@ class RLlibTrainer:
                 window=window,
                 ret=sum(recent_returns) / len(recent_returns),
                 surv=sum(recent_survival) / len(recent_survival),
-                loss=sum(recent_loss) / len(recent_loss),
+                mean_reward=mean_reward_last_episode,
                 episodes_total=int(episodes_total),
             )
 
@@ -1242,6 +1246,35 @@ class RLlibTrainer:
                 if losses:
                     return sum(losses) / len(losses)
         return 0.0
+
+    def _extract_last_episode_mean_reward(
+        self,
+        result: Dict[str, object],
+        n_agents: int,
+        default: float = 0.0,
+    ) -> float:
+        def _dig(path: tuple[str, ...]) -> object:
+            cur: object = result
+            for key in path:
+                if not isinstance(cur, dict) or key not in cur:
+                    return None
+                cur = cur[key]
+            return cur
+
+        n = max(1, int(n_agents))
+        candidate_paths = (
+            ("hist_stats", "episode_reward"),
+            ("hist_stats", "episode_return"),
+            ("env_runners", "hist_stats", "episode_reward"),
+            ("env_runners", "hist_stats", "episode_return"),
+        )
+        for path in candidate_paths:
+            values = _dig(path)
+            if isinstance(values, list) and values:
+                last = values[-1]
+                if isinstance(last, numbers.Real):
+                    return float(last) / float(n)
+        return float(default)
 
     def _extract_custom_metric_map(self, result: Dict[str, object]) -> Dict[str, float]:
         merged: Dict[str, Tuple[int, float]] = {}
@@ -1463,7 +1496,7 @@ class RLlibTrainer:
         window: int,
         ret: float,
         surv: float,
-        loss: float,
+        mean_reward: float,
         episodes_total: int,
     ) -> None:
         bar_width = 26
@@ -1474,7 +1507,7 @@ class RLlibTrainer:
             f"\r[{bar}] {iteration}/{total} "
             f"ret{window}={ret:.3f} "
             f"surv{window}={surv:.1f} "
-            f"loss{window}={loss:.4f} "
+            f"meanReward={mean_reward:.3f} "
             f"episodes_total={episodes_total}"
         )
         print(line, end="", flush=True)
