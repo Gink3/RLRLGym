@@ -251,6 +251,44 @@ class RLlibTrainer:
                 super().__init__(*args, **kwargs)
                 self._episode_action_counts: Dict[int, Dict[str, int]] = {}
 
+            def _episode_agent_ids(self, episode) -> list[str]:
+                if hasattr(episode, "get_agents"):
+                    try:
+                        return list(episode.get_agents())
+                    except Exception:
+                        pass
+                ids = getattr(episode, "agent_ids", None)
+                if isinstance(ids, (list, tuple, set)):
+                    return [str(x) for x in ids]
+                if hasattr(episode, "_agent_to_last_info"):
+                    try:
+                        return list(episode._agent_to_last_info.keys())
+                    except Exception:
+                        pass
+                return []
+
+            def _episode_latest_infos(self, episode) -> Dict[str, Dict[str, object]]:
+                if hasattr(episode, "get_infos"):
+                    try:
+                        out = episode.get_infos(-1)
+                        if isinstance(out, dict):
+                            return {
+                                str(k): v
+                                for k, v in out.items()
+                                if isinstance(v, dict)
+                            }
+                    except Exception:
+                        pass
+                if hasattr(episode, "_agent_to_last_info"):
+                    raw = getattr(episode, "_agent_to_last_info", {})
+                    if isinstance(raw, dict):
+                        return {
+                            str(k): v
+                            for k, v in raw.items()
+                            if isinstance(v, dict)
+                        }
+                return {}
+
             def _get_episode_store(self, episode):
                 custom = getattr(episode, "custom_data", None)
                 if isinstance(custom, MutableMapping):
@@ -302,13 +340,10 @@ class RLlibTrainer:
                 counts = store.get("action_counts")
                 if not isinstance(counts, dict):
                     return
-                agent_ids = []
-                if hasattr(episode, "get_agents"):
-                    agent_ids = list(episode.get_agents())
-                elif hasattr(episode, "_agent_to_last_info"):
-                    agent_ids = list(episode._agent_to_last_info.keys())
+                agent_ids = self._episode_agent_ids(episode)
+                latest_infos = self._episode_latest_infos(episode)
                 for aid in agent_ids:
-                    info = episode.last_info_for(aid)
+                    info = latest_infos.get(aid, {})
                     if not info:
                         continue
                     action = info.get("action")
@@ -357,11 +392,8 @@ class RLlibTrainer:
                         store["phase_index"] = max(float(store.get("phase_index", 0.0)), float(pidx))
 
             def on_episode_end(self, *, episode, metrics_logger=None, **kwargs):
-                agent_ids = []
-                if hasattr(episode, "get_agents"):
-                    agent_ids = list(episode.get_agents())
-                elif hasattr(episode, "_agent_to_last_info"):
-                    agent_ids = list(episode._agent_to_last_info.keys())
+                agent_ids = self._episode_agent_ids(episode)
+                latest_infos = self._episode_latest_infos(episode)
 
                 alive_flags = []
                 starvation_flags = []
@@ -385,7 +417,7 @@ class RLlibTrainer:
                 survival_lengths = []
                 overall_levels = []
                 for aid in agent_ids:
-                    info = episode.last_info_for(aid)
+                    info = latest_infos.get(aid, {})
                     if not info:
                         continue
                     alive = bool(info.get("alive", False))
