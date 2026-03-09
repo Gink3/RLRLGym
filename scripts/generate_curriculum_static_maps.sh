@@ -8,7 +8,7 @@ fi
 
 CURRICULUM_PATH="${1:-data/base/curriculum_phases_crafting_1000.json}"
 SCENARIO_PATH="${2:-data/scenarios/crafting_curriculum_10_agents}"
-OUTPUT_DIR="${3:-data/maps/curriculum_crafting_1000}"
+OUTPUT_DIR="${3:-${SCENARIO_PATH%/}/maps}"
 BASE_SEED="${4:-7000}"
 
 "$PY_BIN" - "$CURRICULUM_PATH" "$SCENARIO_PATH" "$OUTPUT_DIR" "$BASE_SEED" << 'PY'
