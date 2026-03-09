@@ -247,7 +247,12 @@
         "density": 0.0,
         "speed_multiplier": 1.1,
         "quality_tier": 0,
-        "unlock_recipes": ["smelt_copper_ingot", "smelt_iron_ingot"]
+        "unlock_recipes": [
+          "smelt_copper_ingot",
+          "smelt_iron_ingot",
+          "smelt_silver_ingot",
+          "smelt_gold_ingot"
+        ]
       },
       {
         "id": "mint",

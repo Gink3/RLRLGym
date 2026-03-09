@@ -140,6 +140,8 @@ DEFAULT_CONSTRUCT_TILE_IDS = {
     "firepit",
     "fireplace",
     "clay_forge",
+    "clay_furnace",
+    "clay_smelter",
     "glass_window",
 }
 OPAQUE_TILE_IDS = {

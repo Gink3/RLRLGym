@@ -175,6 +175,52 @@
       "tags": ["construction", "forge"]
     },
     {
+      "id": "craft_clay_furnace_kit",
+      "inputs": {"clay": 5, "stone": 2, "wood": 1},
+      "outputs": {"clay_furnace_kit": 1},
+      "skill": "crafting",
+      "min_skill": 1,
+      "craft_time": 2,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "kit", "furnace"]
+    },
+    {
+      "id": "build_clay_furnace",
+      "inputs": {"clay_furnace_kit": 1},
+      "outputs": {},
+      "skill": "crafting",
+      "min_skill": 1,
+      "craft_time": 2,
+      "build_tile_id": "clay_furnace",
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "furnace"]
+    },
+    {
+      "id": "craft_clay_smelter_kit",
+      "inputs": {"clay": 6, "stone": 3, "wood": 1},
+      "outputs": {"clay_smelter_kit": 1},
+      "skill": "crafting",
+      "min_skill": 2,
+      "craft_time": 3,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "kit", "smelter"]
+    },
+    {
+      "id": "build_clay_smelter",
+      "inputs": {"clay_smelter_kit": 1},
+      "outputs": {},
+      "skill": "crafting",
+      "min_skill": 2,
+      "craft_time": 2,
+      "build_tile_id": "clay_smelter",
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["construction", "smelter"]
+    },
+    {
       "id": "craft_wood_wall",
       "inputs": {"wood": 4},
       "outputs": {"wood_wall_kit": 1},

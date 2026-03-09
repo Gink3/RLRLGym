@@ -76,8 +76,8 @@ If no recipe is craftable:
 
 Base crafting recipes include:
 
-- Smelting: copper/iron ingots at `smelter`
-- Coinage: copper/silver/gold coins at `mint`
+- Smelting: copper/iron/silver/gold ingots at `smelter`
+- Coinage: copper/silver/gold coins at `mint` (from ingots)
 
 ## Skills and Progression
 

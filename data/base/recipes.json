@@ -26,6 +26,30 @@
       "tags": ["smelting"]
     },
     {
+      "id": "smelt_silver_ingot",
+      "inputs": {"silver_ore": 2},
+      "outputs": {"silver_ingot": 1},
+      "skill": "smithing",
+      "min_skill": 2,
+      "station": "smelter",
+      "craft_time": 3,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["smelting"]
+    },
+    {
+      "id": "smelt_gold_ingot",
+      "inputs": {"gold_ore": 2},
+      "outputs": {"gold_ingot": 1},
+      "skill": "smithing",
+      "min_skill": 3,
+      "station": "smelter",
+      "craft_time": 4,
+      "speed_multiplier": 1.0,
+      "quality_bonus": 0.0,
+      "tags": ["smelting"]
+    },
+    {
       "id": "craft_stone_pickaxe",
       "inputs": {"stone": 2, "stick": 2, "flint": 1},
       "outputs": {"stone_pickaxe": 1},
@@ -138,7 +162,7 @@
     },
     {
       "id": "mint_silver_coin",
-      "inputs": {"silver_ore": 2},
+      "inputs": {"silver_ingot": 1},
       "outputs": {"silver_coin": 6},
       "skill": "smithing",
       "min_skill": 1,
@@ -150,7 +174,7 @@
     },
     {
       "id": "mint_gold_coin",
-      "inputs": {"gold_ore": 2},
+      "inputs": {"gold_ingot": 1},
       "outputs": {"gold_coin": 4},
       "skill": "smithing",
       "min_skill": 2,
