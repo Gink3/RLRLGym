@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--iterations", type=int, default=50)
     p.add_argument(
         "--algo",
-        choices=["ppo", "ppo_masked", "recurrent_ppo", "dqn_masked"],
+        choices=["ppo", "ppo_masked", "recurrent_ppo", "dqn", "dqn_masked"],
         default="ppo",
         help="RLlib algorithm/policy mode.",
     )

@@ -661,7 +661,11 @@ class RLlibTrainer:
             sgd_minibatch_size = max(sgd_minibatch_size, 1024)
 
         base_cfg = (
-            (self._DQNConfig() if algo_mode == "dqn_masked" else self._PPOConfig())
+            (
+                self._DQNConfig()
+                if algo_mode in {"dqn", "dqn_masked"}
+                else self._PPOConfig()
+            )
             .environment(env=env_name, env_config=env_config)
             .api_stack(
                 enable_rl_module_and_learner=True,

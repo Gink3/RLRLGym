@@ -19,6 +19,9 @@ from rlrlgym.systems.scenario import (
 
 
 class TestScenario(unittest.TestCase):
+    def test_supported_policies_include_plain_dqn(self):
+        self.assertIn("dqn", SUPPORTED_AGENT_POLICIES)
+
     def test_make_all_race_class_combinations(self):
         agents = make_all_race_class_combinations(["human", "orc"], ["fighter", "rogue"])
         self.assertEqual(len(agents), 4)

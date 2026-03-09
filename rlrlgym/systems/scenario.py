@@ -12,7 +12,7 @@ from ..content.names import generate_full_name, load_name_table
 
 SCENARIO_ENV_FILE = "env_config.json"
 SCENARIO_AGENTS_FILE = "agents.json"
-SUPPORTED_AGENT_POLICIES = {"ppo", "ppo_masked", "recurrent_ppo", "dqn_masked"}
+SUPPORTED_AGENT_POLICIES = {"ppo", "ppo_masked", "recurrent_ppo", "dqn", "dqn_masked"}
 
 
 @dataclass
