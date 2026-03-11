@@ -42,34 +42,6 @@ Features / tasks:
 - Capture at least one `py-spy` flamegraph for the environment-heavy smoke run.
 - Write down the top 5 sampled hotspots before making optimizations.
 
-Commands:
-
-```bash
-./scripts/train_crafting_curriculum_10_agents_smoke.sh
-```
-
-```bash
-python3 -m train \
-  --backend rllib \
-  --algo ppo_masked \
-  --iterations 7 \
-  --scenario-path data/scenarios/crafting_curriculum_10_agents \
-  --curriculum-path /tmp/crafting_curriculum_smoke.json \
-  --shared-policy \
-  --num-rollout-workers 0 \
-  --train-batch-size 400 \
-  --sgd-minibatch-size 128 \
-  --num-sgd-iter 1 \
-  --rollout-fragment-length 50 \
-  --sample-timeout-s 300 \
-  --replay-save-every 1 \
-  --seed 0 \
-  --no-aim \
-  --output-dir outputs/train/crafting_curriculum_10_agents_smoke &
-PY_PID=$!
-sudo .venv/bin/py-spy record --pid "$PY_PID" --duration 20 -o pyspy.svg
-```
-
 Success criteria:
 
 - We can name the top 5 functions by sampled wall time.
@@ -85,13 +57,11 @@ Features / tasks:
 - Replace repeated scans inside `_walkable` and related helpers with O(1) membership checks.
 - Update occupancy state incrementally on movement, spawn, death, and revive.
 
-Expected payoff:
+Success criteria:
 
-- High
-
-Risk:
-
-- Medium, because stale occupancy state can create movement bugs.
+- Movement and collision checks no longer scan all live entities on every query.
+- Profiling shows a measurable drop in wall time for walkability-related helpers.
+- Behavior remains correct for movement, spawn, death, and revive paths.
 
 ### Version 0.3
 
@@ -108,13 +78,11 @@ Features / tasks:
   info payloads.
 - Add an opaque-grid cache for fast LOS checks.
 
-Expected payoff:
+Success criteria:
 
-- High
-
-Risk:
-
-- Low to medium
+- Visibility and enemy-visible values are computed once per agent per step.
+- Profiling shows a measurable reduction in LOS and visibility hotspot cost.
+- Observation and reward logic still agree on what an agent can see.
 
 ### Version 0.4
 
@@ -127,13 +95,11 @@ Features / tasks:
 - Evaluate per-step pairwise distance caches or spatial bucketing.
 - Split simulation work from observation construction for clearer profiling.
 
-Expected payoff:
+Success criteria:
 
-- Medium to high
-
-Risk:
-
-- Medium
+- Repeated geometric work is reduced in the main step loop.
+- Nearest-opponent and LOS-heavy paths are cheaper in profiling than the previous version.
+- Simulation work can be measured separately from observation construction.
 
 ### Version 0.5
 
@@ -145,13 +111,11 @@ Features / tasks:
 - Reduce transient `dict`, `list`, and `set` allocations in hot loops.
 - Reuse per-step buffers where practical.
 
-Expected payoff:
+Success criteria:
 
-- Medium
-
-Risk:
-
-- Medium
+- Replay-enabled smoke runs are materially cheaper than the baseline.
+- Allocation-heavy hot loops show reduced sampled time or reduced call frequency.
+- Replay output remains correct and usable in the viewer.
 
 ### Version 0.6
 
@@ -163,13 +127,11 @@ Features / tasks:
 - Reduce nested dataclass access in the hottest simulation loops.
 - Keep external APIs stable while simplifying the sim kernel internally.
 
-Expected payoff:
+Success criteria:
 
-- Medium
-
-Risk:
-
-- Medium to high
+- Hot-path entity access is simpler and cheaper in profiling.
+- Public environment behavior and external APIs remain unchanged.
+- The sim kernel is easier to isolate for future compiled backends.
 
 ### Version 0.7
 
@@ -181,34 +143,27 @@ Features / tasks:
 2. Evaluate mypyc for type-stable pure-Python modules.
 3. Use Numba only if hot paths are converted to numeric array-oriented code.
 
-Constraint:
+Success criteria:
 
-- Only move isolated kernels first.
-- Do not port content loading, replay serialization, RLlib adapters, or scenario configuration prematurely.
+- At least one compiled-Python option is tested against a real hotspot.
+- Only isolated kernels are moved; orchestration and content loading remain in Python.
+- The compiled path provides enough improvement to justify its maintenance cost.
 
 ### Version 0.8
 
 Focus: Rust only if Python and compiled-Python options are still insufficient.
 
-Rust becomes justified if all of the following are true:
+Features / tasks:
 
-- Profiling still shows the simulation kernel dominates runtime after versions `0.2` through `0.7`.
-- Hot paths are well isolated and stable.
-- Python orchestration can call into a Rust step kernel through a narrow API.
-- The team is willing to absorb the build, packaging, and debugging overhead.
+- Define the minimum Rust scope if Python-side work is still insufficient.
+- Keep any future Rust boundary limited to the simulation step kernel and other proven hotspots.
+- Keep config, scenarios, replay tooling, and RLlib integration in Python.
 
-Preferred Rust scope:
+Success criteria:
 
-- simulation step kernel only
-- occupancy and LOS
-- combat resolution
-
-Keep in Python:
-
-- config and JSON loading
-- scenarios and curriculum wiring
-- replay viewers and tools
-- training scripts and RLlib integration
+- Rust is only pursued if profiling still shows the simulation kernel dominates after versions `0.2` through `0.7`.
+- Hot paths are isolated enough to support a narrow Python-to-Rust boundary.
+- The expected speedup is large enough to justify build and maintenance overhead.
 
 ## Immediate Next Tasks
 
