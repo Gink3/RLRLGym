@@ -60,7 +60,8 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         self._replay_output_dir = Path(out_dir) if out_dir else None
         self._save_latest_replay = bool(cfg.get("save_latest_replay", True))
         self._capture_replay = False
-        self._replay_states = []
+        self._replay_frames = []
+        self._replay_prev_diff_state = None
         self._replay_actions = []
         self._replay_step_logs = []
         self._curriculum_phases = self._parse_curriculum_phases(cfg.get("curriculum_phases"))
@@ -97,7 +98,12 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         should_capture_any = self._capture_replay or (
             self._replay_output_dir is not None and self._save_latest_replay
         )
-        self._replay_states = [self.base.capture_playback_state()] if should_capture_any else []
+        if should_capture_any:
+            self._replay_frames = [self._capture_replay_frame()]
+            self._replay_prev_diff_state = self._capture_replay_diff_state()
+        else:
+            self._replay_frames = []
+            self._replay_prev_diff_state = None
         self._replay_actions = []
         self._replay_step_logs = []
         vec_obs = {
@@ -215,13 +221,12 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                 info[aid]["phase_index"] = self._active_phase_index
                 if self._enable_action_masking:
                     info[aid]["action_masking_applied"] = True
-        if self._replay_states:
-            self._replay_states.append(self.base.capture_playback_state())
+        if self._replay_frames:
+            curr_state = self._capture_replay_diff_state()
+            self._replay_frames.append(self._capture_replay_frame())
             self._replay_actions.append(
                 {aid: int(a) for aid, a in dict(applied_actions).items()}
             )
-            prev_state = self._replay_states[-2] if len(self._replay_states) >= 2 else None
-            curr_state = self._replay_states[-1]
             self._replay_step_logs.append(
                 self._build_replay_step_log(
                     actions=dict(applied_actions),
@@ -229,10 +234,11 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                     terminations=terminations,
                     truncations=truncations,
                     info=info,
-                    prev_state=prev_state,
+                    prev_state=self._replay_prev_diff_state,
                     curr_state=curr_state,
                 )
             )
+            self._replay_prev_diff_state = curr_state
         vec_obs = {}
         out_rewards = {}
         out_infos = {}
@@ -276,19 +282,20 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             if self._capture_replay:
                 self._write_replay(
                     episode=self._episode_counter,
-                    frames=self._replay_states,
+                    frames=self._replay_frames,
                     action_history=self._replay_actions,
                     step_logs=self._replay_step_logs,
                 )
             if self._replay_output_dir is not None and self._save_latest_replay:
                 self._write_latest_replay(
                     episode=self._episode_counter,
-                    frames=self._replay_states,
+                    frames=self._replay_frames,
                     action_history=self._replay_actions,
                     step_logs=self._replay_step_logs,
                 )
             self._capture_replay = False
-            self._replay_states = []
+            self._replay_frames = []
+            self._replay_prev_diff_state = None
             self._replay_actions = []
             self._replay_step_logs = []
         return vec_obs, out_rewards, terminateds, truncateds, out_infos
@@ -309,7 +316,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             "schema_version": 1,
             "episode": int(episode),
             "frame_count": len(frames),
-            "frames": [self._serialize_state(s) for s in frames],
+            "frames": list(frames),
             "actions": [{aid: int(a) for aid, a in x.items()} for x in action_history],
             "step_logs": list(step_logs or []),
         }
@@ -331,7 +338,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             "schema_version": 1,
             "episode": int(episode),
             "frame_count": len(frames),
-            "frames": [self._serialize_state(s) for s in frames],
+            "frames": list(frames),
             "actions": [{aid: int(a) for aid, a in x.items()} for x in action_history],
             "step_logs": list(step_logs or []),
         }
@@ -412,11 +419,13 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
 
     def _agent_damage_events(self, prev_state, curr_state, info) -> list[dict]:
         out = []
-        for aid, curr_agent in curr_state.agents.items():
-            prev_agent = prev_state.agents.get(aid)
+        curr_agents = dict(curr_state.get("agents", {}))
+        prev_agents = dict(prev_state.get("agents", {}))
+        for aid, curr_agent in curr_agents.items():
+            prev_agent = prev_agents.get(aid)
             if prev_agent is None:
                 continue
-            dmg = int(prev_agent.hp) - int(curr_agent.hp)
+            dmg = int(prev_agent.get("hp", 0)) - int(curr_agent.get("hp", 0))
             if dmg <= 0:
                 continue
             source = "unknown"
@@ -452,19 +461,21 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
                 if isinstance(evt, str) and evt.startswith("agent_interact:kill_monster:"):
                     monster_id = evt.split(":", 2)[2]
                     killer_by_monster_id[monster_id] = src_aid
-        for entity_id, curr_mon in curr_state.monsters.items():
-            prev_mon = prev_state.monsters.get(entity_id)
+        curr_monsters = dict(curr_state.get("monsters", {}))
+        prev_monsters = dict(prev_state.get("monsters", {}))
+        for entity_id, curr_mon in curr_monsters.items():
+            prev_mon = prev_monsters.get(entity_id)
             if prev_mon is None:
                 continue
-            if bool(prev_mon.alive) and not bool(curr_mon.alive):
-                killer = killer_by_monster_id.get(curr_mon.monster_id)
+            if bool(prev_mon.get("alive", False)) and not bool(curr_mon.get("alive", False)):
+                killer = killer_by_monster_id.get(str(curr_mon.get("monster_id", "")))
                 if killer is None:
                     continue
                 reason = f"killed by agent ({killer})"
                 out.append(
                     {
                         "entity_id": entity_id,
-                        "monster_id": curr_mon.monster_id,
+                        "monster_id": str(curr_mon.get("monster_id", "")),
                         "reason": reason,
                     }
                 )
@@ -472,11 +483,13 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
 
     def _monster_damage_events(self, prev_state, curr_state, info) -> list[dict]:
         out = []
-        for entity_id, curr_mon in curr_state.monsters.items():
-            prev_mon = prev_state.monsters.get(entity_id)
+        curr_monsters = dict(curr_state.get("monsters", {}))
+        prev_monsters = dict(prev_state.get("monsters", {}))
+        for entity_id, curr_mon in curr_monsters.items():
+            prev_mon = prev_monsters.get(entity_id)
             if prev_mon is None:
                 continue
-            dmg = int(prev_mon.hp) - int(curr_mon.hp)
+            dmg = int(prev_mon.get("hp", 0)) - int(curr_mon.get("hp", 0))
             if dmg <= 0:
                 continue
             source = None
@@ -495,15 +508,39 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             out.append(
                 {
                     "entity_id": entity_id,
-                    "monster_id": curr_mon.monster_id,
+                    "monster_id": str(curr_mon.get("monster_id", "")),
                     "amount": dmg,
-                    "hp_before": int(prev_mon.hp),
-                    "hp_after": int(curr_mon.hp),
-                    "hp_max": int(curr_mon.max_hp),
+                    "hp_before": int(prev_mon.get("hp", 0)),
+                    "hp_after": int(curr_mon.get("hp", 0)),
+                    "hp_max": int(curr_mon.get("max_hp", 0)),
                     "source": source,
                 }
             )
         return out
+
+    def _capture_replay_frame(self) -> Dict[str, object]:
+        return self._serialize_state(self.base.state)
+
+    def _capture_replay_diff_state(self) -> Dict[str, object]:
+        state = self.base.state
+        return {
+            "agents": {
+                aid: {
+                    "hp": int(agent.hp),
+                    "alive": bool(agent.alive),
+                }
+                for aid, agent in state.agents.items()
+            },
+            "monsters": {
+                entity_id: {
+                    "hp": int(monster.hp),
+                    "alive": bool(monster.alive),
+                    "monster_id": str(monster.monster_id),
+                    "max_hp": int(monster.max_hp),
+                }
+                for entity_id, monster in state.monsters.items()
+            },
+        }
 
     def _serialize_state(self, state) -> Dict[str, object]:
         return {

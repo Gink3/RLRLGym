@@ -467,10 +467,27 @@ class MultiAgentRLRLGym:
         self._occupied_agent_positions: set[Tuple[int, int]] = set()
         self._occupied_monster_positions: set[Tuple[int, int]] = set()
         self._occupied_animal_positions: set[Tuple[int, int]] = set()
+        self._agent_position_by_id: Dict[str, Tuple[int, int]] = {}
+        self._agent_faction_by_id: Dict[str, int] = {}
         self._monster_position_by_id: Dict[str, Tuple[int, int]] = {}
         self._animal_position_by_id: Dict[str, Tuple[int, int]] = {}
         self._alive_agent_ids: List[str] = []
+        self._faction_member_counts: Dict[int, int] = {}
         self._edible_tile_positions: set[Tuple[int, int]] = set()
+        self._ground_item_positions_by_row: Dict[int, set[int]] = {}
+        self._ground_item_edible_positions: set[Tuple[int, int]] = set()
+        self._edible_chest_positions: set[Tuple[int, int]] = set()
+        self._active_fire_positions: set[Tuple[int, int]] = set()
+        self._opaque_tile_positions: set[Tuple[int, int]] = set()
+        self._visible_tiles_cache: Dict[str, Tuple[Tuple[int, int], ...]] = {}
+        self._visible_tile_set_cache: Dict[str, set[Tuple[int, int]]] = {}
+        self._enemy_visible_cache: Dict[str, bool] = {}
+        self._nearest_opponent_distance_cache: Dict[str, int | None] = {}
+        self._nearest_teammate_distance_cache: Dict[str, int | None] = {}
+        self._local_view_cache: Dict[Tuple[str, Tuple[int, int], int, int], List[List[str]]] = {}
+        self._observation_context_cache: Dict[Tuple[str, bool, bool], Dict[str, object]] = {}
+        self._animal_prey_cache: Dict[str, AnimalState | None] = {}
+        self._los_ray_cache: Dict[Tuple[int, int], Tuple[Tuple[int, int], ...]] = {}
 
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
@@ -482,15 +499,33 @@ class MultiAgentRLRLGym:
             self._occupied_agent_positions = set()
             self._occupied_monster_positions = set()
             self._occupied_animal_positions = set()
+            self._agent_position_by_id = {}
+            self._agent_faction_by_id = {}
             self._monster_position_by_id = {}
             self._animal_position_by_id = {}
             self._alive_agent_ids = []
+            self._faction_member_counts = {}
             self._edible_tile_positions = set()
+            self._ground_item_positions_by_row = {}
+            self._ground_item_edible_positions = set()
+            self._edible_chest_positions = set()
+            self._active_fire_positions = set()
+            self._opaque_tile_positions = set()
+            self._invalidate_step_caches()
             return
         self._occupied_agent_positions = {
             agent.position
             for agent in self.state.agents.values()
             if agent.alive
+        }
+        self._agent_position_by_id = {
+            aid: agent.position
+            for aid, agent in self.state.agents.items()
+            if agent.alive
+        }
+        self._agent_faction_by_id = {
+            aid: int(agent.faction_id)
+            for aid, agent in self.state.agents.items()
         }
         self._monster_position_by_id = {
             monster.entity_id: monster.position
@@ -507,7 +542,19 @@ class MultiAgentRLRLGym:
         self._alive_agent_ids = [
             aid for aid in self.possible_agents if self.state.agents[aid].alive and self.state.agents[aid].hp > 0
         ]
+        faction_counts: Dict[int, int] = {}
+        for aid in self._alive_agent_ids:
+            faction_id = int(self.state.agents[aid].faction_id)
+            if faction_id < 0:
+                continue
+            faction_counts[faction_id] = faction_counts.get(faction_id, 0) + 1
+        self._faction_member_counts = faction_counts
         self._rebuild_edible_tile_positions()
+        self._rebuild_ground_item_caches()
+        self._rebuild_edible_chest_positions()
+        self._rebuild_fire_positions()
+        self._rebuild_opaque_tile_positions()
+        self._invalidate_step_caches()
 
     def _rebuild_edible_tile_positions(self) -> None:
         if self.state is None:
@@ -523,6 +570,65 @@ class MultiAgentRLRLGym:
                     positions.add((r, c))
         self._edible_tile_positions = positions
 
+    def _rebuild_ground_item_caches(self) -> None:
+        if self.state is None:
+            self._ground_item_positions_by_row = {}
+            self._ground_item_edible_positions = set()
+            return
+        by_row: Dict[int, set[int]] = {}
+        edible_positions: set[Tuple[int, int]] = set()
+        for (r, c), items in self.state.ground_items.items():
+            if not items:
+                continue
+            by_row.setdefault(r, set()).add(c)
+            if any(item in self.edible_items for item in items):
+                edible_positions.add((r, c))
+        self._ground_item_positions_by_row = by_row
+        self._ground_item_edible_positions = edible_positions
+
+    def _rebuild_edible_chest_positions(self) -> None:
+        if self.state is None:
+            self._edible_chest_positions = set()
+            return
+        positions: set[Tuple[int, int]] = set()
+        for pos, chest in self.state.chests.items():
+            if chest.opened:
+                continue
+            if any(item in self.edible_items for item in chest.loot):
+                positions.add(pos)
+        self._edible_chest_positions = positions
+
+    def _rebuild_fire_positions(self) -> None:
+        if self.state is None:
+            self._active_fire_positions = set()
+            return
+        self._active_fire_positions = {
+            pos
+            for pos, fuel in self.state.tile_interactions.items()
+            if int(fuel) > 0 and self.state.grid[pos[0]][pos[1]] in FIRE_CONTAINER_TILE_IDS
+        }
+
+    def _rebuild_opaque_tile_positions(self) -> None:
+        if self.state is None:
+            self._opaque_tile_positions = set()
+            return
+        positions: set[Tuple[int, int]] = set()
+        for r, row in enumerate(self.state.grid):
+            for c, tile_id in enumerate(row):
+                if self._tile_blocks_los(tile_id):
+                    positions.add((r, c))
+        self._opaque_tile_positions = positions
+
+    def _invalidate_step_caches(self) -> None:
+        self._visible_tiles_cache = {}
+        self._visible_tile_set_cache = {}
+        self._enemy_visible_cache = {}
+        self._nearest_opponent_distance_cache = {}
+        self._nearest_teammate_distance_cache = {}
+        self._local_view_cache = {}
+        self._observation_context_cache = {}
+        self._animal_prey_cache = {}
+
     def _refresh_edible_tile_position(self, pos: Tuple[int, int]) -> None:
         if self.state is None:
             return
@@ -536,13 +642,110 @@ class MultiAgentRLRLGym:
         else:
             self._edible_tile_positions.discard((r, c))
 
+    def _refresh_ground_item_position(self, pos: Tuple[int, int]) -> None:
+        if self.state is None:
+            return
+        r, c = pos
+        items = self.state.ground_items.get(pos, [])
+        if items:
+            self._ground_item_positions_by_row.setdefault(r, set()).add(c)
+            if any(item in self.edible_items for item in items):
+                self._ground_item_edible_positions.add(pos)
+            else:
+                self._ground_item_edible_positions.discard(pos)
+        else:
+            row = self._ground_item_positions_by_row.get(r)
+            if row is not None:
+                row.discard(c)
+                if not row:
+                    self._ground_item_positions_by_row.pop(r, None)
+            self._ground_item_edible_positions.discard(pos)
+            self.state.ground_items.pop(pos, None)
+
+    def _add_ground_item(self, pos: Tuple[int, int], item_id: str) -> None:
+        assert self.state is not None
+        self.state.ground_items.setdefault(pos, []).append(item_id)
+        self._refresh_ground_item_position(pos)
+
+    def _pop_ground_item(self, pos: Tuple[int, int]) -> str | None:
+        assert self.state is not None
+        items = self.state.ground_items.get(pos)
+        if not items:
+            self._refresh_ground_item_position(pos)
+            return None
+        item = items.pop(0)
+        self._refresh_ground_item_position(pos)
+        return item
+
+    def _refresh_chest_position(self, pos: Tuple[int, int]) -> None:
+        if self.state is None:
+            return
+        chest = self.state.chests.get(pos)
+        if chest is None or chest.opened or not any(item in self.edible_items for item in chest.loot):
+            self._edible_chest_positions.discard(pos)
+        else:
+            self._edible_chest_positions.add(pos)
+
+    def _set_grid_tile(self, pos: Tuple[int, int], tile_id: str) -> None:
+        assert self.state is not None
+        r, c = pos
+        self.state.grid[r][c] = tile_id
+        self._refresh_edible_tile_position(pos)
+        if self._tile_blocks_los(tile_id):
+            self._opaque_tile_positions.add(pos)
+        else:
+            self._opaque_tile_positions.discard(pos)
+        self._refresh_fire_position(pos)
+        self._invalidate_step_caches()
+
+    def _set_tile_interaction(self, pos: Tuple[int, int], count: int) -> None:
+        assert self.state is not None
+        self.state.tile_interactions[pos] = int(count)
+        self._refresh_fire_position(pos)
+
+    def _clear_tile_interaction(self, pos: Tuple[int, int]) -> None:
+        assert self.state is not None
+        self.state.tile_interactions.pop(pos, None)
+        self._refresh_fire_position(pos)
+
+    def _refresh_fire_position(self, pos: Tuple[int, int]) -> None:
+        if self.state is None:
+            return
+        r, c = pos
+        if r < 0 or c < 0 or r >= len(self.state.grid) or c >= len(self.state.grid[0]):
+            self._active_fire_positions.discard(pos)
+            return
+        tile_id = self.state.grid[r][c]
+        fuel = int(self.state.tile_interactions.get(pos, 0))
+        if tile_id in FIRE_CONTAINER_TILE_IDS and fuel > 0:
+            self._active_fire_positions.add(pos)
+        else:
+            self._active_fire_positions.discard(pos)
+
+    def _set_agent_faction(self, agent: AgentState, faction_id: int) -> None:
+        old_faction = int(agent.faction_id)
+        new_faction = int(faction_id)
+        agent.faction_id = new_faction
+        self._agent_faction_by_id[agent.agent_id] = new_faction
+        if agent.alive and old_faction >= 0:
+            old_count = int(self._faction_member_counts.get(old_faction, 0)) - 1
+            if old_count > 0:
+                self._faction_member_counts[old_faction] = old_count
+            else:
+                self._faction_member_counts.pop(old_faction, None)
+        if agent.alive and new_faction >= 0:
+            self._faction_member_counts[new_faction] = self._faction_member_counts.get(new_faction, 0) + 1
+        self._invalidate_step_caches()
+
     def _set_agent_position(self, agent: AgentState, position: Tuple[int, int]) -> None:
         old = agent.position
         if agent.alive:
             self._occupied_agent_positions.discard(old)
         agent.position = position
+        self._agent_position_by_id[agent.agent_id] = position
         if agent.alive:
             self._occupied_agent_positions.add(position)
+        self._invalidate_step_caches()
 
     def _set_monster_position(self, monster: MonsterState, position: Tuple[int, int]) -> None:
         old = monster.position
@@ -553,6 +756,7 @@ class MultiAgentRLRLGym:
         if monster.alive:
             self._occupied_monster_positions.add(position)
             self._monster_position_by_id[monster.entity_id] = position
+        self._invalidate_step_caches()
 
     def _set_animal_position(self, animal: AnimalState, position: Tuple[int, int]) -> None:
         old = animal.position
@@ -563,16 +767,31 @@ class MultiAgentRLRLGym:
         if animal.alive:
             self._occupied_animal_positions.add(position)
             self._animal_position_by_id[animal.entity_id] = position
+        self._animal_prey_cache = {}
 
     def _set_agent_alive(self, agent: AgentState, alive: bool) -> None:
+        old_alive = bool(agent.alive)
         agent.alive = bool(alive)
         if agent.alive:
             self._occupied_agent_positions.add(agent.position)
+            self._agent_position_by_id[agent.agent_id] = agent.position
         else:
             self._occupied_agent_positions.discard(agent.position)
+            self._agent_position_by_id.pop(agent.agent_id, None)
+        faction_id = int(agent.faction_id)
+        if faction_id >= 0 and old_alive != agent.alive:
+            if agent.alive:
+                self._faction_member_counts[faction_id] = self._faction_member_counts.get(faction_id, 0) + 1
+            else:
+                count = int(self._faction_member_counts.get(faction_id, 0)) - 1
+                if count > 0:
+                    self._faction_member_counts[faction_id] = count
+                else:
+                    self._faction_member_counts.pop(faction_id, None)
         self._alive_agent_ids = [
             aid for aid in self.possible_agents if self.state is not None and self.state.agents[aid].alive and self.state.agents[aid].hp > 0
         ]
+        self._invalidate_step_caches()
 
     def _set_monster_alive(self, monster: MonsterState, alive: bool) -> None:
         monster.alive = bool(alive)
@@ -582,6 +801,7 @@ class MultiAgentRLRLGym:
         else:
             self._occupied_monster_positions.discard(monster.position)
             self._monster_position_by_id.pop(monster.entity_id, None)
+        self._invalidate_step_caches()
 
     def _set_animal_alive(self, animal: AnimalState, alive: bool) -> None:
         animal.alive = bool(alive)
@@ -591,12 +811,14 @@ class MultiAgentRLRLGym:
         else:
             self._occupied_animal_positions.discard(animal.position)
             self._animal_position_by_id.pop(animal.entity_id, None)
+        self._animal_prey_cache = {}
 
     def _register_spawned_animal(self, animal: AnimalState) -> None:
         if not animal.alive:
             return
         self._occupied_animal_positions.add(animal.position)
         self._animal_position_by_id[animal.entity_id] = animal.position
+        self._animal_prey_cache = {}
 
     def observation_space(self, agent_id: str) -> Dict[str, object]:
         if agent_id not in self.possible_agents:
@@ -713,6 +935,7 @@ class MultiAgentRLRLGym:
         self._episode_timeout_no_contact = False
         self._episode_terminal_rewards_applied = False
         self._rebuild_runtime_caches()
+        self._invalidate_step_caches()
         self._episode_metrics = {}
         self._episode_survival_steps = {aid: 0 for aid in self.possible_agents}
         for aid in self.possible_agents:
@@ -754,6 +977,7 @@ class MultiAgentRLRLGym:
     def step(self, actions: Dict[str, int]):
         if self.state is None:
             raise RuntimeError("Environment must be reset before step")
+        self._invalidate_step_caches()
         self._guard_assignments = {}
         self._defending_agents = set()
         self._revived_this_step = set()
@@ -803,6 +1027,7 @@ class MultiAgentRLRLGym:
             action = self._status_adjust_action(aid=aid, action=action, info=info)
             info[aid]["action"] = action
             delta_reward, events = self._apply_action(aid, action)
+            self._invalidate_step_caches()
             rewards[aid] += delta_reward
             reward_components[aid]["action_total"] += float(delta_reward)
             info[aid]["events"].extend(events)
@@ -847,6 +1072,7 @@ class MultiAgentRLRLGym:
         self._apply_monster_turn(rewards, terminations, info)
         self._apply_animal_turn(info=info)
         self._tick_fires()
+        self._invalidate_step_caches()
         self.state.step_count += 1
 
         if self.state.step_count >= self.config.max_steps:
@@ -1419,7 +1645,7 @@ class MultiAgentRLRLGym:
 
         n_interactions = self.state.tile_interactions.get((r, c), 0)
         if tile.max_interactions > 0 and n_interactions < tile.max_interactions:
-            self.state.tile_interactions[(r, c)] = n_interactions + 1
+            self._set_tile_interaction((r, c), n_interactions + 1)
             if tile_id == "shrine":
                 actor.hp = min(actor.max_hp, actor.hp + 1)
                 reward += 0.1
@@ -1459,7 +1685,7 @@ class MultiAgentRLRLGym:
         if used >= max(1, int(tile.max_interactions)):
             events.append("interact_exhausted")
             return -0.02
-        self.state.tile_interactions[(r, c)] = used + 1
+        self._set_tile_interaction((r, c), used + 1)
         actor.hp = min(actor.max_hp, actor.hp + 1)
         events.append("interact:shrine")
         return 0.1
@@ -1479,7 +1705,7 @@ class MultiAgentRLRLGym:
         if used >= max(1, int(tile.max_interactions)):
             events.append("interact_exhausted")
             return -0.02
-        self.state.tile_interactions[(r, c)] = used + 1
+        self._set_tile_interaction((r, c), used + 1)
         actor.hunger = min(actor.max_hunger, actor.hunger + 1)
         events.append("interact:water")
         return 0.04
@@ -1502,7 +1728,7 @@ class MultiAgentRLRLGym:
                 continue
             fuel = int(self.state.tile_interactions.get((r, c), 0))
             fuel = min(FIRE_FUEL_MAX, fuel + int(fuel_gain))
-            self.state.tile_interactions[(r, c)] = fuel
+            self._set_tile_interaction((r, c), fuel)
             events.append(f"fire_refuel:{fuel_item}:{fuel}")
             return 0.08, True
         events.append("fire_refuel_fail:no_fuel")
@@ -1551,7 +1777,7 @@ class MultiAgentRLRLGym:
             reward = 0.05 + (0.01 * float(max(1, stick_qty)))
             progress = 1 + axe_bonus + max(0, woodcutting // 5)
             used = int(self.state.tile_interactions.get((nr, nc), 0)) + progress
-            self.state.tile_interactions[(nr, nc)] = used
+            self._set_tile_interaction((nr, nc), used)
             events.append(f"chop_tree_progress:{nr}:{nc}:{used}/{self.tree_chop_progress_required}")
             if used >= self.tree_chop_progress_required:
                 floor_id = (
@@ -1559,9 +1785,8 @@ class MultiAgentRLRLGym:
                     if self.mapgen_cfg.floor_fallback_id in self.tiles
                     else "floor"
                 )
-                self.state.grid[nr][nc] = floor_id
-                self._refresh_edible_tile_position((nr, nc))
-                self.state.tile_interactions.pop((nr, nc), None)
+                self._set_grid_tile((nr, nc), floor_id)
+                self._clear_tile_interaction((nr, nc))
                 log_qty = 1 + max(0, axe_bonus // 2)
                 log_added = self._add_item_or_drop(actor, "log", log_qty, events)
                 events.append(f"chop_tree_felled:{nr}:{nc}:log:{log_qty}:{log_added}")
@@ -1589,7 +1814,7 @@ class MultiAgentRLRLGym:
                 events.append("mine_wall_unbreakable_edge")
                 return -0.01, True
             used = int(self.state.tile_interactions.get((nr, nc), 0)) + 1
-            self.state.tile_interactions[(nr, nc)] = used
+            self._set_tile_interaction((nr, nc), used)
             qty = 1 + (mining // 3) + (mining_tool_bonus // 2)
             added = self._add_item_or_drop(actor, "stone", max(1, qty), events)
             self._record_harvest((nr, nc))
@@ -1598,11 +1823,10 @@ class MultiAgentRLRLGym:
             if used_pickaxe is not None:
                 self._consume_item_durability(actor, used_pickaxe, 1, events)
             if used >= 5:
-                self.state.grid[nr][nc] = "stone_floor" if "stone_floor" in self.tiles else (
+                self._set_grid_tile((nr, nc), "stone_floor" if "stone_floor" in self.tiles else (
                     self.mapgen_cfg.floor_fallback_id if self.mapgen_cfg.floor_fallback_id in self.tiles else "floor"
-                )
-                self._refresh_edible_tile_position((nr, nc))
-                self.state.tile_interactions.pop((nr, nc), None)
+                ))
+                self._clear_tile_interaction((nr, nc))
                 events.append(f"mine_wall_broken:{nr}:{nc}")
             else:
                 events.append(f"mine_wall:{nr}:{nc}:used={used}/5")
@@ -1623,7 +1847,7 @@ class MultiAgentRLRLGym:
                 events.append("mine_ground_depleted")
                 return -0.01, True
             used += 1
-            self.state.tile_interactions[(r, c)] = used
+            self._set_tile_interaction((r, c), used)
             qty = 1 + (mining // 4) + (mining_tool_bonus // 2)
             added = self._add_item_or_drop(actor, "stone", max(1, qty), events)
             self._record_harvest((r, c))
@@ -1651,8 +1875,7 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         pos = actor.position
         tile_id = self.state.grid[pos[0]][pos[1]]
-        forage_tiles = set(self.forage_tile_ids)
-        if tile_id not in forage_tiles:
+        if tile_id not in self.forage_tile_ids:
             return 0.0, False
         tile = self.tiles.get(tile_id)
         if tile is None or not tile.loot_table:
@@ -1664,7 +1887,7 @@ class MultiAgentRLRLGym:
         if used >= max_uses:
             events.append(f"forage_depleted:{tile_id}")
             return -0.01, True
-        self.state.tile_interactions[pos] = used + 1
+        self._set_tile_interaction(pos, used + 1)
         self._record_harvest(pos)
         foraging = self._skill_level(actor, "foraging")
         qty = 1 + (foraging // 5)
@@ -1721,9 +1944,8 @@ class MultiAgentRLRLGym:
         seed_item = str(crop["seed_item"])
         if self._pop_first_base_item(actor.inventory, seed_item) is None:
             return 0.0, False
-        self.state.grid[r][c] = str(crop["crop_tile"])
-        self._refresh_edible_tile_position((r, c))
-        self.state.tile_interactions[(r, c)] = 0
+        self._set_grid_tile((r, c), str(crop["crop_tile"]))
+        self._set_tile_interaction((r, c), 0)
         self.state.plant_plots[(r, c)] = PlantPlotState(
             crop_id=crop_id,
             planter_id=actor_id,
@@ -1759,15 +1981,14 @@ class MultiAgentRLRLGym:
         seed_qty = self._rng.randint(int(seed_min), int(seed_max)) + (farming // 5)
         food_added = self._add_item_or_drop(actor, food_item, max(1, int(food_qty)), events)
         seed_added = self._add_item_or_drop(actor, seed_item, max(1, int(seed_qty)), events)
-        self.state.grid[pos[0]][pos[1]] = (
+        self._set_grid_tile(pos, (
             self.mapgen_cfg.floor_fallback_id
             if self.mapgen_cfg.floor_fallback_id in self.tiles
             else "floor"
-        )
-        self._refresh_edible_tile_position(pos)
+        ))
         self._record_harvest(pos)
         self.state.plant_plots.pop(pos, None)
-        self.state.tile_interactions.pop(pos, None)
+        self._clear_tile_interaction(pos)
         same_faction_bonus = 0.0
         if (
             plot is not None
@@ -1817,7 +2038,7 @@ class MultiAgentRLRLGym:
                 added += 1
             else:
                 pos = agent.position
-                self.state.ground_items.setdefault(pos, []).append(item_id)
+                self._add_ground_item(pos, item_id)
                 events.append(f"drop_overweight:{item_id}")
         return added
 
@@ -2045,12 +2266,11 @@ class MultiAgentRLRLGym:
         if recipe.build_tile_id:
             if recipe.build_tile_id not in self.tiles:
                 return False
-            self.state.grid[ar][ac] = recipe.build_tile_id
-            self._refresh_edible_tile_position((ar, ac))
+            self._set_grid_tile((ar, ac), recipe.build_tile_id)
             if recipe.build_tile_id in FIRE_CONTAINER_TILE_IDS:
-                self.state.tile_interactions[(ar, ac)] = max(
+                self._set_tile_interaction((ar, ac), max(
                     1, int(self.state.tile_interactions.get((ar, ac), 0)) + FIRE_FUEL_PER_STICK
-                )
+                ))
             events.append(f"build:{recipe.build_tile_id}:{ar}:{ac}")
         if recipe.build_station_id:
             if (ar, ac) in self.state.stations:
@@ -2752,7 +2972,7 @@ class MultiAgentRLRLGym:
                 events.append("faction_invite_expired")
                 return -float(self.config.invalid_faction_action_penalty), True
             if self._manhattan(actor.position, inviter.position) == 1:
-                actor.faction_id = faction_id
+                self._set_agent_faction(actor, faction_id)
                 self.state.pending_faction_invites.pop(actor_id, None)
                 events.append(f"faction_join:{faction_id}:{inviter_id}")
                 reward += float(self.config.team_join_reward)
@@ -2767,7 +2987,7 @@ class MultiAgentRLRLGym:
                 return -float(self.config.invalid_faction_action_penalty), True
             new_faction = int(self._next_faction_id)
             self._next_faction_id += 1
-            actor.faction_id = new_faction
+            self._set_agent_faction(actor, new_faction)
             self.state.faction_leaders[new_faction] = actor_id
             events.append(f"faction_create:{new_faction}")
             reward += float(self.config.team_create_reward)
@@ -3038,7 +3258,7 @@ class MultiAgentRLRLGym:
             return -float(self.config.invalid_faction_action_penalty)
 
         was_leader = self.state.faction_leaders.get(old_faction) == actor_id
-        actor.faction_id = -1
+        self._set_agent_faction(actor, -1)
         self.state.pending_faction_invites.pop(actor_id, None)
         for aid, invite in list(self.state.pending_faction_invites.items()):
             if int(invite.get("faction_id", -1)) == old_faction:
@@ -3090,7 +3310,7 @@ class MultiAgentRLRLGym:
             events.append("faction_accept_fail:not_adjacent")
             return -float(self.config.invalid_faction_action_penalty)
 
-        actor.faction_id = faction_id
+        self._set_agent_faction(actor, faction_id)
         self.state.pending_faction_invites.pop(actor_id, None)
         events.append(f"faction_join:{faction_id}:{inviter_id}")
         out = float(self.config.team_join_reward)
@@ -3135,11 +3355,7 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         if int(faction_id) < 0:
             return 1
-        return sum(
-            1
-            for agent in self.state.agents.values()
-            if agent.alive and int(agent.faction_id) == int(faction_id)
-        )
+        return int(self._faction_member_counts.get(int(faction_id), 0))
 
     def _is_allied(self, a: AgentState, b: AgentState) -> bool:
         if int(a.faction_id) < 0 or int(b.faction_id) < 0:
@@ -3593,9 +3809,8 @@ class MultiAgentRLRLGym:
         r, c = agent.position
         reward = 0.0
 
-        items = self.state.ground_items.get((r, c), [])
-        if items:
-            item = items.pop(0)
+        item = self._pop_ground_item((r, c))
+        if item is not None:
             added = self._add_item_or_drop(agent, item, 1, events)
             base_item = self._item_base_id(item)
             if added <= 0:
@@ -3615,6 +3830,7 @@ class MultiAgentRLRLGym:
         chest = self.state.chests.get((r, c))
         if chest and not chest.opened:
             chest.opened = True
+            self._refresh_chest_position((r, c))
             if chest.loot:
                 for item in chest.loot:
                     self._add_item_or_drop(agent, item, 1, events)
@@ -3984,9 +4200,13 @@ class MultiAgentRLRLGym:
             return not bool(self.tiles[tile_id].walkable)
         return False
 
-    def _line_points(self, a: Tuple[int, int], b: Tuple[int, int]) -> List[Tuple[int, int]]:
-        x0, y0 = int(a[0]), int(a[1])
-        x1, y1 = int(b[0]), int(b[1])
+    def _line_point_offsets(self, dr: int, dc: int) -> Tuple[Tuple[int, int], ...]:
+        key = (int(dr), int(dc))
+        cached = self._los_ray_cache.get(key)
+        if cached is not None:
+            return cached
+        x0, y0 = 0, 0
+        x1, y1 = key
         points: List[Tuple[int, int]] = []
         dx = abs(x1 - x0)
         dy = abs(y1 - y0)
@@ -4004,6 +4224,17 @@ class MultiAgentRLRLGym:
             if e2 < dx:
                 err += dx
                 y0 += sy
+        offsets = tuple((rr, cc) for rr, cc in points[1:-1])
+        self._los_ray_cache[key] = offsets
+        return offsets
+
+    def _line_points(self, a: Tuple[int, int], b: Tuple[int, int]) -> List[Tuple[int, int]]:
+        src_r, src_c = int(a[0]), int(a[1])
+        dst_r, dst_c = int(b[0]), int(b[1])
+        offsets = self._line_point_offsets(dst_r - src_r, dst_c - src_c)
+        points = [(src_r, src_c)]
+        points.extend((src_r + dr, src_c + dc) for dr, dc in offsets)
+        points.append((dst_r, dst_c))
         return points
 
     def _has_line_of_sight(self, src: Tuple[int, int], dst: Tuple[int, int]) -> bool:
@@ -4012,16 +4243,21 @@ class MultiAgentRLRLGym:
             return True
         if not bool(self.config.enable_los):
             return True
-        ray = self._line_points(src, dst)
-        for rr, cc in ray[1:-1]:
+        src_r, src_c = int(src[0]), int(src[1])
+        for dr, dc in self._line_point_offsets(int(dst[0]) - src_r, int(dst[1]) - src_c):
+            rr = src_r + dr
+            cc = src_c + dc
             if rr < 0 or cc < 0 or rr >= len(self.state.grid) or cc >= len(self.state.grid[0]):
                 return False
-            if self._tile_blocks_los(self.state.grid[rr][cc]):
+            if (rr, cc) in self._opaque_tile_positions:
                 return False
         return True
 
     def _visible_tile_coords(self, aid: str) -> List[Tuple[int, int]]:
         assert self.state is not None
+        cached = self._visible_tiles_cache.get(aid)
+        if cached is not None:
+            return list(cached)
         if aid not in self.state.agents:
             return []
         agent = self.state.agents[aid]
@@ -4043,7 +4279,18 @@ class MultiAgentRLRLGym:
                     continue
                 if self._has_line_of_sight(agent.position, (r, c)):
                     out.append((r, c))
+        cached_out = tuple(out)
+        self._visible_tiles_cache[aid] = cached_out
+        self._visible_tile_set_cache[aid] = set(cached_out)
         return out
+
+    def _visible_tile_coord_set(self, aid: str) -> set[Tuple[int, int]]:
+        cached = self._visible_tile_set_cache.get(aid)
+        if cached is not None:
+            return cached
+        visible = set(self._visible_tile_coords(aid))
+        self._visible_tile_set_cache[aid] = visible
+        return visible
 
     def _is_frontier_tile(self, pos: Tuple[int, int], seen_before: set[Tuple[int, int]]) -> bool:
         assert self.state is not None
@@ -4062,38 +4309,49 @@ class MultiAgentRLRLGym:
 
     def _nearest_opponent_distance(self, aid: str) -> int | None:
         assert self.state is not None
+        if aid in self._nearest_opponent_distance_cache:
+            return self._nearest_opponent_distance_cache[aid]
         actor = self.state.agents[aid]
         if not actor.alive:
             return None
         best: int | None = None
-        for other_id, other in self.state.agents.items():
-            if other_id == aid or not other.alive:
+        actor_faction = int(self._agent_faction_by_id.get(aid, actor.faction_id))
+        actor_pos = self._agent_position_by_id.get(aid, actor.position)
+        for other_id in self._alive_agent_ids:
+            if other_id == aid:
                 continue
-            if self._is_allied(actor, other):
+            other_faction = int(self._agent_faction_by_id.get(other_id, -1))
+            if actor_faction >= 0 and other_faction >= 0 and actor_faction == other_faction:
                 continue
-            d = self._manhattan(actor.position, other.position)
+            other_pos = self._agent_position_by_id.get(other_id)
+            if other_pos is None:
+                continue
+            d = self._manhattan(actor_pos, other_pos)
             if best is None or d < best:
                 best = d
+        self._nearest_opponent_distance_cache[aid] = best
         return best
 
     def _enemy_visible(self, aid: str) -> bool:
         assert self.state is not None
+        if aid in self._enemy_visible_cache:
+            return self._enemy_visible_cache[aid]
         actor = self.state.agents[aid]
         if not actor.alive:
             return False
-        view_height, view_width = self._observation_window_dims(aid)
-        half_h = view_height // 2
-        half_w = view_width // 2
-        ar, ac = actor.position
-        for other_id, other in self.state.agents.items():
-            if other_id == aid or not other.alive:
+        visible = self._visible_tile_coord_set(aid)
+        actor_faction = int(self._agent_faction_by_id.get(aid, actor.faction_id))
+        for other_id in self._alive_agent_ids:
+            if other_id == aid:
                 continue
-            if self._is_allied(actor, other):
+            other_faction = int(self._agent_faction_by_id.get(other_id, -1))
+            if actor_faction >= 0 and other_faction >= 0 and actor_faction == other_faction:
                 continue
-            dr = abs(other.position[0] - ar)
-            dc = abs(other.position[1] - ac)
-            if dr <= half_h and dc <= half_w and self._has_line_of_sight(actor.position, other.position):
+            other_pos = self._agent_position_by_id.get(other_id)
+            if other_pos in visible:
+                self._enemy_visible_cache[aid] = True
                 return True
+        self._enemy_visible_cache[aid] = False
         return False
 
     def _walkable(self, r: int, c: int) -> bool:
@@ -4134,15 +4392,20 @@ class MultiAgentRLRLGym:
     def _build_observation(self, aid: str) -> Dict[str, object]:
         assert self.state is not None
         cfg = self.config.agent_observation_config.get(aid, {})
-
         agent = self.state.agents[aid]
         profile = self._profile_for_agent(aid)
-        view_height, view_width = self._observation_window_dims(aid)
         include_grid = bool(cfg.get("include_grid", profile.include_grid))
         include_stats = bool(cfg.get("include_stats", profile.include_stats))
         include_inventory = bool(
             cfg.get("include_inventory", profile.include_inventory)
         )
+        context = self._observation_context(
+            aid=aid,
+            include_grid=include_grid,
+            include_stats=include_stats,
+        )
+        view_height = int(context["view_height"])
+        view_width = int(context["view_width"])
         obs: Dict[str, object] = {"step": self.state.step_count, "alive": agent.alive}
         obs["profile"] = profile.name
         obs["race"] = agent.race_name
@@ -4154,13 +4417,8 @@ class MultiAgentRLRLGym:
         }
 
         if include_grid:
-            obs["local_tiles"] = self._local_view_dims(
-                agent.position, height=view_height, width=view_width, aid=aid
-            )
+            obs["local_tiles"] = context["local_tiles"]
         if include_stats:
-            nearby_item_counts = self._nearby_item_counts(
-                center=agent.position, height=view_height, width=view_width
-            )
             metrics = self._episode_metrics.get(aid, {})
             seen_tiles = int(len(metrics.get("seen_tiles", set())))
             dcnt = int(metrics.get("enemy_distance_delta_count", 0))
@@ -4195,42 +4453,80 @@ class MultiAgentRLRLGym:
                 "faction_id": int(agent.faction_id),
                 "is_faction_leader": bool(self._is_faction_leader(aid)),
                 "faction_member_count": int(self._faction_member_count(agent.faction_id)),
-                "nearby_item_counts": nearby_item_counts,
+                "nearby_item_counts": context["nearby_item_counts"],
                 "tile_interaction_counts": self._tile_interaction_counts(
                     agent.position
                 ),
-                "teammate_distance": self._nearest_teammate_distance(aid),
-                "enemy_distance": self._nearest_opponent_distance(aid),
-                "enemy_visible": self._enemy_visible(aid),
+                "teammate_distance": context["teammate_distance"],
+                "enemy_distance": context["enemy_distance"],
+                "enemy_visible": context["enemy_visible"],
                 "explore_coverage": float(seen_tiles) / float(self._walkable_tile_count),
                 "steps_since_new_tile": int(metrics.get("steps_since_new_tile", 0)),
                 "first_enemy_seen_step": metrics.get("first_enemy_seen_step"),
                 "enemy_visible_steps": int(metrics.get("enemy_visible_steps", 0)),
                 "enemy_distance_delta_mean": (dsum / dcnt) if dcnt > 0 else 0.0,
-                "nearby_chests": self._nearby_chest_counts(
-                    center=agent.position, height=view_height, width=view_width
-                ),
-                "nearby_resource_nodes": self._nearby_resource_counts(
-                    center=agent.position, height=view_height, width=view_width
-                ),
-                "nearby_stations": self._nearby_station_counts(
-                    center=agent.position, height=view_height, width=view_width
-                ),
+                "nearby_chests": context["nearby_chests"],
+                "nearby_resource_nodes": context["nearby_resource_nodes"],
+                "nearby_stations": context["nearby_stations"],
                 "biome": self.state.biomes.get(agent.position, ""),
-                "nearby_agents": self._nearby_agent_counts(
-                    aid=aid, center=agent.position, height=view_height, width=view_width
-                ),
-                "nearby_monsters": self._nearby_monster_counts(
-                    center=agent.position, height=view_height, width=view_width
-                ),
-                "nearby_animals": self._nearby_animal_counts(
-                    center=agent.position, height=view_height, width=view_width
-                ),
+                "nearby_agents": context["nearby_agents"],
+                "nearby_monsters": context["nearby_monsters"],
+                "nearby_animals": context["nearby_animals"],
             }
         if include_inventory:
             obs["inventory"] = list(agent.inventory)
 
         return obs
+
+    def _observation_context(
+        self, aid: str, include_grid: bool, include_stats: bool
+    ) -> Dict[str, object]:
+        cache_key = (aid, bool(include_grid), bool(include_stats))
+        cached = self._observation_context_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        assert self.state is not None
+        agent = self.state.agents[aid]
+        view_height, view_width = self._observation_window_dims(aid)
+        context: Dict[str, object] = {
+            "view_height": int(view_height),
+            "view_width": int(view_width),
+        }
+        if include_grid:
+            context["local_tiles"] = self._local_view_dims(
+                agent.position, height=view_height, width=view_width, aid=aid
+            )
+        if include_stats:
+            context.update(
+                {
+                    "nearby_item_counts": self._nearby_item_counts(
+                        center=agent.position, height=view_height, width=view_width
+                    ),
+                    "teammate_distance": self._nearest_teammate_distance(aid),
+                    "enemy_distance": self._nearest_opponent_distance(aid),
+                    "enemy_visible": self._enemy_visible(aid),
+                    "nearby_chests": self._nearby_chest_counts(
+                        center=agent.position, height=view_height, width=view_width
+                    ),
+                    "nearby_resource_nodes": self._nearby_resource_counts(
+                        center=agent.position, height=view_height, width=view_width
+                    ),
+                    "nearby_stations": self._nearby_station_counts(
+                        center=agent.position, height=view_height, width=view_width
+                    ),
+                    "nearby_agents": self._nearby_agent_counts(
+                        aid=aid, center=agent.position, height=view_height, width=view_width
+                    ),
+                    "nearby_monsters": self._nearby_monster_counts(
+                        center=agent.position, height=view_height, width=view_width
+                    ),
+                    "nearby_animals": self._nearby_animal_counts(
+                        center=agent.position, height=view_height, width=view_width
+                    ),
+                }
+            )
+        self._observation_context_cache[cache_key] = context
+        return context
 
     def _resolve_profile_name(self, agent_id: str, index: int) -> str:
         if agent_id in self.config.agent_profile_map:
@@ -4419,7 +4715,11 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         height = max(1, int(height))
         width = max(1, int(width))
-        visible = set(self._visible_tile_coords(aid)) if aid else None
+        cache_key = (str(aid), tuple(center), int(height), int(width))
+        cached = self._local_view_cache.get(cache_key)
+        if cached is not None:
+            return [list(row) for row in cached]
+        visible = self._visible_tile_coord_set(aid) if aid else None
         cr, cc = center
         start_r = cr - (height // 2)
         start_c = cc - (width // 2)
@@ -4441,6 +4741,7 @@ class MultiAgentRLRLGym:
                     else:
                         row.append(tile_id)
             view.append(row)
+        self._local_view_cache[cache_key] = [list(row) for row in view]
         return view
 
     def _nearby_item_counts(
@@ -4451,14 +4752,14 @@ class MultiAgentRLRLGym:
         cr, cc = center
         start_r = cr - (height // 2)
         start_c = cc - (width // 2)
-        for r in range(start_r, start_r + height):
-            for c in range(start_c, start_c + width):
-                if (
-                    r < 0
-                    or c < 0
-                    or r >= len(self.state.grid)
-                    or c >= len(self.state.grid[0])
-                ):
+        end_r = start_r + height
+        end_c = start_c + width
+        for r in range(max(0, start_r), min(len(self.state.grid), end_r)):
+            cols = self._ground_item_positions_by_row.get(r)
+            if not cols:
+                continue
+            for c in cols:
+                if c < start_c or c >= end_c:
                     continue
                 for item in self.state.ground_items.get((r, c), []):
                     counts[item] = counts.get(item, 0) + 1
@@ -4472,39 +4773,40 @@ class MultiAgentRLRLGym:
 
     def _nearest_teammate_distance(self, aid: str) -> int | None:
         assert self.state is not None
+        if aid in self._nearest_teammate_distance_cache:
+            return self._nearest_teammate_distance_cache[aid]
         actor = self.state.agents[aid]
         if int(actor.faction_id) < 0:
             return None
-        distances: List[int] = []
-        for other_id, other in self.state.agents.items():
-            if other_id == aid or not other.alive:
+        actor_pos = self._agent_position_by_id.get(aid, actor.position)
+        actor_faction = int(self._agent_faction_by_id.get(aid, actor.faction_id))
+        best: int | None = None
+        for other_id in self._alive_agent_ids:
+            if other_id == aid:
                 continue
-            if not self._is_allied(actor, other):
+            if int(self._agent_faction_by_id.get(other_id, -1)) != actor_faction:
                 continue
-            d = abs(actor.position[0] - other.position[0]) + abs(
-                actor.position[1] - other.position[1]
-            )
-            distances.append(d)
-        if not distances:
-            return None
-        return min(distances)
+            other_pos = self._agent_position_by_id.get(other_id)
+            if other_pos is None:
+                continue
+            d = abs(actor_pos[0] - other_pos[0]) + abs(actor_pos[1] - other_pos[1])
+            if best is None or d < best:
+                best = d
+        self._nearest_teammate_distance_cache[aid] = best
+        return best
 
     def _nearest_food_distance(self, position: Tuple[int, int]) -> int | None:
         assert self.state is not None
         row, col = position
         best: int | None = None
-        for (r, c), items in self.state.ground_items.items():
-            if any(item in self.edible_items for item in items):
-                dist = abs(row - r) + abs(col - c)
-                if best is None or dist < best:
-                    best = dist
-        for (r, c), chest in self.state.chests.items():
-            if chest.opened:
-                continue
-            if any(item in self.edible_items for item in chest.loot):
-                dist = abs(row - r) + abs(col - c)
-                if best is None or dist < best:
-                    best = dist
+        for r, c in self._ground_item_edible_positions:
+            dist = abs(row - r) + abs(col - c)
+            if best is None or dist < best:
+                best = dist
+        for r, c in self._edible_chest_positions:
+            dist = abs(row - r) + abs(col - c)
+            if best is None or dist < best:
+                best = dist
         for r, c in self._edible_tile_positions:
             tile = self.tiles[self.state.grid[r][c]]
             used = self.state.tile_interactions.get((r, c), 0)
@@ -5128,20 +5430,16 @@ class MultiAgentRLRLGym:
             else "floor"
         )
         to_extinguish: List[Tuple[int, int]] = []
-        for r, row in enumerate(self.state.grid):
-            for c, tile_id in enumerate(row):
-                if tile_id not in FIRE_CONTAINER_TILE_IDS:
-                    continue
-                fuel = int(self.state.tile_interactions.get((r, c), 0))
-                fuel = max(0, fuel - FIRE_FUEL_DECAY_PER_STEP)
-                if fuel <= 0:
-                    to_extinguish.append((r, c))
-                    continue
-                self.state.tile_interactions[(r, c)] = fuel
+        for pos in list(self._active_fire_positions):
+            fuel = int(self.state.tile_interactions.get(pos, 0))
+            fuel = max(0, fuel - FIRE_FUEL_DECAY_PER_STEP)
+            if fuel <= 0:
+                to_extinguish.append(pos)
+                continue
+            self._set_tile_interaction(pos, fuel)
         for pos in to_extinguish:
-            self.state.grid[pos[0]][pos[1]] = floor_id
-            self._refresh_edible_tile_position(pos)
-            self.state.tile_interactions.pop(pos, None)
+            self._set_grid_tile(pos, floor_id)
+            self._clear_tile_interaction(pos)
 
     def _apply_animal_turn(self, info: Dict[str, Dict[str, object]]) -> None:
         assert self.state is not None
@@ -5185,12 +5483,11 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         if bool(animal.carnivore):
             return self._animal_find_prey(animal) is not None
-        forage_tiles = set(self.animal_forage_tile_ids)
         for nr, nc in self._animal_neighborhood(pos):
             if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
                 continue
             tile_id = self.state.grid[nr][nc]
-            if tile_id not in forage_tiles:
+            if tile_id not in self.animal_forage_tile_ids:
                 continue
             max_interactions = max(1, int(self.tiles[tile_id].max_interactions))
             used = int(self.state.tile_interactions.get((nr, nc), 0))
@@ -5205,14 +5502,13 @@ class MultiAgentRLRLGym:
 
     def _animal_consume_forage(self, pos: Tuple[int, int]) -> bool:
         assert self.state is not None
-        forage_tiles = set(self.animal_forage_tile_ids)
         candidates = self._animal_neighborhood(pos)
         self._rng.shuffle(candidates)
         for nr, nc in candidates:
             if nr < 0 or nc < 0 or nr >= len(self.state.grid) or nc >= len(self.state.grid[0]):
                 continue
             tile_id = self.state.grid[nr][nc]
-            if tile_id not in forage_tiles:
+            if tile_id not in self.animal_forage_tile_ids:
                 continue
             max_interactions = max(1, int(self.tiles[tile_id].max_interactions))
             used = int(self.state.tile_interactions.get((nr, nc), 0))
@@ -5225,11 +5521,10 @@ class MultiAgentRLRLGym:
                     if self.mapgen_cfg.floor_fallback_id in self.tiles
                     else "floor"
                 )
-                self.state.grid[nr][nc] = floor_id
-                self._refresh_edible_tile_position((nr, nc))
-                self.state.tile_interactions.pop((nr, nc), None)
+                self._set_grid_tile((nr, nc), floor_id)
+                self._clear_tile_interaction((nr, nc))
             else:
-                self.state.tile_interactions[(nr, nc)] = used
+                self._set_tile_interaction((nr, nc), used)
             return True
         return False
 
@@ -5274,6 +5569,11 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         if not bool(predator.carnivore):
             return None
+        if predator.entity_id in self._animal_prey_cache:
+            cached = self._animal_prey_cache[predator.entity_id]
+            if cached is not None and cached.alive and cached.entity_id in self._animal_position_by_id:
+                return cached
+            return None
         best: AnimalState | None = None
         best_dist: int | None = None
         for other in self.state.animals.values():
@@ -5291,6 +5591,7 @@ class MultiAgentRLRLGym:
             if best_dist is None or dist < best_dist:
                 best = other
                 best_dist = dist
+        self._animal_prey_cache[predator.entity_id] = best
         return best
 
     def _animal_hunt_step(self, predator: AnimalState) -> bool:
@@ -5584,9 +5885,8 @@ class MultiAgentRLRLGym:
         if qty <= 0:
             return
         pos = monster.position
-        bag = self.state.ground_items.setdefault(pos, [])
         for _ in range(qty):
-            bag.append(picked.item)
+            self._add_ground_item(pos, picked.item)
         events.append(f"monster_loot_drop:{monster.monster_id}:{picked.item}:{qty}")
 
     def _drop_animal_material(self, animal: AnimalState, events: List[str]) -> None:
@@ -5595,9 +5895,8 @@ class MultiAgentRLRLGym:
         if adef is None or not adef.drop_item:
             return
         qty = 1 if animal.animal_id != "chicken" else 2
-        bag = self.state.ground_items.setdefault(animal.position, [])
         for _ in range(max(1, qty)):
-            bag.append(adef.drop_item)
+            self._add_ground_item(animal.position, adef.drop_item)
         if events is not None:
             events.append(f"animal_drop:{animal.animal_id}:{adef.drop_item}:{qty}")
 
