@@ -45,6 +45,11 @@ from ..systems.constants import (
 )
 from ..content.classes import AgentClass, load_classes
 from ..content.animals import AnimalDef, load_animals, parse_animals
+from ..content.env_constants import (
+    load_combat_constants,
+    load_reward_constants,
+    load_world_constants,
+)
 from ..content.items import ItemCatalog, load_items, parse_items
 from .mapgen import generate_biome_terrain, generate_map, sample_walkable_positions
 from .mapgen_config import MapGenConfig, load_mapgen_config, parse_mapgen_config
@@ -79,86 +84,40 @@ from ..systems.scenario import apply_scenario_to_env_config, load_scenario
 from ..content.structures import load_structures_config, parse_structures_config
 from ..content.tiles import load_tileset, parse_tileset
 
-MOVE_VALID_REWARD = 0.005
-MOVE_STEP_COST = 0.002
-MOVE_FOOD_PROGRESS_REWARD = 0.01
-MOVE_FOOD_REGRESS_PENALTY = 0.005
-EAT_PER_HUNGER_GAIN_REWARD = 0.06
-EAT_WASTE_THRESHOLD = 0.8
-EAT_WASTE_PENALTY = 0.05
-LOW_HUNGER_THRESHOLD = 0.4
-LOW_HUNGER_PENALTY_SCALE = 0.006
+_REWARD_CONSTANTS = load_reward_constants()
+MOVE_VALID_REWARD = _REWARD_CONSTANTS.move_valid_reward
+MOVE_STEP_COST = _REWARD_CONSTANTS.move_step_cost
+MOVE_FOOD_PROGRESS_REWARD = _REWARD_CONSTANTS.move_food_progress_reward
+MOVE_FOOD_REGRESS_PENALTY = _REWARD_CONSTANTS.move_food_regress_penalty
+EAT_PER_HUNGER_GAIN_REWARD = _REWARD_CONSTANTS.eat_per_hunger_gain_reward
+EAT_WASTE_THRESHOLD = _REWARD_CONSTANTS.eat_waste_threshold
+EAT_WASTE_PENALTY = _REWARD_CONSTANTS.eat_waste_penalty
+LOW_HUNGER_THRESHOLD = _REWARD_CONSTANTS.low_hunger_threshold
+LOW_HUNGER_PENALTY_SCALE = _REWARD_CONSTANTS.low_hunger_penalty_scale
 
-DAMAGE_TYPE_SLASH = "slash"
-DAMAGE_TYPE_PIERCE = "pierce"
-DAMAGE_TYPE_BLUNT = "blunt"
+_COMBAT_CONSTANTS = load_combat_constants()
+DAMAGE_TYPE_SLASH = _COMBAT_CONSTANTS.damage_type_slash
+DAMAGE_TYPE_PIERCE = _COMBAT_CONSTANTS.damage_type_pierce
+DAMAGE_TYPE_BLUNT = _COMBAT_CONSTANTS.damage_type_blunt
+UNARMED_DAMAGE_RANGE = _COMBAT_CONSTANTS.unarmed_damage_range
+RING_ARMOR_SLOTS = _COMBAT_CONSTANTS.ring_armor_slots
+RING_ITEM_SLOT = _COMBAT_CONSTANTS.ring_item_slot
+HIT_SLOT_WEIGHTS = _COMBAT_CONSTANTS.hit_slot_weights
+HIT_SLOT_TO_ARMOR_SLOTS = _COMBAT_CONSTANTS.hit_slot_to_armor_slots
+ARMOR_CLASS_TO_SKILL = _COMBAT_CONSTANTS.armor_class_to_skill
+TOOL_DURABILITY_USE_BY_CATEGORY = _COMBAT_CONSTANTS.tool_durability_use_by_category
 
-UNARMED_DAMAGE_RANGE = (1, 2)
-RING_ARMOR_SLOTS = ("ring_1", "ring_2", "ring_3", "ring_4")
-RING_ITEM_SLOT = "ring"
-HIT_SLOT_WEIGHTS: Tuple[Tuple[str, int], ...] = (
-    ("head", 14),
-    ("chest", 30),
-    ("back", 14),
-    ("arms", 14),
-    ("legs", 18),
-    ("neck", 6),
-    ("rings", 4),
-)
-HIT_SLOT_TO_ARMOR_SLOTS: Dict[str, Tuple[str, ...]] = {
-    "head": ("head",),
-    "chest": ("chest",),
-    "back": ("back",),
-    "arms": ("arms",),
-    "legs": ("legs",),
-    "neck": ("neck",),
-    "rings": RING_ARMOR_SLOTS,
-}
-ARMOR_CLASS_TO_SKILL: Dict[str, str] = {
-    "light": "armor_light",
-    "medium": "armor_medium",
-    "heavy": "armor_heavy",
-}
-PROFILE_ALIASES: Dict[str, str] = {
-    "human": "reward_explorer_policy_v1",
-    "orc": "reward_brawler_policy_v1",
-}
-DEFAULT_VISION_RANGE = 20
-FIRE_FUEL_MAX = 20
-FIRE_FUEL_PER_STICK = 2
-FIRE_FUEL_PER_WOOD = 5
-FIRE_FUEL_PER_LOG = 8
-FIRE_FUEL_DECAY_PER_STEP = 1
-FIRE_CONTAINER_TILE_IDS = {"campfire", "firepit", "fireplace"}
-DEFAULT_CONSTRUCT_TILE_IDS = {
-    "wood_wall",
-    "rock_wall",
-    "stone_wall",
-    "wood_door",
-    "spike_trap",
-    "campfire",
-    "firepit",
-    "fireplace",
-    "clay_forge",
-    "clay_furnace",
-    "clay_smelter",
-    "glass_window",
-}
-OPAQUE_TILE_IDS = {
-    "wall",
-    "indestructible_wall",
-    "wood_wall",
-    "rock_wall",
-    "stone_wall",
-    "tree",
-}
-TOOL_DURABILITY_USE_BY_CATEGORY: Dict[str, int] = {
-    "axe": 1,
-    "pickaxe": 1,
-    "shovel": 1,
-    "handaxe": 1,
-    "knife": 1,
-}
+_WORLD_CONSTANTS = load_world_constants()
+PROFILE_ALIASES = _WORLD_CONSTANTS.profile_aliases
+DEFAULT_VISION_RANGE = _WORLD_CONSTANTS.default_vision_range
+FIRE_FUEL_MAX = _WORLD_CONSTANTS.fire_fuel_max
+FIRE_FUEL_PER_STICK = _WORLD_CONSTANTS.fire_fuel_per_stick
+FIRE_FUEL_PER_WOOD = _WORLD_CONSTANTS.fire_fuel_per_wood
+FIRE_FUEL_PER_LOG = _WORLD_CONSTANTS.fire_fuel_per_log
+FIRE_FUEL_DECAY_PER_STEP = _WORLD_CONSTANTS.fire_fuel_decay_per_step
+FIRE_CONTAINER_TILE_IDS = _WORLD_CONSTANTS.fire_container_tile_ids
+DEFAULT_CONSTRUCT_TILE_IDS = _WORLD_CONSTANTS.default_construct_tile_ids
+OPAQUE_TILE_IDS = _WORLD_CONSTANTS.opaque_tile_ids
 
 @dataclass
 class EnvConfig:

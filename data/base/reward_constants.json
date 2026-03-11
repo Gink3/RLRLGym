@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "reward_constants": {
+    "move_valid_reward": 0.005,
+    "move_step_cost": 0.002,
+    "move_food_progress_reward": 0.01,
+    "move_food_regress_penalty": 0.005,
+    "eat_per_hunger_gain_reward": 0.06,
+    "eat_waste_threshold": 0.8,
+    "eat_waste_penalty": 0.05,
+    "low_hunger_threshold": 0.4,
+    "low_hunger_penalty_scale": 0.006
+  }
+}

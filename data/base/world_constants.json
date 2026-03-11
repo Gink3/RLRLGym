@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "world_constants": {
+    "profile_aliases": {
+      "human": "reward_explorer_policy_v1",
+      "orc": "reward_brawler_policy_v1"
+    },
+    "default_vision_range": 20,
+    "fire_fuel_max": 20,
+    "fire_fuel_per_stick": 2,
+    "fire_fuel_per_wood": 5,
+    "fire_fuel_per_log": 8,
+    "fire_fuel_decay_per_step": 1,
+    "fire_container_tile_ids": ["campfire", "firepit", "fireplace"],
+    "default_construct_tile_ids": [
+      "wood_wall",
+      "rock_wall",
+      "stone_wall",
+      "wood_door",
+      "spike_trap",
+      "campfire",
+      "firepit",
+      "fireplace",
+      "clay_forge",
+      "clay_furnace",
+      "clay_smelter",
+      "glass_window"
+    ],
+    "opaque_tile_ids": [
+      "wall",
+      "indestructible_wall",
+      "wood_wall",
+      "rock_wall",
+      "stone_wall",
+      "tree"
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "combat_constants": {
+    "damage_type_slash": "slash",
+    "damage_type_pierce": "pierce",
+    "damage_type_blunt": "blunt",
+    "unarmed_damage_range": [1, 2],
+    "ring_armor_slots": ["ring_1", "ring_2", "ring_3", "ring_4"],
+    "ring_item_slot": "ring",
+    "hit_slot_weights": [
+      {"slot": "head", "weight": 14},
+      {"slot": "chest", "weight": 30},
+      {"slot": "back", "weight": 14},
+      {"slot": "arms", "weight": 14},
+      {"slot": "legs", "weight": 18},
+      {"slot": "neck", "weight": 6},
+      {"slot": "rings", "weight": 4}
+    ],
+    "hit_slot_to_armor_slots": {
+      "head": ["head"],
+      "chest": ["chest"],
+      "back": ["back"],
+      "arms": ["arms"],
+      "legs": ["legs"],
+      "neck": ["neck"],
+      "rings": ["ring_1", "ring_2", "ring_3", "ring_4"]
+    },
+    "armor_class_to_skill": {
+      "light": "armor_light",
+      "medium": "armor_medium",
+      "heavy": "armor_heavy"
+    },
+    "tool_durability_use_by_category": {
+      "axe": 1,
+      "pickaxe": 1,
+      "shovel": 1,
+      "handaxe": 1,
+      "knife": 1
+    }
+  }
+}
