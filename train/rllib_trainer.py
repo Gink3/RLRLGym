@@ -42,6 +42,7 @@ class RLlibTrainConfig:
     rollout_fragment_length: int = 200
     sample_timeout_s: float = 180.0
     replay_save_every: int = 5000
+    save_latest_replay: bool = True
     env_config_path: str = "data/env_config.json"
     scenario_path: str = ""
     curriculum_path: str = "data/base/curriculum_phases.json"
@@ -125,6 +126,7 @@ class RLlibTrainer:
                 "rollout_fragment_length": int(config.rollout_fragment_length),
                 "sample_timeout_s": float(config.sample_timeout_s),
                 "replay_save_every": int(config.replay_save_every),
+                "save_latest_replay": bool(config.save_latest_replay),
                 "env_config_path": str(config.env_config_path),
                 "scenario_path": str(config.scenario_path or ""),
                 "curriculum_path": str(config.curriculum_path),
@@ -256,7 +258,7 @@ class RLlibTrainer:
             "render_enabled": False,
             "replay_save_every": int(self.config.replay_save_every),
             "replay_output_dir": str(Path(self.config.output_dir).resolve()),
-            "save_latest_replay": True,
+            "save_latest_replay": bool(self.config.save_latest_replay),
             "env_config_path": self.config.env_config_path,
             "scenario_path": str(self.config.scenario_path or ""),
             "curriculum_phases": curriculum_phases,

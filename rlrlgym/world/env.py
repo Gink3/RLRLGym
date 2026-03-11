@@ -464,11 +464,139 @@ class MultiAgentRLRLGym:
         self._team_pair_last_reward_step: Dict[str, int] = {}
         self._defending_agents: set[str] = set()
         self._workstation_rewarded_agents: set[str] = set()
+        self._occupied_agent_positions: set[Tuple[int, int]] = set()
+        self._occupied_monster_positions: set[Tuple[int, int]] = set()
+        self._occupied_animal_positions: set[Tuple[int, int]] = set()
+        self._monster_position_by_id: Dict[str, Tuple[int, int]] = {}
+        self._animal_position_by_id: Dict[str, Tuple[int, int]] = {}
+        self._alive_agent_ids: List[str] = []
+        self._edible_tile_positions: set[Tuple[int, int]] = set()
 
     def action_space(self, agent_id: str) -> Tuple[int, int]:
         if agent_id not in self.possible_agents:
             raise KeyError(f"Unknown agent: {agent_id}")
         return (0, int(ACTION_MAX))
+
+    def _rebuild_runtime_caches(self) -> None:
+        if self.state is None:
+            self._occupied_agent_positions = set()
+            self._occupied_monster_positions = set()
+            self._occupied_animal_positions = set()
+            self._monster_position_by_id = {}
+            self._animal_position_by_id = {}
+            self._alive_agent_ids = []
+            self._edible_tile_positions = set()
+            return
+        self._occupied_agent_positions = {
+            agent.position
+            for agent in self.state.agents.values()
+            if agent.alive
+        }
+        self._monster_position_by_id = {
+            monster.entity_id: monster.position
+            for monster in self.state.monsters.values()
+            if monster.alive
+        }
+        self._occupied_monster_positions = set(self._monster_position_by_id.values())
+        self._animal_position_by_id = {
+            animal.entity_id: animal.position
+            for animal in self.state.animals.values()
+            if animal.alive
+        }
+        self._occupied_animal_positions = set(self._animal_position_by_id.values())
+        self._alive_agent_ids = [
+            aid for aid in self.possible_agents if self.state.agents[aid].alive and self.state.agents[aid].hp > 0
+        ]
+        self._rebuild_edible_tile_positions()
+
+    def _rebuild_edible_tile_positions(self) -> None:
+        if self.state is None:
+            self._edible_tile_positions = set()
+            return
+        positions: set[Tuple[int, int]] = set()
+        for r, grid_row in enumerate(self.state.grid):
+            for c, tile_id in enumerate(grid_row):
+                tile = self.tiles[tile_id]
+                if not tile.loot_table:
+                    continue
+                if any(item in self.edible_items for item in tile.loot_table):
+                    positions.add((r, c))
+        self._edible_tile_positions = positions
+
+    def _refresh_edible_tile_position(self, pos: Tuple[int, int]) -> None:
+        if self.state is None:
+            return
+        r, c = pos
+        if r < 0 or c < 0 or r >= len(self.state.grid) or c >= len(self.state.grid[0]):
+            self._edible_tile_positions.discard((r, c))
+            return
+        tile = self.tiles[self.state.grid[r][c]]
+        if tile.loot_table and any(item in self.edible_items for item in tile.loot_table):
+            self._edible_tile_positions.add((r, c))
+        else:
+            self._edible_tile_positions.discard((r, c))
+
+    def _set_agent_position(self, agent: AgentState, position: Tuple[int, int]) -> None:
+        old = agent.position
+        if agent.alive:
+            self._occupied_agent_positions.discard(old)
+        agent.position = position
+        if agent.alive:
+            self._occupied_agent_positions.add(position)
+
+    def _set_monster_position(self, monster: MonsterState, position: Tuple[int, int]) -> None:
+        old = monster.position
+        if monster.alive:
+            self._occupied_monster_positions.discard(old)
+            self._monster_position_by_id.pop(monster.entity_id, None)
+        monster.position = position
+        if monster.alive:
+            self._occupied_monster_positions.add(position)
+            self._monster_position_by_id[monster.entity_id] = position
+
+    def _set_animal_position(self, animal: AnimalState, position: Tuple[int, int]) -> None:
+        old = animal.position
+        if animal.alive:
+            self._occupied_animal_positions.discard(old)
+            self._animal_position_by_id.pop(animal.entity_id, None)
+        animal.position = position
+        if animal.alive:
+            self._occupied_animal_positions.add(position)
+            self._animal_position_by_id[animal.entity_id] = position
+
+    def _set_agent_alive(self, agent: AgentState, alive: bool) -> None:
+        agent.alive = bool(alive)
+        if agent.alive:
+            self._occupied_agent_positions.add(agent.position)
+        else:
+            self._occupied_agent_positions.discard(agent.position)
+        self._alive_agent_ids = [
+            aid for aid in self.possible_agents if self.state is not None and self.state.agents[aid].alive and self.state.agents[aid].hp > 0
+        ]
+
+    def _set_monster_alive(self, monster: MonsterState, alive: bool) -> None:
+        monster.alive = bool(alive)
+        if monster.alive:
+            self._occupied_monster_positions.add(monster.position)
+            self._monster_position_by_id[monster.entity_id] = monster.position
+        else:
+            self._occupied_monster_positions.discard(monster.position)
+            self._monster_position_by_id.pop(monster.entity_id, None)
+
+    def _set_animal_alive(self, animal: AnimalState, alive: bool) -> None:
+        animal.alive = bool(alive)
+        if animal.alive:
+            self._occupied_animal_positions.add(animal.position)
+            self._animal_position_by_id[animal.entity_id] = animal.position
+        else:
+            self._occupied_animal_positions.discard(animal.position)
+            self._animal_position_by_id.pop(animal.entity_id, None)
+
+    def _register_spawned_animal(self, animal: AnimalState) -> None:
+        if not animal.alive:
+            return
+        self._occupied_animal_positions.add(animal.position)
+        self._animal_position_by_id[animal.entity_id] = animal.position
 
     def observation_space(self, agent_id: str) -> Dict[str, object]:
         if agent_id not in self.possible_agents:
@@ -584,6 +712,7 @@ class MultiAgentRLRLGym:
         self._episode_any_enemy_seen = False
         self._episode_timeout_no_contact = False
         self._episode_terminal_rewards_applied = False
+        self._rebuild_runtime_caches()
         self._episode_metrics = {}
         self._episode_survival_steps = {aid: 0 for aid in self.possible_agents}
         for aid in self.possible_agents:
@@ -666,7 +795,7 @@ class MultiAgentRLRLGym:
                 if agent.alive and agent.hp <= 0:
                     rewards[aid] -= 1.0
                     info[aid]["events"].append("death")
-                agent.alive = False
+                self._set_agent_alive(agent, False)
                 terminations[aid] = True
                 continue
 
@@ -691,7 +820,7 @@ class MultiAgentRLRLGym:
             reward_components[aid]["search_explore"] += float(search_delta)
 
             if agent.hp <= 0:
-                agent.alive = False
+                self._set_agent_alive(agent, False)
                 terminations[aid] = True
                 rewards[aid] -= 1.0
                 reward_components[aid]["terminal"] -= 1.0
@@ -973,7 +1102,7 @@ class MultiAgentRLRLGym:
             nr, nc = agent.position[0] + dr, agent.position[1] + dc
             if self._walkable(nr, nc):
                 old_pos = agent.position
-                agent.position = (nr, nc)
+                self._set_agent_position(agent, (nr, nc))
                 events.append(f"move:{old_pos}->{agent.position}")
                 tile_here = self.state.grid[nr][nc]
                 if tile_here == "spike_trap":
@@ -1431,6 +1560,7 @@ class MultiAgentRLRLGym:
                     else "floor"
                 )
                 self.state.grid[nr][nc] = floor_id
+                self._refresh_edible_tile_position((nr, nc))
                 self.state.tile_interactions.pop((nr, nc), None)
                 log_qty = 1 + max(0, axe_bonus // 2)
                 log_added = self._add_item_or_drop(actor, "log", log_qty, events)
@@ -1471,6 +1601,7 @@ class MultiAgentRLRLGym:
                 self.state.grid[nr][nc] = "stone_floor" if "stone_floor" in self.tiles else (
                     self.mapgen_cfg.floor_fallback_id if self.mapgen_cfg.floor_fallback_id in self.tiles else "floor"
                 )
+                self._refresh_edible_tile_position((nr, nc))
                 self.state.tile_interactions.pop((nr, nc), None)
                 events.append(f"mine_wall_broken:{nr}:{nc}")
             else:
@@ -1591,6 +1722,7 @@ class MultiAgentRLRLGym:
         if self._pop_first_base_item(actor.inventory, seed_item) is None:
             return 0.0, False
         self.state.grid[r][c] = str(crop["crop_tile"])
+        self._refresh_edible_tile_position((r, c))
         self.state.tile_interactions[(r, c)] = 0
         self.state.plant_plots[(r, c)] = PlantPlotState(
             crop_id=crop_id,
@@ -1632,6 +1764,7 @@ class MultiAgentRLRLGym:
             if self.mapgen_cfg.floor_fallback_id in self.tiles
             else "floor"
         )
+        self._refresh_edible_tile_position(pos)
         self._record_harvest(pos)
         self.state.plant_plots.pop(pos, None)
         self.state.tile_interactions.pop(pos, None)
@@ -1913,6 +2046,7 @@ class MultiAgentRLRLGym:
             if recipe.build_tile_id not in self.tiles:
                 return False
             self.state.grid[ar][ac] = recipe.build_tile_id
+            self._refresh_edible_tile_position((ar, ac))
             if recipe.build_tile_id in FIRE_CONTAINER_TILE_IDS:
                 self.state.tile_interactions[(ar, ac)] = max(
                     1, int(self.state.tile_interactions.get((ar, ac), 0)) + FIRE_FUEL_PER_STICK
@@ -2579,7 +2713,7 @@ class MultiAgentRLRLGym:
                     walkable = [(r, c) for (r, c) in options if self._walkable(r, c)]
                     if walkable:
                         old = target_agent.position
-                        target_agent.position = self._rng.choice(walkable)
+                        self._set_agent_position(target_agent, self._rng.choice(walkable))
                         events.append(f"{context}:blink:{old}->{target_agent.position}")
             elif et == "knockback":
                 if self.state is not None and source_agent is not None:
@@ -2590,7 +2724,7 @@ class MultiAgentRLRLGym:
                     nr, nc = tr + dr, tc + dc
                     if self._walkable(nr, nc):
                         old = target_agent.position
-                        target_agent.position = (nr, nc)
+                        self._set_agent_position(target_agent, (nr, nc))
                         events.append(f"{context}:knockback:{old}->{target_agent.position}")
         return delta
 
@@ -2825,7 +2959,7 @@ class MultiAgentRLRLGym:
 
         target_id = sorted(candidates)[0]
         target = self.state.agents[target_id]
-        target.alive = True
+        self._set_agent_alive(target, True)
         target.hp = max(1, int(target.max_hp) // 2)
         target.hunger = max(0, min(target.max_hunger, int(target.max_hunger) // 4))
         self._revived_this_step.add(target_id)
@@ -3209,7 +3343,7 @@ class MultiAgentRLRLGym:
         events.append(f"agent_interact:hit_animal:{target.entity_id}")
         reward = 0.04 + 0.015 * float(final_damage)
         if target.hp <= 0 and target.alive:
-            target.alive = False
+            self._set_animal_alive(target, False)
             events.append(f"agent_interact:kill_animal:{target.animal_id}")
             self._drop_animal_material(target, events)
             reward += 0.2
@@ -3273,7 +3407,7 @@ class MultiAgentRLRLGym:
                 reward += 0.05 + 0.02 * final_damage
                 self._gain_skill_xp(attacker, skill_name, 2, events)
             if target.hp <= 0 and target.alive:
-                target.alive = False
+                self._set_agent_alive(target, False)
                 events.append(f"agent_interact:kill:{target.agent_id}")
                 if allied_target:
                     reward -= float(self.config.ally_kill_penalty)
@@ -3337,7 +3471,7 @@ class MultiAgentRLRLGym:
             reward += 0.05 + 0.02 * final_damage
             self._gain_skill_xp(attacker, skill_name, 2, events)
             if target.hp <= 0 and target.alive:
-                target.alive = False
+                self._set_monster_alive(target, False)
                 events.append(f"agent_interact:kill_monster:{target.monster_id}")
                 reward += 0.45
                 self._gain_skill_xp(attacker, skill_name, 4, events)
@@ -3969,15 +4103,13 @@ class MultiAgentRLRLGym:
         tile_id = self.state.grid[r][c]
         if not self.tiles[tile_id].walkable:
             return False
-        for agent in self.state.agents.values():
-            if agent.alive and agent.position == (r, c):
-                return False
-        for monster in self.state.monsters.values():
-            if monster.alive and monster.position == (r, c):
-                return False
-        for animal in self.state.animals.values():
-            if animal.alive and animal.position == (r, c):
-                return False
+        pos = (r, c)
+        if pos in self._occupied_agent_positions:
+            return False
+        if pos in self._occupied_monster_positions:
+            return False
+        if pos in self._occupied_animal_positions:
+            return False
         return True
 
     def _walkable_for_monster(
@@ -3989,19 +4121,14 @@ class MultiAgentRLRLGym:
         tile_id = self.state.grid[r][c]
         if not self.tiles[tile_id].walkable:
             return False
-        for agent in self.state.agents.values():
-            if agent.alive and agent.position == (r, c):
-                return False
-        for monster in self.state.monsters.values():
-            if (
-                monster.alive
-                and monster.entity_id != moving_entity_id
-                and monster.position == (r, c)
-            ):
-                return False
-        for animal in self.state.animals.values():
-            if animal.alive and animal.position == (r, c):
-                return False
+        pos = (r, c)
+        if pos in self._occupied_agent_positions:
+            return False
+        current_monster_pos = self._monster_position_by_id.get(moving_entity_id)
+        if pos in self._occupied_monster_positions and pos != current_monster_pos:
+            return False
+        if pos in self._occupied_animal_positions:
+            return False
         return True
 
     def _build_observation(self, aid: str) -> Dict[str, object]:
@@ -4378,20 +4505,14 @@ class MultiAgentRLRLGym:
                 dist = abs(row - r) + abs(col - c)
                 if best is None or dist < best:
                     best = dist
-
-        for r, grid_row in enumerate(self.state.grid):
-            for c, tile_id in enumerate(grid_row):
-                tile = self.tiles[tile_id]
-                if not tile.loot_table:
-                    continue
-                if not any(item in self.edible_items for item in tile.loot_table):
-                    continue
-                used = self.state.tile_interactions.get((r, c), 0)
-                if used >= max(1, tile.max_interactions):
-                    continue
-                dist = abs(row - r) + abs(col - c)
-                if best is None or dist < best:
-                    best = dist
+        for r, c in self._edible_tile_positions:
+            tile = self.tiles[self.state.grid[r][c]]
+            used = self.state.tile_interactions.get((r, c), 0)
+            if used >= max(1, tile.max_interactions):
+                continue
+            dist = abs(row - r) + abs(col - c)
+            if best is None or dist < best:
+                best = dist
         return best
 
     def _generate_world_terrain(self) -> Tuple[List[List[str]], Dict[Tuple[int, int], str]]:
@@ -4982,7 +5103,7 @@ class MultiAgentRLRLGym:
         for entity_id in sorted(self.state.monsters.keys()):
             monster = self.state.monsters[entity_id]
             if not monster.alive or monster.hp <= 0:
-                monster.alive = False
+                self._set_monster_alive(monster, False)
                 continue
 
             target_id = self._nearest_alive_agent_id(
@@ -5019,6 +5140,7 @@ class MultiAgentRLRLGym:
                 self.state.tile_interactions[(r, c)] = fuel
         for pos in to_extinguish:
             self.state.grid[pos[0]][pos[1]] = floor_id
+            self._refresh_edible_tile_position(pos)
             self.state.tile_interactions.pop(pos, None)
 
     def _apply_animal_turn(self, info: Dict[str, Dict[str, object]]) -> None:
@@ -5056,7 +5178,7 @@ class MultiAgentRLRLGym:
         if self._animal_can_drink(animal.position):
             animal.thirst = min(int(animal.max_thirst), int(animal.thirst) + 2)
         if animal.hunger <= 0 or animal.thirst <= 0:
-            animal.alive = False
+            self._set_animal_alive(animal, False)
             self._drop_animal_material(animal, [])
 
     def _animal_can_eat(self, animal: AnimalState, pos: Tuple[int, int]) -> bool:
@@ -5104,6 +5226,7 @@ class MultiAgentRLRLGym:
                     else "floor"
                 )
                 self.state.grid[nr][nc] = floor_id
+                self._refresh_edible_tile_position((nr, nc))
                 self.state.tile_interactions.pop((nr, nc), None)
             else:
                 self.state.tile_interactions[(nr, nc)] = used
@@ -5138,14 +5261,14 @@ class MultiAgentRLRLGym:
         if thirsty:
             near_water = [p for p in walkable if self._animal_can_drink(p)]
             if near_water:
-                animal.position = self._rng.choice(near_water)
+                self._set_animal_position(animal, self._rng.choice(near_water))
                 return
         if hungry:
             near_food = [p for p in walkable if self._animal_can_eat(animal, p)]
             if near_food:
-                animal.position = self._rng.choice(near_food)
+                self._set_animal_position(animal, self._rng.choice(near_food))
                 return
-        animal.position = self._rng.choice(walkable)
+        self._set_animal_position(animal, self._rng.choice(walkable))
 
     def _animal_find_prey(self, predator: AnimalState) -> AnimalState | None:
         assert self.state is not None
@@ -5190,7 +5313,7 @@ class MultiAgentRLRLGym:
         if not walkable:
             return True
         walkable.sort(key=lambda p: self._manhattan(p, (tr, tc)))
-        predator.position = walkable[0]
+        self._set_animal_position(predator, walkable[0])
         if self._manhattan(predator.position, target.position) <= 1:
             self._animal_attack_animal(predator, target)
         return True
@@ -5202,7 +5325,7 @@ class MultiAgentRLRLGym:
         prey.hp = max(0, int(prey.hp) - damage)
         if prey.hp > 0:
             return
-        prey.alive = False
+        self._set_animal_alive(prey, False)
         predator.hunger = min(int(predator.max_hunger), int(predator.hunger) + max(3, int(prey.max_hunger // 3)))
 
     def _animal_try_reproduce(self, animal: AnimalState) -> None:
@@ -5279,6 +5402,7 @@ class MultiAgentRLRLGym:
                 shear_regrow_max=parent_def.shear_regrow_steps,
                 alive=True,
             )
+            self._register_spawned_animal(self.state.animals[entity_id])
             spawned += 1
         if spawned <= 0:
             return
@@ -5289,15 +5413,19 @@ class MultiAgentRLRLGym:
         self, r: int, c: int, moving_entity_id: str
     ) -> bool:
         assert self.state is not None
-        if not self._walkable(r, c):
+        if r < 0 or c < 0 or r >= len(self.state.grid) or c >= len(self.state.grid[0]):
             return False
-        for animal in self.state.animals.values():
-            if (
-                animal.alive
-                and animal.entity_id != moving_entity_id
-                and animal.position == (r, c)
-            ):
-                return False
+        tile_id = self.state.grid[r][c]
+        if not self.tiles[tile_id].walkable:
+            return False
+        pos = (r, c)
+        if pos in self._occupied_agent_positions:
+            return False
+        if pos in self._occupied_monster_positions:
+            return False
+        current_animal_pos = self._animal_position_by_id.get(moving_entity_id)
+        if pos in self._occupied_animal_positions and pos != current_animal_pos:
+            return False
         return True
 
     def _nearest_alive_agent_id(
@@ -5306,10 +5434,8 @@ class MultiAgentRLRLGym:
         assert self.state is not None
         best_id: str | None = None
         best_dist: int | None = None
-        for aid in self.possible_agents:
+        for aid in self._alive_agent_ids:
             agent = self.state.agents[aid]
-            if not agent.alive or agent.hp <= 0:
-                continue
             dist = self._manhattan(position, agent.position)
             if max_range is not None and dist > int(max_range):
                 continue
@@ -5371,7 +5497,7 @@ class MultiAgentRLRLGym:
                 rewards=rewards,
             )
         if target.hp <= 0 and target.alive:
-            target.alive = False
+            self._set_agent_alive(target, False)
             terminations[target.agent_id] = True
             rewards[target.agent_id] -= 1.0
             target_events.append("death")
@@ -5408,7 +5534,7 @@ class MultiAgentRLRLGym:
                 best_moves.append((nr, nc))
         if best_moves:
             old = monster.position
-            monster.position = self._rng.choice(best_moves)
+            self._set_monster_position(monster, self._rng.choice(best_moves))
             nearest = self._nearest_alive_agent_id(monster.position)
             if nearest is not None:
                 info[nearest]["events"].append(
@@ -5436,7 +5562,7 @@ class MultiAgentRLRLGym:
         if not walkable:
             return
         old = monster.position
-        monster.position = self._rng.choice(walkable)
+        self._set_monster_position(monster, self._rng.choice(walkable))
         nearest = self._nearest_alive_agent_id(monster.position)
         if nearest is not None:
             info[nearest]["events"].append(

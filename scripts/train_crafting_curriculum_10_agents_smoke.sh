@@ -46,7 +46,7 @@ PY
 
 echo "Smoke curriculum: ${TMP_CURRICULUM}"
 echo "Smoke curriculum runs all 7 phases with one episode per phase."
-echo "A replay is saved at the end of every smoke phase episode."
+echo "Replay capture is disabled in this smoke profile path to avoid serialization skew."
 
 "$PY_BIN" -m train \
   --backend rllib \
@@ -61,7 +61,8 @@ echo "A replay is saved at the end of every smoke phase episode."
   --num-sgd-iter 1 \
   --rollout-fragment-length 50 \
   --sample-timeout-s 300 \
-  --replay-save-every 1 \
+  --replay-save-every 0 \
+  --no-save-latest-replay \
   --seed 0 \
   --no-aim \
   --output-dir outputs/train/crafting_curriculum_10_agents_smoke \

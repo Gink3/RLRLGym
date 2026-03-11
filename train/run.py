@@ -37,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rollout-fragment-length", type=int, default=200)
     p.add_argument("--sample-timeout-s", type=float, default=180.0)
     p.add_argument("--replay-save-every", type=int, default=5000)
+    p.add_argument(
+        "--no-save-latest-replay",
+        action="store_true",
+        help="Disable per-episode latest replay capture in RLlib runs.",
+    )
     p.add_argument("--env-config-path", type=str, default="data/env_config.json")
     p.add_argument("--scenario-path", type=str, default="")
     p.add_argument("--max-nn-policies", type=int, default=0)
@@ -146,6 +151,7 @@ def main() -> None:
         rollout_fragment_length=args.rollout_fragment_length,
         sample_timeout_s=args.sample_timeout_s,
         replay_save_every=args.replay_save_every,
+        save_latest_replay=not bool(args.no_save_latest_replay),
         env_config_path=args.env_config_path,
         scenario_path=args.scenario_path,
         curriculum_path=args.curriculum_path,
