@@ -6,7 +6,9 @@ Reduce environment step time enough that curriculum and replay smoke tests are f
 
 ## Current Problem
 
-The environment layer in [env.py](/proj/RLRLGym/rlrlgym/world/env.py) appears to be the training bottleneck, especially as curriculum phases grow in map size and system count. Likely hotspots from code inspection:
+The environment layer in [env.py](/proj/RLRLGym/rlrlgym/world/env.py) appears to be the training bottleneck, especially as curriculum phases grow in map size and system count.
+
+Likely hotspots from code inspection:
 
 - Line-of-sight and visibility:
   [env.py](/proj/RLRLGym/rlrlgym/world/env.py)
@@ -28,23 +30,23 @@ The environment layer in [env.py](/proj/RLRLGym/rlrlgym/world/env.py) appears to
 - Keep Python orchestration, config loading, RLlib integration, and replay tooling intact.
 - Isolate hot kernels so they can be compiled later without rewriting the whole environment.
 
-## Phase 1: Measure
+## Versioned Roadmap
 
-### Deliverables
+### Version 0.1
 
-- A repeatable profiling command using the smoke curriculum runner.
-- One saved flamegraph from `py-spy` with subprocess support when relevant.
-- A short hotspot summary checked into a note or attached to an issue.
+Focus: measurement baseline.
 
-### Commands
+Features / tasks:
 
-Run the smoke training job:
+- Add a repeatable profiling command using the smoke curriculum runner.
+- Capture at least one `py-spy` flamegraph for the environment-heavy smoke run.
+- Write down the top 5 sampled hotspots before making optimizations.
+
+Commands:
 
 ```bash
 ./scripts/train_crafting_curriculum_10_agents_smoke.sh
 ```
-
-Profile a direct Python training process:
 
 ```bash
 python3 -m train \
@@ -68,22 +70,20 @@ PY_PID=$!
 sudo .venv/bin/py-spy record --pid "$PY_PID" --duration 20 -o pyspy.svg
 ```
 
-### Success Criteria
+Success criteria:
 
 - We can name the top 5 functions by sampled wall time.
 - We can separate environment cost from RLlib overhead.
 
-## Phase 2: Cheap Python Wins
+### Version 0.2
 
-### 1. Occupancy cache
+Focus: cheap Python wins in movement and collision checks.
 
-Replace repeated scans over all agents, monsters, and animals inside `_walkable` and related helpers with maintained occupancy sets/maps.
+Features / tasks:
 
-Target changes:
-
-- Maintain live occupied tile sets for agents, monsters, animals.
-- Update them incrementally on movement, death, revive, spawn.
-- Use O(1) membership checks in pathing and walkability helpers.
+- Add occupancy caches for agents, monsters, and animals.
+- Replace repeated scans inside `_walkable` and related helpers with O(1) membership checks.
+- Update occupancy state incrementally on movement, spawn, death, and revive.
 
 Expected payoff:
 
@@ -93,19 +93,20 @@ Risk:
 
 - Medium, because stale occupancy state can create movement bugs.
 
-### 2. Visibility caching per step
+### Version 0.3
 
-Avoid recomputing LOS-heavy visibility multiple times for the same agent within one step.
+Focus: visibility and line-of-sight caching.
 
-Target changes:
+Features / tasks:
 
-- Cache visible tiles for each agent once per step.
-- Cache enemy-visible boolean once per step.
-- Reuse cached values for:
+- Cache visible tiles per agent once per step.
+- Cache enemy-visible booleans per agent once per step.
+- Reuse cached visibility in:
   reset metrics,
   search rewards,
   observation building,
   info payloads.
+- Add an opaque-grid cache for fast LOS checks.
 
 Expected payoff:
 
@@ -115,9 +116,16 @@ Risk:
 
 - Low to medium
 
-### 3. Opaque-grid cache
+### Version 0.4
 
-Convert repeated tile-id lookups and opacity checks into a boolean grid or flat array that is cheap to access during LOS.
+Focus: algorithmic improvements in repeated geometric and search work.
+
+Features / tasks:
+
+- Precompute LOS ray offsets for common observation windows.
+- Reduce repeated nearest-opponent calculations.
+- Evaluate per-step pairwise distance caches or spatial bucketing.
+- Split simulation work from observation construction for clearer profiling.
 
 Expected payoff:
 
@@ -125,75 +133,66 @@ Expected payoff:
 
 Risk:
 
-- Low
+- Medium
 
-### 4. Replay snapshot reduction
+### Version 0.5
 
-Replace `copy.deepcopy(self.state)` in replay capture with a dedicated snapshot serializer that copies only replay-visible state.
+Focus: replay and allocation reduction.
+
+Features / tasks:
+
+- Replace `copy.deepcopy(self.state)` replay capture with a replay-specific serializer.
+- Reduce transient `dict`, `list`, and `set` allocations in hot loops.
+- Reuse per-step buffers where practical.
 
 Expected payoff:
 
-- Medium, especially when `replay_save_every=1`
+- Medium
 
 Risk:
 
 - Medium
 
-## Phase 3: Algorithmic Improvements
+### Version 0.6
 
-### 1. Precomputed LOS rays
+Focus: structural Python refactors.
 
-For a given observation window, precompute ray offsets from the center and reuse them across agents rather than rebuilding line point lists repeatedly.
+Features / tasks:
 
-### 2. Cheaper nearest-opponent queries
+- Flatten hot-path entity data into cheaper internal representations where justified.
+- Reduce nested dataclass access in the hottest simulation loops.
+- Keep external APIs stable while simplifying the sim kernel internally.
 
-Current opponent distance checks are repeated often. Evaluate:
+Expected payoff:
 
-- per-step pairwise distance cache for agents
-- cheap spatial bucketing by coarse grid cell
+- Medium
 
-### 3. Observation-path split
+Risk:
 
-Separate simulation logic from observation construction so simulation steps can be profiled independently of RL observation serialization.
+- Medium to high
 
-## Phase 4: Structural Python Refactors
+### Version 0.7
 
-### 1. Reduce object churn
+Focus: compiled Python before Rust.
 
-- Reuse per-step buffers where practical
-- Minimize transient `dict`, `list`, and `set` creation in hot loops
-- Avoid converting between tuples, lists, and dicts repeatedly in step-critical code
+Features / tasks:
 
-### 2. Flatten hot entity data
+1. Try Cython for LOS, walkability, visibility, and combat helpers.
+2. Evaluate mypyc for type-stable pure-Python modules.
+3. Use Numba only if hot paths are converted to numeric array-oriented code.
 
-For the hottest simulation paths, consider moving from nested dataclass access toward indexed arrays or compact state records for:
+Constraint:
 
-- positions
-- hp
-- alive flags
-- faction ids
+- Only move isolated kernels first.
+- Do not port content loading, replay serialization, RLlib adapters, or scenario configuration prematurely.
 
-This should be done only for hot-path data, not the entire codebase.
+### Version 0.8
 
-## Phase 5: Compiled Python Before Rust
-
-If Python-side algorithmic work is not enough, try a compiled boundary before a full rewrite.
-
-### Preferred order
-
-1. Cython for LOS, walkability, visibility, and combat helpers
-2. mypyc for type-stable pure-Python modules
-3. Numba only if hot paths are converted to numeric array-oriented code
-
-### Constraint
-
-Only move isolated kernels first. Do not port content loading, replay serialization, RLlib adapters, or scenario configuration prematurely.
-
-## Phase 6: Rust Only If Needed
+Focus: Rust only if Python and compiled-Python options are still insufficient.
 
 Rust becomes justified if all of the following are true:
 
-- Profiling still shows the simulation kernel dominates runtime after Phases 2 through 5.
+- Profiling still shows the simulation kernel dominates runtime after versions `0.2` through `0.7`.
 - Hot paths are well isolated and stable.
 - Python orchestration can call into a Rust step kernel through a narrow API.
 - The team is willing to absorb the build, packaging, and debugging overhead.
@@ -213,11 +212,10 @@ Keep in Python:
 
 ## Immediate Next Tasks
 
-1. Generate a `py-spy` flamegraph from the 7-phase smoke run.
-2. Implement occupancy caches.
-3. Implement per-step visibility caching.
-4. Re-profile and compare against the baseline.
-5. Only then decide whether compiled helpers are necessary.
+1. Fill out feature bullets under each version as implementation decisions get locked in.
+2. Generate a `py-spy` flamegraph from the 7-phase smoke run.
+3. Start version `0.2` with occupancy caches.
+4. Re-profile after each version increment.
 
 ## Done Criteria
 
