@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--train-batch-size", type=int, default=4000)
     p.add_argument("--sgd-minibatch-size", type=int, default=1024)
     p.add_argument("--num-sgd-iter", type=int, default=10)
+    p.add_argument("--rollout-fragment-length", type=int, default=200)
+    p.add_argument("--sample-timeout-s", type=float, default=180.0)
     p.add_argument("--replay-save-every", type=int, default=5000)
     p.add_argument("--env-config-path", type=str, default="data/env_config.json")
     p.add_argument("--scenario-path", type=str, default="")
@@ -141,6 +143,8 @@ def main() -> None:
         train_batch_size=args.train_batch_size,
         sgd_minibatch_size=args.sgd_minibatch_size,
         num_sgd_iter=args.num_sgd_iter,
+        rollout_fragment_length=args.rollout_fragment_length,
+        sample_timeout_s=args.sample_timeout_s,
         replay_save_every=args.replay_save_every,
         env_config_path=args.env_config_path,
         scenario_path=args.scenario_path,

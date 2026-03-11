@@ -38,6 +38,8 @@ class RLlibTrainConfig:
     train_batch_size: int = 4000
     sgd_minibatch_size: int = 1024
     num_sgd_iter: int = 10
+    rollout_fragment_length: int = 200
+    sample_timeout_s: float = 180.0
     replay_save_every: int = 5000
     env_config_path: str = "data/env_config.json"
     scenario_path: str = ""
@@ -104,6 +106,8 @@ class RLlibTrainer:
                 "train_batch_size": int(config.train_batch_size),
                 "sgd_minibatch_size": int(config.sgd_minibatch_size),
                 "num_sgd_iter": int(config.num_sgd_iter),
+                "rollout_fragment_length": int(config.rollout_fragment_length),
+                "sample_timeout_s": float(config.sample_timeout_s),
                 "replay_save_every": int(config.replay_save_every),
                 "env_config_path": str(config.env_config_path),
                 "scenario_path": str(config.scenario_path or ""),
@@ -206,6 +210,19 @@ class RLlibTrainer:
         except Exception:
             # Non-fatal; RLlib will use its defaults if patching fails.
             pass
+
+    @staticmethod
+    def _prefer_nonzero_metric(candidate: float, fallback: float) -> float:
+        try:
+            value = float(candidate)
+        except Exception:
+            return float(fallback)
+        fallback_value = float(fallback)
+        if not math.isfinite(value):
+            return fallback_value
+        if value == 0.0 and fallback_value != 0.0:
+            return fallback_value
+        return value
 
     def train(self) -> Dict[str, object]:
         env_name = "RLRLGymRLlib-v0"
@@ -743,6 +760,7 @@ class RLlibTrainer:
 
         train_batch_size = int(self.config.train_batch_size)
         sgd_minibatch_size = int(self.config.sgd_minibatch_size)
+        rollout_fragment_length = max(50, int(self.config.rollout_fragment_length))
         if self.config.num_gpus > 0 and train_batch_size < 8192:
             # Keep GPUs fed with a larger on-policy batch when acceleration is enabled.
             train_batch_size = 8192
@@ -761,7 +779,11 @@ class RLlibTrainer:
             )
             .framework(self.config.framework)
             .resources(num_gpus=self.config.num_gpus)
-            .env_runners(num_env_runners=self.config.num_rollout_workers)
+            .env_runners(
+                num_env_runners=self.config.num_rollout_workers,
+                rollout_fragment_length=rollout_fragment_length,
+                sample_timeout_s=max(30.0, float(self.config.sample_timeout_s)),
+            )
             .rl_module(rl_module_spec=rl_module_spec)
             .callbacks(MetricsCallbacks)
             .multi_agent(
@@ -799,6 +821,9 @@ class RLlibTrainer:
         death_by_monster_histogram: Dict[str, int] = {}
         n_agents = int(env_config.get("n_agents", 2))
         episodes_total_running = 0.0
+        last_progress_reward = 0.0
+        last_progress_survival = 0.0
+        last_progress_level = 0.0
         for i in range(self.config.iterations):
             result = algo.train()
             reward_mean = self._extract_float(
@@ -1151,6 +1176,21 @@ class RLlibTrainer:
                     default=0.0,
                 ),
             )
+            mean_reward_last_episode = self._prefer_nonzero_metric(
+                mean_reward_last_episode,
+                last_progress_reward,
+            )
+            mean_survival_last_episode = self._prefer_nonzero_metric(
+                mean_survival_last_episode,
+                last_progress_survival,
+            )
+            mean_level_last_episode = self._prefer_nonzero_metric(
+                mean_level_last_episode,
+                last_progress_level,
+            )
+            last_progress_reward = mean_reward_last_episode
+            last_progress_survival = mean_survival_last_episode
+            last_progress_level = mean_level_last_episode
             if episodes_this_iter > 0:
                 deaths_scale = int(round(episodes_this_iter)) * max(1, n_agents)
                 death_histogram["starvation"] += int(round(death_starvation_rate * deaths_scale))
