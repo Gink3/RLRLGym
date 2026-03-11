@@ -12,6 +12,8 @@ from .trainer import MultiAgentTrainer, TrainConfig
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Train multi-agent policies in RLRLGym")
+    # TODO: Remove the custom backend and keep RLlib as the only training backend.
+    # TODO: Remove the custom Q-learning stack (MultiAgentTrainer/NeuralQPolicy path).
     p.add_argument("--backend", choices=["custom", "rllib"], default="rllib")
     p.add_argument("--episodes", type=int, default=100)
     p.add_argument("--max-steps", type=int, default=None)
@@ -29,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="RLlib algorithm/policy mode.",
     )
     p.add_argument("--framework", type=str, default="torch")
+    # TODO: Default num_gpus to 1 for single-GPU training workflows.
     p.add_argument("--num-gpus", type=float, default=0.0)
     p.add_argument("--num-rollout-workers", type=int, default=0)
     p.add_argument("--train-batch-size", type=int, default=4000)

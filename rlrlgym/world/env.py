@@ -1002,6 +1002,9 @@ class MultiAgentRLRLGym:
             }
             for aid in self.possible_agents
         }
+        # TODO(perf): Reduce per-step Python overhead by gating/string-pooling event logs for training runs.
+        # TODO(perf): Preallocate/reuse per-agent step buffers (rewards/info temp dicts) to cut allocations.
+        # TODO(perf): Batch/simplify nearest-opponent visibility-distance queries for large agent counts.
         pre_enemy_distance = {
             aid: self._nearest_opponent_distance(aid) for aid in self.possible_agents
         }
