@@ -21,6 +21,7 @@ from rlrlgym.systems.scenario import SUPPORTED_AGENT_POLICIES, load_scenario
 
 from .aim_logger import AimLogger
 from .data_archive import archive_training_inputs
+from .rllib_warning_filters import install_rllib_warning_filters
 
 @dataclass
 class RLlibTrainConfig:
@@ -58,12 +59,25 @@ class RLlibTrainer:
         os.environ.setdefault("TUNE_DISABLE_AUTO_CALLBACK_LOGGERS", "1")
         os.environ.setdefault("RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO", "0")
         os.environ.setdefault("RAY_AIR_NEW_OUTPUT", "1")
+        install_rllib_warning_filters()
         try:
             import ray
             from ray import air
             from ray.rllib.algorithms.callbacks import DefaultCallbacks
             from ray.rllib.algorithms.dqn import DQNConfig
             from ray.rllib.algorithms.ppo import PPOConfig
+            try:
+                from ray.rllib.algorithms.dqn.torch.default_dqn_torch_rl_module import (
+                    DefaultDQNTorchRLModule,
+                )
+            except Exception:
+                DefaultDQNTorchRLModule = None
+            try:
+                from ray.rllib.algorithms.ppo.torch.default_ppo_torch_rl_module import (
+                    DefaultPPOTorchRLModule,
+                )
+            except Exception:
+                DefaultPPOTorchRLModule = None
             from ray.rllib.core.rl_module.multi_rl_module import MultiRLModuleSpec
             from ray.rllib.core.rl_module.rl_module import RLModuleSpec
             from ray.tune.registry import register_env
@@ -79,6 +93,8 @@ class RLlibTrainer:
         self._DefaultCallbacks = DefaultCallbacks
         self._PPOConfig = PPOConfig
         self._DQNConfig = DQNConfig
+        self._DefaultDQNTorchRLModule = DefaultDQNTorchRLModule
+        self._DefaultPPOTorchRLModule = DefaultPPOTorchRLModule
         self._MultiRLModuleSpec = MultiRLModuleSpec
         self._RLModuleSpec = RLModuleSpec
         self._register_env = register_env
@@ -701,6 +717,22 @@ class RLlibTrainer:
         model_cfg: Dict[str, object] = {}
         if use_recurrent:
             model_cfg = {"use_lstm": True, "max_seq_len": 20}
+        module_class = (
+            self._DefaultDQNTorchRLModule
+            if algo_mode in {"dqn", "dqn_masked"}
+            else self._DefaultPPOTorchRLModule
+        )
+
+        def build_module_spec():
+            kwargs = {
+                "observation_space": sample_obs_space,
+                "action_space": sample_action_space,
+                "inference_only": False,
+                "model_config": dict(model_cfg),
+            }
+            if module_class is not None:
+                kwargs["module_class"] = module_class
+            return self._RLModuleSpec(**kwargs)
 
         scenario_policy_ids = self._scenario_policy_ids()
 
@@ -708,12 +740,7 @@ class RLlibTrainer:
             policy_ids = ["shared_policy"]
             rl_module_spec = self._MultiRLModuleSpec(
                 rl_module_specs={
-                    "shared_policy": self._RLModuleSpec(
-                        observation_space=sample_obs_space,
-                        action_space=sample_action_space,
-                        inference_only=False,
-                        model_config=dict(model_cfg),
-                    )
+                    "shared_policy": build_module_spec()
                 }
             )
 
@@ -724,12 +751,7 @@ class RLlibTrainer:
             policy_ids = list(unique_ids)
             rl_module_spec = self._MultiRLModuleSpec(
                 rl_module_specs={
-                    pid: self._RLModuleSpec(
-                        observation_space=sample_obs_space,
-                        action_space=sample_action_space,
-                        inference_only=False,
-                        model_config=dict(model_cfg),
-                    )
+                    pid: build_module_spec()
                     for pid in policy_ids
                 }
             )
@@ -740,18 +762,8 @@ class RLlibTrainer:
             policy_ids = ["human_policy", "orc_policy"]
             rl_module_spec = self._MultiRLModuleSpec(
                 rl_module_specs={
-                    "human_policy": self._RLModuleSpec(
-                        observation_space=sample_obs_space,
-                        action_space=sample_action_space,
-                        inference_only=False,
-                        model_config=dict(model_cfg),
-                    ),
-                    "orc_policy": self._RLModuleSpec(
-                        observation_space=sample_obs_space,
-                        action_space=sample_action_space,
-                        inference_only=False,
-                        model_config=dict(model_cfg),
-                    ),
+                    "human_policy": build_module_spec(),
+                    "orc_policy": build_module_spec(),
                 }
             )
 

@@ -9,6 +9,7 @@ from typing import Dict
 import numpy as np
 from gymnasium import spaces
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
+from train.rllib_warning_filters import install_rllib_warning_filters
 
 from .env import EnvConfig, PettingZooParallelRLRLGym
 from .map_layout import load_map_layout
@@ -21,6 +22,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
 
     def __init__(self, config: Dict[str, object] | None = None) -> None:
         super().__init__()
+        install_rllib_warning_filters()
         cfg = config or {}
         profile_map = cfg.get("agent_profile_map", {})
         env_cfg = EnvConfig.from_json(str(cfg.get("env_config_path", "data/env_config.json")))
