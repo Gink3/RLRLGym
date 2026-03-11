@@ -1217,6 +1217,8 @@ class RLlibTrainer:
                     monster_id = key.split("__", 1)[1].strip()
                     if not monster_id:
                         continue
+                    if not math.isfinite(float(value)):
+                        continue
                     death_by_monster_histogram[monster_id] = (
                         death_by_monster_histogram.get(monster_id, 0)
                         + int(round(float(value) * deaths_scale))
@@ -1476,9 +1478,12 @@ class RLlibTrainer:
                 if key.endswith("_mean"):
                     key = key[: -len("_mean")]
                     priority = 2
+                value = float(raw_val)
+                if not math.isfinite(value):
+                    continue
                 old = merged.get(key)
                 if old is None or priority >= old[0]:
-                    merged[key] = (priority, float(raw_val))
+                    merged[key] = (priority, value)
 
         _ingest(result.get("custom_metrics"))
         env_runners = result.get("env_runners")
