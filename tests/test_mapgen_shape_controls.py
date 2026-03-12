@@ -86,6 +86,31 @@ class TestMapgenShapeControls(unittest.TestCase):
         )
         self.assertLess(water_tiles, int(width * height * 0.35))
 
+    def test_generated_interior_uses_base_terrain_tiles(self):
+        tiles = load_tileset("data/base/tiles.json")
+        cfg = load_mapgen_config("data/base/mapgen_config.json")
+        width = 32
+        height = 24
+
+        grid, _ = generate_biome_terrain(
+            width=width,
+            height=height,
+            tiles=tiles,
+            rng=random.Random(999),
+            biome_defs=cfg.biomes,
+            wall_tile_id=cfg.wall_tile_id,
+            floor_fallback_id=cfg.floor_fallback_id,
+            worldgen=dict(cfg.worldgen),
+            structures_defs=[],
+            min_width=cfg.min_width,
+            min_height=cfg.min_height,
+        )
+
+        allowed = {"grass", "dirt_floor", "stone_floor", "sand_floor", "water", "shallow_water", "deep_water", "shrine"}
+        for r in range(1, height - 1):
+            for c in range(1, width - 1):
+                self.assertIn(grid[r][c], allowed)
+
 
 if __name__ == "__main__":
     unittest.main()

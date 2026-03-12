@@ -1,7 +1,7 @@
 import unittest
 
 from rlrlgym.world.env import FIRE_CONTAINER_TILE_IDS, EnvConfig, MultiAgentRLRLGym
-from rlrlgym.systems.models import AnimalState, ChestState, MonsterState
+from rlrlgym.systems.models import AnimalState, ChestState, MonsterState, ResourceNodeState
 
 
 class TestEnvPerformanceHelpers(unittest.TestCase):
@@ -95,6 +95,32 @@ class TestEnvPerformanceHelpers(unittest.TestCase):
 
         self.assertNotIn((2, 2), env._active_fire_positions)
         self.assertNotIn((2, 2), env.state.tile_interactions)
+
+    def test_tile_volume_blocks_extra_items_and_nodes(self):
+        env = MultiAgentRLRLGym(
+            EnvConfig(width=8, height=8, n_agents=1, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=8)
+        assert env.state is not None
+
+        pos = env.state.agents["agent_0"].position
+        env.tiles[env.state.grid[pos[0]][pos[1]]].max_volume = env._item_volume("stone") + 0.01
+        env._add_ground_item(pos, "stone")
+        env._add_ground_item(pos, "stone")
+
+        self.assertEqual(env.state.ground_items.get(pos, []), ["stone"])
+
+        node = ResourceNodeState(
+            node_id="stone_vein",
+            position=pos,
+            skill="mining",
+            drop_item="stone",
+            remaining=2,
+            max_yield=2,
+            entity_id="resource_node_test",
+            volume=2.0,
+        )
+        self.assertFalse(env._can_accept_tile_volume(pos, node.volume))
 
 
 if __name__ == "__main__":

@@ -47,6 +47,7 @@ class TileDef:
     spawn_weight: float
     max_interactions: int
     loot_table: List[str]
+    max_volume: float = 24.0
 
 
 @dataclass
@@ -79,14 +80,29 @@ class AgentState:
     skill_xp: Dict[str, int] = field(default_factory=dict)
     spell_cooldowns: Dict[str, int] = field(default_factory=dict)
     known_spells: List[str] = field(default_factory=list)
+    volume: float = 1.0
+
+    @property
+    def entity_id(self) -> str:
+        return str(self.agent_id)
+
+    @property
+    def entity_kind(self) -> str:
+        return "agent"
 
 
 @dataclass
 class ChestState:
     position: Tuple[int, int]
+    entity_id: str = ""
     opened: bool = False
     locked: bool = False
     loot: List[str] = field(default_factory=list)
+    volume: float = 2.0
+
+    @property
+    def entity_kind(self) -> str:
+        return "chest"
 
 
 @dataclass
@@ -106,6 +122,11 @@ class MonsterState:
     dr_min: int
     dr_max: int
     alive: bool = True
+    volume: float = 1.0
+
+    @property
+    def entity_kind(self) -> str:
+        return "monster"
 
 
 @dataclass
@@ -116,16 +137,28 @@ class ResourceNodeState:
     drop_item: str
     remaining: int
     max_yield: int
+    entity_id: str = ""
     biome: str = ""
+    volume: float = 2.0
+
+    @property
+    def entity_kind(self) -> str:
+        return "resource_node"
 
 
 @dataclass
 class StationState:
     station_id: str
     position: Tuple[int, int]
+    entity_id: str = ""
     speed_multiplier: float = 1.0
     quality_tier: int = 0
     unlock_recipes: List[str] = field(default_factory=list)
+    volume: float = 3.0
+
+    @property
+    def entity_kind(self) -> str:
+        return "station"
 
 
 @dataclass
@@ -167,6 +200,11 @@ class AnimalState:
     wool_regrow: int = 0
     shear_regrow_max: int = 0
     alive: bool = True
+    volume: float = 1.0
+
+    @property
+    def entity_kind(self) -> str:
+        return "animal"
 
 
 @dataclass

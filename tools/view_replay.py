@@ -10,9 +10,11 @@ import sys
 from typing import Dict, List
 
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
+    QDialog,
     QGraphicsPixmapItem,
     QGraphicsRectItem,
     QGraphicsScene,
@@ -28,6 +30,7 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QStyle,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -42,6 +45,13 @@ from rlrlgym.world.replay_viewer_support import (  # noqa: E402
     supported_construction_sprite_ids,
     supported_resource_sprite_ids,
     visible_tiles_for_agent,
+)
+from rlrlgym.world.themes import (  # noqa: E402
+    get_theme,
+    list_theme_names,
+    load_selected_theme,
+    save_selected_theme,
+    theme_label,
 )
 
 
@@ -129,9 +139,15 @@ class ReplayWindow(QMainWindow):
         self._resource_sprites = supported_resource_sprite_ids()
         self._construction_sprites = supported_construction_sprite_ids()
         self._sprite_cache: Dict[str, QPixmap] = {}
+        self._tile_cache: Dict[str, QPixmap] = {}
         self._current_frame_idx = 0
         self._selected_agent_id = ""
         self._visible_tiles: set[tuple[int, int]] = set()
+        self._theme_name = load_selected_theme()
+        self._theme = get_theme(self._theme_name)
+        self._log_expanded = False
+        self._log_popup: QDialog | None = None
+        self._log_popup_text: QTextEdit | None = None
 
         self.tile_px = 24
         self.playing = False
@@ -186,13 +202,33 @@ class ReplayWindow(QMainWindow):
         self.summary.setReadOnly(True)
         right_col.addWidget(self.summary, stretch=1)
 
+        theme_row = QHBoxLayout()
+        theme_row.addWidget(QLabel("Theme"))
+        self.theme_combo = QComboBox()
+        for name in list_theme_names():
+            self.theme_combo.addItem(theme_label(name), userData=name)
+        theme_row.addWidget(self.theme_combo, stretch=1)
+        right_col.addLayout(theme_row)
+
+        right_col.addWidget(QLabel("Legend"))
+        self.legend = QListWidget()
+        self.legend.setMaximumHeight(180)
+        right_col.addWidget(self.legend)
+
         right_col.addWidget(QLabel("Action / Events"))
         right_col.addWidget(QLabel("Log Agent Filter"))
         self.log_agent_list = QListWidget()
         self.log_agent_list.setMaximumHeight(140)
         right_col.addWidget(self.log_agent_list)
+        log_btns = QHBoxLayout()
+        self.expand_log_btn = QPushButton("Expand Log")
+        self.popout_log_btn = QPushButton("Pop Out Log")
+        log_btns.addWidget(self.expand_log_btn)
+        log_btns.addWidget(self.popout_log_btn)
+        right_col.addLayout(log_btns)
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
+        self.log_text.setMinimumHeight(180)
         right_col.addWidget(self.log_text, stretch=1)
 
         self.timer = QTimer(self)
@@ -208,9 +244,16 @@ class ReplayWindow(QMainWindow):
         self.replay_list.currentRowChanged.connect(self._load_replay)
         self.log_agent_list.itemChanged.connect(self._on_log_filter_changed)
         self.agent_list.currentRowChanged.connect(self._on_selected_agent_changed)
+        self.expand_log_btn.clicked.connect(self._toggle_log_expanded)
+        self.popout_log_btn.clicked.connect(self._toggle_log_popout)
+        self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
 
+        self._apply_theme()
         self._reload_replay_list()
         self._load_replay(self.replay_index)
+        combo_idx = self.theme_combo.findData(self._theme_name)
+        if combo_idx >= 0:
+            self.theme_combo.setCurrentIndex(combo_idx)
 
     def _reload_replay_list(self) -> None:
         self.replay_list.blockSignals(True)
@@ -219,6 +262,74 @@ class ReplayWindow(QMainWindow):
             self.replay_list.addItem(QListWidgetItem(p.name))
         self.replay_list.setCurrentRow(self.replay_index)
         self.replay_list.blockSignals(False)
+
+    def _apply_theme(self) -> None:
+        t = self._theme
+        self.setStyleSheet(
+            f"""
+            QMainWindow {{ background: {t['bg']}; color: {t['text']}; }}
+            QWidget {{ background: {t['panel']}; color: {t['text']}; }}
+            QLineEdit, QTextEdit, QListWidget, QComboBox {{
+                background: {t['bg']};
+                color: {t['text']};
+                border: 1px solid {t['border']};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QLabel {{ color: {t['text']}; }}
+            QPushButton {{
+                background: {t['panel_alt']};
+                color: {t['text']};
+                border: 1px solid {t['border']};
+                border-radius: 4px;
+                padding: 6px 10px;
+            }}
+            QPushButton:hover {{ background: {t['primary_hover']}; }}
+            """
+        )
+        self.scene.setBackgroundBrush(QColor(t["bg"]))
+
+    def _on_theme_changed(self, idx: int) -> None:
+        name = str(self.theme_combo.itemData(idx) or "").strip()
+        if not name:
+            return
+        self._theme_name = save_selected_theme(name)
+        self._theme = get_theme(self._theme_name)
+        self._sprite_cache.clear()
+        self._tile_cache.clear()
+        self._apply_theme()
+        self._set_frame(self._current_frame_idx)
+
+    def _toggle_log_expanded(self) -> None:
+        self._log_expanded = not self._log_expanded
+        self.expand_log_btn.setText("Collapse Log" if self._log_expanded else "Expand Log")
+        self.log_text.setMinimumHeight(420 if self._log_expanded else 180)
+
+    def _toggle_log_popout(self) -> None:
+        if self._log_popup is not None and self._log_popup.isVisible():
+            self._log_popup.close()
+            self._log_popup = None
+            self._log_popup_text = None
+            self.popout_log_btn.setText("Pop Out Log")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Replay Action Log")
+        dlg.resize(760, 540)
+        layout = QVBoxLayout(dlg)
+        txt = QTextEdit(dlg)
+        txt.setReadOnly(True)
+        txt.setPlainText(self.log_text.toPlainText())
+        layout.addWidget(txt)
+        dlg.finished.connect(self._on_log_popout_closed)
+        dlg.show()
+        self._log_popup = dlg
+        self._log_popup_text = txt
+        self.popout_log_btn.setText("Close Log Window")
+
+    def _on_log_popout_closed(self) -> None:
+        self._log_popup = None
+        self._log_popup_text = None
+        self.popout_log_btn.setText("Pop Out Log")
 
     def _load_replay(self, idx: int) -> None:
         if idx < 0 or idx >= len(self.replay_files):
@@ -312,11 +423,12 @@ class ReplayWindow(QMainWindow):
         selected_agents = self._selected_log_agents()
         if idx > 0 and idx - 1 < len(self.step_logs):
             lines = build_activity_log_lines(self.step_logs[idx - 1], selected_agents)
-            self.log_text.setPlainText(
-                "\n".join(lines) if lines else "(no matching agent logs for current filter)"
-            )
+            text = "\n".join(lines) if lines else "(no matching agent logs for current filter)"
         else:
-            self.log_text.setPlainText("(no step log for first frame)")
+            text = "(no step log for first frame)"
+        self.log_text.setPlainText(text)
+        if self._log_popup_text is not None:
+            self._log_popup_text.setPlainText(text)
 
     def _toggle_play(self) -> None:
         self.playing = not self.playing
@@ -472,11 +584,148 @@ class ReplayWindow(QMainWindow):
         self._sprite_cache[key] = pm
         return pm
 
+    def _tile_texture(self, tile_id: str) -> QPixmap:
+        key = f"{tile_id}:{self.tile_px}"
+        if key in self._tile_cache:
+            return self._tile_cache[key]
+        pm = QPixmap(self.tile_px, self.tile_px)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        t = self._theme
+        bg = QColor(t["panel_alt"] if tile_id not in {"water", "shallow_water", "deep_water"} else t["panel"])
+        p.fillRect(0, 0, self.tile_px, self.tile_px, bg)
+        if tile_id in {"grass", "floor"}:
+            p.fillRect(0, 0, self.tile_px, self.tile_px, QColor("#567d46"))
+            p.setPen(QPen(QColor("#7eae63"), 1))
+            for xx in (4, 9, 14, 19):
+                p.drawLine(xx, 20, xx - 1, 14)
+        elif tile_id == "dirt_floor":
+            p.fillRect(0, 0, self.tile_px, self.tile_px, QColor("#7c5a3a"))
+            p.setPen(QPen(QColor("#9d7751"), 1))
+            p.drawArc(5, 5, 10, 8, 0, 180 * 16)
+        elif tile_id == "stone_floor":
+            p.fillRect(0, 0, self.tile_px, self.tile_px, QColor("#68727d"))
+            p.setPen(QPen(QColor("#8d97a2"), 1))
+            p.drawLine(4, 9, 18, 9)
+            p.drawLine(8, 4, 8, 20)
+        elif tile_id == "sand_floor":
+            p.fillRect(0, 0, self.tile_px, self.tile_px, QColor("#c8b26f"))
+            p.setPen(QPen(QColor("#e0cb8f"), 1))
+            p.drawPoint(5, 6)
+            p.drawPoint(14, 10)
+            p.drawPoint(9, 18)
+        elif tile_id in {"water", "shallow_water", "deep_water"}:
+            fill = {"water": "#3d6f93", "shallow_water": "#5d95b8", "deep_water": "#214c70"}[tile_id]
+            p.fillRect(0, 0, self.tile_px, self.tile_px, QColor(fill))
+            p.setPen(QPen(QColor(255, 255, 255, 65), 1))
+            p.drawArc(2, 8, 10, 6, 0, 180 * 16)
+            p.drawArc(10, 12, 10, 6, 0, 180 * 16)
+        elif tile_id in self._construction_sprites:
+            p.drawPixmap(0, 0, self._entity_sprite(tile_id))
+        else:
+            td = self.tile_defs.get(tile_id)
+            glyph = td.glyph if td is not None else "?"
+            color_name = td.color if td is not None else "white"
+            text = QGraphicsSimpleTextItem(glyph)
+            text.setBrush(self._tile_color(color_name))
+            text.setFont(QFont("DejaVu Sans Mono", 10))
+            p.setPen(self._tile_color(color_name))
+            p.setFont(QFont("DejaVu Sans Mono", 10))
+            p.drawText(6, 16, glyph)
+        p.end()
+        self._tile_cache[key] = pm
+        return pm
+
     def _add_sprite(self, sprite_id: str, row: int, col: int, z: float) -> None:
         item = QGraphicsPixmapItem(self._entity_sprite(sprite_id))
         item.setPos(col * self.tile_px, row * self.tile_px)
         item.setZValue(z)
         self.scene.addItem(item)
+
+    def _frame_entities(self, frame: dict) -> List[dict]:
+        raw = frame.get("entities", [])
+        if isinstance(raw, list) and raw:
+            return [dict(row) for row in raw if isinstance(row, dict)]
+        out: List[dict] = []
+        for row in frame.get("resource_nodes", []) or []:
+            if not isinstance(row, dict):
+                continue
+            pos = row.get("position", [])
+            if not isinstance(pos, list) or len(pos) != 2:
+                continue
+            out.append(
+                {
+                    "entity_id": f"resource_node_{pos[0]}_{pos[1]}",
+                    "kind": "resource_node",
+                    "position": list(pos),
+                    "alive": True,
+                    "sprite_id": resource_node_sprite_id(
+                        node_id=str(row.get("node_id", "")),
+                        drop_item=str(row.get("drop_item", "")),
+                    ),
+                    "label": str(row.get("node_id", "")),
+                }
+            )
+        for row in frame.get("chests", []) or []:
+            if isinstance(row, dict):
+                pos = row.get("position", [])
+                if isinstance(pos, list) and len(pos) == 2:
+                    out.append({"entity_id": f"chest_{pos[0]}_{pos[1]}", "kind": "chest", "position": list(pos), "alive": True, "sprite_id": "chest", "label": "open" if bool(row.get("opened")) else ""})
+        for row in frame.get("stations", []) or []:
+            if isinstance(row, dict):
+                pos = row.get("position", [])
+                if isinstance(pos, list) and len(pos) == 2:
+                    out.append({"entity_id": f"station_{pos[0]}_{pos[1]}", "kind": "station", "position": list(pos), "alive": True, "sprite_id": str(row.get("station_id", "workbench")), "label": str(row.get("station_id", ""))})
+        for row in frame.get("monsters", []) or []:
+            if isinstance(row, dict):
+                pos = row.get("position", [])
+                if isinstance(pos, list) and len(pos) == 2:
+                    out.append({"entity_id": str(row.get("entity_id", "monster")), "kind": "monster", "position": list(pos), "alive": bool(row.get("alive", True)), "sprite_id": str(row.get("monster_id", "monster")), "label": str(row.get("symbol", "M")), "color": str(row.get("color", "red"))})
+        for row in frame.get("animals", []) or []:
+            if isinstance(row, dict):
+                pos = row.get("position", [])
+                if isinstance(pos, list) and len(pos) == 2:
+                    out.append({"entity_id": str(row.get("entity_id", "animal")), "kind": "animal", "position": list(pos), "alive": bool(row.get("alive", True)), "sprite_id": str(row.get("animal_id", "rabbit")), "label": str(row.get("animal_id", ""))})
+        agents = frame.get("agents", {})
+        if isinstance(agents, dict):
+            for aid, row in sorted(agents.items()):
+                if not isinstance(row, dict):
+                    continue
+                pos = row.get("position", [])
+                if not isinstance(pos, list) or len(pos) != 2:
+                    continue
+                out.append({"entity_id": aid, "kind": "agent", "position": list(pos), "alive": bool(row.get("alive", True)), "sprite_id": "agent", "label": aid, "faction_id": int(row.get("faction_id", -1))})
+        return out
+
+    def _update_legend(self, frame: dict) -> None:
+        self.legend.clear()
+        tile_counts: Dict[str, int] = {}
+        for row in frame.get("grid", []) or []:
+            if not isinstance(row, list):
+                continue
+            for tile_id in row:
+                tile_counts[str(tile_id)] = tile_counts.get(str(tile_id), 0) + 1
+        for tile_id, count in sorted(tile_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:8]:
+            item = QListWidgetItem(f"{tile_id} x{count}")
+            item.setIcon(QIcon(self._tile_texture(tile_id)))
+            self.legend.addItem(item)
+        entity_counts: Dict[str, int] = {}
+        entity_sprite: Dict[str, str] = {}
+        for entity in self._frame_entities(frame):
+            if not bool(entity.get("alive", True)):
+                continue
+            kind = str(entity.get("kind", "entity"))
+            entity_counts[kind] = entity_counts.get(kind, 0) + 1
+            entity_sprite.setdefault(kind, str(entity.get("sprite_id", kind)))
+        for kind, count in sorted(entity_counts.items()):
+            item = QListWidgetItem(f"{kind} x{count}")
+            sprite_id = entity_sprite.get(kind, kind)
+            if kind not in {"agent", "monster"}:
+                item.setIcon(QIcon(self._entity_sprite(sprite_id)))
+            else:
+                item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowRight))
+            self.legend.addItem(item)
 
     def _selected_agent_visible_tiles(self, frame: dict) -> set[tuple[int, int]]:
         if not self._selected_agent_id:
@@ -507,13 +756,12 @@ class ReplayWindow(QMainWindow):
                 continue
             for c, tile_id_any in enumerate(row):
                 tile_id = str(tile_id_any)
-                td = self.tile_defs.get(tile_id)
-                glyph = td.glyph if td is not None else "?"
-                color_name = td.color if td is not None else "white"
                 x = c * self.tile_px
                 y = r * self.tile_px
-                bg = QColor("#1f232a") if (r + c) % 2 == 0 else QColor("#242a33")
-                self.scene.addRect(x, y, self.tile_px, self.tile_px, QPen(Qt.PenStyle.NoPen), bg)
+                tile_item = QGraphicsPixmapItem(self._tile_texture(tile_id))
+                tile_item.setPos(x, y)
+                tile_item.setZValue(0.2)
+                self.scene.addItem(tile_item)
                 if self._selected_agent_id:
                     if (r, c) in self._visible_tiles:
                         self.scene.addRect(
@@ -533,15 +781,6 @@ class ReplayWindow(QMainWindow):
                             QPen(Qt.PenStyle.NoPen),
                             QColor(8, 10, 12, 110),
                         )
-                if tile_id in self._construction_sprites:
-                    self._add_sprite(tile_id, r, c, 1.0)
-                else:
-                    text = QGraphicsSimpleTextItem(glyph)
-                    text.setBrush(self._tile_color(color_name))
-                    text.setFont(QFont("DejaVu Sans Mono", 10))
-                    text.setPos(x + 5, y + 2)
-                    text.setZValue(1.0)
-                    self.scene.addItem(text)
 
         for row in frame.get("plant_plots", []):
             if not isinstance(row, dict):
@@ -560,95 +799,60 @@ class ReplayWindow(QMainWindow):
             rect.setZValue(1.8)
             self.scene.addItem(rect)
 
-        for row in frame.get("resource_nodes", []):
-            if not isinstance(row, dict):
+        entities = self._frame_entities(frame)
+        agents = frame.get("agents", {})
+        selected_pos = None
+        for entity in entities:
+            if not bool(entity.get("alive", True)):
                 continue
-            pos = row.get("position", [])
-            if not isinstance(pos, list) or len(pos) != 2:
-                continue
-            self._add_sprite(
-                resource_node_sprite_id(
-                    node_id=str(row.get("node_id", "")),
-                    drop_item=str(row.get("drop_item", "")),
-                ),
-                int(pos[0]),
-                int(pos[1]),
-                2.0,
-            )
-
-        for row in frame.get("chests", []):
-            if not isinstance(row, dict):
-                continue
-            pos = row.get("position", [])
-            if not isinstance(pos, list) or len(pos) != 2:
-                continue
-            self._add_sprite("chest", int(pos[0]), int(pos[1]), 2.1)
-            if bool(row.get("opened", False)):
-                lid = QGraphicsSimpleTextItem("open")
-                lid.setBrush(QColor("#f0d060"))
-                lid.setFont(QFont("DejaVu Sans Mono", 6))
-                lid.setPos(int(pos[1]) * self.tile_px + 2, int(pos[0]) * self.tile_px + 15)
-                lid.setZValue(2.2)
-                self.scene.addItem(lid)
-
-        for row in frame.get("stations", []):
-            if not isinstance(row, dict):
-                continue
-            pos = row.get("position", [])
-            if not isinstance(pos, list) or len(pos) != 2:
-                continue
-            self._add_sprite(str(row.get("station_id", "workbench")), int(pos[0]), int(pos[1]), 2.3)
-
-        for row in frame.get("monsters", []):
-            if not isinstance(row, dict) or not bool(row.get("alive", True)):
-                continue
-            pos = row.get("position", [])
+            pos = entity.get("position", [])
             if not isinstance(pos, list) or len(pos) != 2:
                 continue
             r = int(pos[0])
             c = int(pos[1])
-            m = QGraphicsSimpleTextItem(str(row.get("symbol", "M"))[:1] or "M")
-            m.setBrush(QColor("#d66b6b"))
-            m.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
-            m.setPos(c * self.tile_px + 5, r * self.tile_px + 2)
-            m.setZValue(3.0)
-            self.scene.addItem(m)
-
-        for row in frame.get("animals", []):
-            if not isinstance(row, dict) or not bool(row.get("alive", True)):
-                continue
-            pos = row.get("position", [])
-            if not isinstance(pos, list) or len(pos) != 2:
-                continue
-            self._add_sprite(str(row.get("animal_id", "")) or "rabbit", int(pos[0]), int(pos[1]), 3.1)
-
-        agents = frame.get("agents", {})
-        selected_pos = None
-        if isinstance(agents, dict):
-            for aid, row in sorted(agents.items()):
-                if not isinstance(row, dict) or not bool(row.get("alive", True)):
-                    continue
-                pos = row.get("position", [])
-                if not isinstance(pos, list) or len(pos) != 2:
-                    continue
-                r = int(pos[0])
-                c = int(pos[1])
-                x = c * self.tile_px
-                y = r * self.tile_px
-                faction_id = int(row.get("faction_id", -1))
+            x = c * self.tile_px
+            y = r * self.tile_px
+            kind = str(entity.get("kind", "entity"))
+            sprite_id = str(entity.get("sprite_id", kind))
+            if kind == "agent":
+                faction_id = int(entity.get("faction_id", -1))
                 self.scene.addRect(x, y, self.tile_px, self.tile_px, QPen(Qt.PenStyle.NoPen), self._faction_bg_color(faction_id))
-                label = aid.split("_")[-1]
+                label = str(entity.get("label", "")).split("_")[-1]
                 t = QGraphicsSimpleTextItem(label)
                 t.setBrush(QColor("#f3f7ff"))
                 t.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
                 t.setPos(x + 4, y + 2)
                 t.setZValue(4.0)
                 self.scene.addItem(t)
-                if aid == self._selected_agent_id:
+                if str(entity.get("entity_id", "")) == self._selected_agent_id:
                     selected_pos = (r, c)
                     outline = QPen(QColor("#ffd166"))
                     outline.setWidth(2)
                     self.scene.addRect(x + 1, y + 1, self.tile_px - 2, self.tile_px - 2, outline)
+            elif kind == "monster":
+                m = QGraphicsSimpleTextItem(str(entity.get("label", "M"))[:1] or "M")
+                m.setBrush(QColor("#d66b6b"))
+                m.setFont(QFont("DejaVu Sans Mono", 11, QFont.Weight.Bold))
+                m.setPos(x + 5, y + 2)
+                m.setZValue(3.0)
+                self.scene.addItem(m)
+            else:
+                z = {
+                    "resource_node": 2.0,
+                    "item_pile": 2.05,
+                    "chest": 2.1,
+                    "station": 2.3,
+                    "animal": 3.1,
+                }.get(kind, 2.5)
+                self._add_sprite(sprite_id, r, c, z)
+                label = str(entity.get("label", "")).strip()
+                if label and kind in {"item_pile", "chest"}:
+                    txt = QGraphicsSimpleTextItem(label)
+                    txt.setBrush(QColor("#f0d060" if kind == "chest" else "#f3f7ff"))
+                    txt.setFont(QFont("DejaVu Sans Mono", 6))
+                    txt.setPos(x + 2, y + 15)
+                    txt.setZValue(z + 0.1)
+                    self.scene.addItem(txt)
         if selected_pos is not None:
             cx = selected_pos[1] * self.tile_px + self.tile_px / 2.0
             cy = selected_pos[0] * self.tile_px + self.tile_px / 2.0
@@ -683,6 +887,7 @@ class ReplayWindow(QMainWindow):
             f"selected_agent_visible_tiles: {len(self._visible_tiles)}",
         ]
         self.summary.setPlainText("\n".join(summary_lines))
+        self._update_legend(frame)
 
         self._refresh_log_text(idx)
 

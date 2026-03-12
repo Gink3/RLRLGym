@@ -664,6 +664,8 @@ class MultiAgentRLRLGym:
 
     def _add_ground_item(self, pos: Tuple[int, int], item_id: str) -> None:
         assert self.state is not None
+        if not self._can_add_ground_item(pos, item_id):
+            return
         self.state.ground_items.setdefault(pos, []).append(item_id)
         self._refresh_ground_item_position(pos)
 
@@ -685,6 +687,42 @@ class MultiAgentRLRLGym:
             self._edible_chest_positions.discard(pos)
         else:
             self._edible_chest_positions.add(pos)
+
+    def _item_volume(self, item_id: str) -> float:
+        base_id = self._item_base_id(item_id)
+        return max(0.05, float(self.item_weight.get(base_id, 1.0)))
+
+    def _resource_node_volume(self, node: ResourceNodeState) -> float:
+        base = max(0.5, float(self.item_weight.get(str(node.drop_item), 1.0)))
+        yield_units = max(1, int(node.remaining))
+        return max(1.0, min(8.0, base * float(yield_units)))
+
+    def _tile_max_volume(self, pos: Tuple[int, int]) -> float:
+        assert self.state is not None
+        r, c = pos
+        if r < 0 or c < 0 or r >= len(self.state.grid) or c >= len(self.state.grid[0]):
+            return 0.0
+        tile = self.tiles[self.state.grid[r][c]]
+        return max(0.0, float(getattr(tile, "max_volume", 24.0)))
+
+    def _tile_content_volume(self, pos: Tuple[int, int]) -> float:
+        assert self.state is not None
+        total = 0.0
+        for item_id in self.state.ground_items.get(pos, []):
+            total += self._item_volume(item_id)
+        node = self.state.resource_nodes.get(pos)
+        if node is not None:
+            total += self._resource_node_volume(node)
+        return total
+
+    def _can_accept_tile_volume(self, pos: Tuple[int, int], extra_volume: float) -> bool:
+        capacity = self._tile_max_volume(pos)
+        if capacity <= 0.0:
+            return False
+        return (self._tile_content_volume(pos) + max(0.0, float(extra_volume))) <= capacity
+
+    def _can_add_ground_item(self, pos: Tuple[int, int], item_id: str) -> bool:
+        return self._can_accept_tile_volume(pos, self._item_volume(item_id))
 
     def _set_grid_tile(self, pos: Tuple[int, int], tile_id: str) -> None:
         assert self.state is not None
@@ -2041,8 +2079,11 @@ class MultiAgentRLRLGym:
                 added += 1
             else:
                 pos = agent.position
-                self._add_ground_item(pos, item_id)
-                events.append(f"drop_overweight:{item_id}")
+                if self._can_add_ground_item(pos, item_id):
+                    self._add_ground_item(pos, item_id)
+                    events.append(f"drop_overweight:{item_id}")
+                else:
+                    events.append(f"drop_blocked:tile_full:{item_id}")
         return added
 
     def _interact_resource_node(
@@ -2067,6 +2108,7 @@ class MultiAgentRLRLGym:
         added = self._add_item_or_drop(actor, node.drop_item, qty, events)
         self._record_harvest(actor.position)
         node.remaining = max(0, int(node.remaining) - qty)
+        node.volume = self._resource_node_volume(node)
         if int(node.remaining) <= 0:
             self.state.resource_nodes.pop(actor.position, None)
             events.append(f"resource_depleted:{node.node_id}")
@@ -4252,7 +4294,7 @@ class MultiAgentRLRLGym:
             cc = src_c + dc
             if rr < 0 or cc < 0 or rr >= len(self.state.grid) or cc >= len(self.state.grid[0]):
                 return False
-            if (rr, cc) in self._opaque_tile_positions:
+            if (rr, cc) in self._opaque_tile_positions or self._tile_blocks_los(self.state.grid[rr][cc]):
                 return False
         return True
 
@@ -4394,6 +4436,7 @@ class MultiAgentRLRLGym:
 
     def _build_observation(self, aid: str) -> Dict[str, object]:
         assert self.state is not None
+        self._invalidate_step_caches()
         cfg = self.config.agent_observation_config.get(aid, {})
         agent = self.state.agents[aid]
         profile = self._profile_for_agent(aid)
@@ -4896,15 +4939,20 @@ class MultiAgentRLRLGym:
                 if allowed_biomes and biome and biome not in allowed_biomes:
                     continue
                 qty = self._rng.randint(min_yield, max_yield)
-                out[pos] = ResourceNodeState(
+                node = ResourceNodeState(
                     node_id=node_id,
                     position=pos,
                     skill=skill,
                     drop_item=drop_item,
                     remaining=qty,
                     max_yield=qty,
+                    entity_id=f"resource_node_{node_id}_{pos[0]}_{pos[1]}",
                     biome=biome,
+                    volume=max(1.0, min(8.0, self._item_volume(drop_item) * float(qty))),
                 )
+                if not self._can_accept_tile_volume(pos, node.volume):
+                    continue
+                out[pos] = node
                 placed += 1
         return out
 
@@ -4948,6 +4996,7 @@ class MultiAgentRLRLGym:
                 out[pos] = StationState(
                     station_id=station_id,
                     position=pos,
+                    entity_id=f"station_{station_id}_{pos[0]}_{pos[1]}",
                     speed_multiplier=speed,
                     quality_tier=quality,
                     unlock_recipes=unlock,
@@ -4983,7 +5032,13 @@ class MultiAgentRLRLGym:
         for pos in walkable[:n]:
             loot_count = self._rng.randint(1, 3)
             loot = [self._rng.choice(self.chest_loot_table) for _ in range(loot_count)]
-            out[pos] = ChestState(position=pos, opened=False, locked=False, loot=loot)
+            out[pos] = ChestState(
+                position=pos,
+                entity_id=f"chest_{pos[0]}_{pos[1]}",
+                opened=False,
+                locked=False,
+                loot=loot,
+            )
         return out
 
     def _spawn_monsters(

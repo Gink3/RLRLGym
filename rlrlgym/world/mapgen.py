@@ -12,6 +12,7 @@ from ..systems.models import TileDef
 from ..content.tiles import weighted_tile_ids, weighted_tile_weights
 
 OPEN_WATER_TILE_IDS = {"water", "shallow_water", "deep_water"}
+BASE_TERRAIN_TILE_IDS = {"grass", "dirt_floor", "stone_floor", "sand_floor", "floor", "shrine"}
 
 def _weighted_choice(
     rng: random.Random, ids: List[str], cum_weights: List[float]
@@ -833,10 +834,15 @@ def generate_biome_terrain(
 
     wall_id = _valid_tile(tiles, wall_tile_id, floor_fallback_id)
     floor_id = _valid_tile(tiles, floor_fallback_id, "floor")
+    base_terrain_only = bool(worldgen.get("base_terrain_only", True))
     shallow_tile = _valid_tile(tiles, str(worldgen.get("shallow_water_tile_id", "shallow_water")), "water")
     deep_tile = _valid_tile(tiles, str(worldgen.get("deep_water_tile_id", "deep_water")), shallow_tile)
-    tree_tile = _valid_tile(tiles, str(worldgen.get("tree_tile_id", "tree")), floor_id)
-    stone_tile = _valid_tile(tiles, str(worldgen.get("stone_tile_id", "rock_wall")), wall_id)
+    if base_terrain_only:
+        tree_tile = _valid_tile(tiles, "grass", floor_id)
+        stone_tile = _valid_tile(tiles, "stone_floor", floor_id)
+    else:
+        tree_tile = _valid_tile(tiles, str(worldgen.get("tree_tile_id", "tree")), floor_id)
+        stone_tile = _valid_tile(tiles, str(worldgen.get("stone_tile_id", "rock_wall")), wall_id)
     dirt_tile = _valid_tile(tiles, str(worldgen.get("dirt_tile_id", "dirt_floor")), floor_id)
     sand_tile = _valid_tile(tiles, str(worldgen.get("sand_tile_id", "sand_floor")), dirt_tile)
 
@@ -865,6 +871,8 @@ def generate_biome_terrain(
                     continue
                 if not allow_scattered_open_water and stid in OPEN_WATER_TILE_IDS:
                     # Keep open-water placement controlled by dedicated lake/river passes.
+                    continue
+                if base_terrain_only and stid not in BASE_TERRAIN_TILE_IDS:
                     continue
                 tile_ids.append(stid)
                 tile_weights.append(max(0.0, float(weight)))
@@ -1021,7 +1029,7 @@ def generate_biome_terrain(
         forest_blobs=forest_blobs,
         forest_radius=forest_radius,
         tree_tile=tree_tile,
-        bush_tile="bush" if "bush" in tiles else tree_tile,
+        bush_tile=("grass" if base_terrain_only else ("bush" if "bush" in tiles else tree_tile)),
         fallback_floor=floor_id,
         worldgen=worldgen,
     )

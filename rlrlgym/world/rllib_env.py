@@ -13,6 +13,7 @@ from train.rllib_warning_filters import install_rllib_warning_filters
 
 from .env import EnvConfig, PettingZooParallelRLRLGym
 from .map_layout import load_map_layout
+from .replay_viewer_support import resource_node_sprite_id
 from ..systems.featurize import observation_vector_size, vectorize_observation
 from ..systems.constants import ACTION_MAX
 
@@ -543,8 +544,100 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
         }
 
     def _serialize_state(self, state) -> Dict[str, object]:
+        entities: list[dict[str, object]] = []
+        for (r, c), items in sorted(state.ground_items.items()):
+            if not items:
+                continue
+            entities.append(
+                {
+                    "entity_id": f"ground_items_{r}_{c}",
+                    "kind": "item_pile",
+                    "position": [r, c],
+                    "alive": True,
+                    "volume": float(sum(self.base.item_weight.get(self.base._item_base_id(item), 1.0) for item in items)),
+                    "sprite_id": "item_pile",
+                    "label": f"x{len(items)}",
+                    "items": list(items),
+                }
+            )
+        for (r, c), chest in sorted(state.chests.items()):
+            entities.append(
+                {
+                    "entity_id": str(getattr(chest, "entity_id", "") or f"chest_{r}_{c}"),
+                    "kind": "chest",
+                    "position": [r, c],
+                    "alive": True,
+                    "volume": float(getattr(chest, "volume", 2.0)),
+                    "sprite_id": "chest",
+                    "label": "open" if bool(chest.opened) else "",
+                }
+            )
+        for (r, c), station in sorted(state.stations.items()):
+            entities.append(
+                {
+                    "entity_id": str(getattr(station, "entity_id", "") or f"station_{r}_{c}"),
+                    "kind": "station",
+                    "position": [r, c],
+                    "alive": True,
+                    "volume": float(getattr(station, "volume", 3.0)),
+                    "sprite_id": str(station.station_id),
+                    "label": str(station.station_id),
+                }
+            )
+        for (r, c), node in sorted(state.resource_nodes.items()):
+            entities.append(
+                {
+                    "entity_id": str(getattr(node, "entity_id", "") or f"resource_node_{r}_{c}"),
+                    "kind": "resource_node",
+                    "position": [r, c],
+                    "alive": True,
+                    "volume": float(getattr(node, "volume", 2.0)),
+                    "sprite_id": resource_node_sprite_id(str(node.node_id), str(node.drop_item)),
+                    "label": str(node.node_id),
+                }
+            )
+        for _, monster in sorted(state.monsters.items()):
+            entities.append(
+                {
+                    "entity_id": str(monster.entity_id),
+                    "kind": "monster",
+                    "position": [monster.position[0], monster.position[1]],
+                    "alive": bool(monster.alive),
+                    "volume": float(getattr(monster, "volume", 1.0)),
+                    "sprite_id": str(monster.monster_id),
+                    "label": str(monster.symbol),
+                    "color": str(monster.color),
+                }
+            )
+        for _, animal in sorted(state.animals.items()):
+            entities.append(
+                {
+                    "entity_id": str(animal.entity_id),
+                    "kind": "animal",
+                    "position": [animal.position[0], animal.position[1]],
+                    "alive": bool(animal.alive),
+                    "volume": float(getattr(animal, "volume", 1.0)),
+                    "sprite_id": str(animal.animal_id),
+                    "label": str(animal.name),
+                    "color": str(animal.color),
+                }
+            )
+        for aid, agent in sorted(state.agents.items()):
+            entities.append(
+                {
+                    "entity_id": str(getattr(agent, "entity_id", aid)),
+                    "kind": "agent",
+                    "position": [agent.position[0], agent.position[1]],
+                    "alive": bool(agent.alive),
+                    "volume": float(getattr(agent, "volume", 1.0)),
+                    "sprite_id": "agent",
+                    "label": str(aid),
+                    "faction_id": int(agent.faction_id),
+                }
+            )
         return {
             "grid": state.grid,
+            "entities": entities,
             "tile_interactions": [
                 {"position": [r, c], "count": count}
                 for (r, c), count in sorted(state.tile_interactions.items())

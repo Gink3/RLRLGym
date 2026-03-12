@@ -68,6 +68,7 @@ def parse_tileset(raw: object) -> Dict[str, TileDef]:
             spawn_weight=float(row["spawn_weight"]),
             max_interactions=int(row["max_interactions"]),
             loot_table=list(row["loot_table"]),
+            max_volume=float(row.get("max_volume", 24.0)),
         )
         tiles[tile.tile_id] = tile
 
