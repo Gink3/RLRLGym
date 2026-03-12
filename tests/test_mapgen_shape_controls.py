@@ -58,6 +58,34 @@ class TestMapgenShapeControls(unittest.TestCase):
         ]
         self.assertEqual(len(near_edge), 0)
 
+    def test_small_maps_do_not_become_mostly_water(self):
+        tiles = load_tileset("data/base/tiles.json")
+        cfg = load_mapgen_config("data/base/mapgen_config.json")
+        width = 18
+        height = 18
+
+        grid, _ = generate_biome_terrain(
+            width=width,
+            height=height,
+            tiles=tiles,
+            rng=random.Random(321),
+            biome_defs=cfg.biomes,
+            wall_tile_id=cfg.wall_tile_id,
+            floor_fallback_id=cfg.floor_fallback_id,
+            worldgen=dict(cfg.worldgen),
+            structures_defs=[],
+            min_width=cfg.min_width,
+            min_height=cfg.min_height,
+        )
+
+        water_tiles = sum(
+            1
+            for r in range(height)
+            for c in range(width)
+            if grid[r][c] in {"water", "shallow_water", "deep_water"}
+        )
+        self.assertLess(water_tiles, int(width * height * 0.35))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -900,6 +900,11 @@ def generate_biome_terrain(
 
     grid: List[List[str]] = [[floor_id for _ in range(width)] for _ in range(height)]
     biomes: Dict[Tuple[int, int], str] = {}
+    inner_width = max(1, width - 2)
+    inner_height = max(1, height - 2)
+    short_side = max(1, min(inner_width, inner_height))
+    inner_area = inner_width * inner_height
+    water_feature_scale = min(1.0, float(short_side) / 48.0)
 
     for r in range(height):
         for c in range(width):
@@ -914,10 +919,21 @@ def generate_biome_terrain(
     # Lakes: deep core + shallow ring.
     lake_scale = max(1, int(worldgen.get("lake_scale", 170)))
     n_lakes = max(0, int((width * height) / float(lake_scale * lake_scale)))
-    n_lakes = max(n_lakes, int(worldgen.get("min_lakes", 2)))
-    n_lakes = min(n_lakes, int(worldgen.get("max_lakes", 24)))
-    min_lake_r = max(3, int(worldgen.get("lake_min_radius", 6)))
-    max_lake_r = max(min_lake_r, int(worldgen.get("lake_max_radius", 26)))
+    min_lakes_cfg = max(0, int(worldgen.get("min_lakes", 2)))
+    max_lakes_cfg = max(min_lakes_cfg, int(worldgen.get("max_lakes", 24)))
+    scaled_min_lakes = int(round(float(min_lakes_cfg) * water_feature_scale))
+    scaled_max_lakes = max(scaled_min_lakes, int(round(float(max_lakes_cfg) * water_feature_scale)))
+    max_lake_radius_by_map = max(2, min((inner_height - 1) // 3, (inner_width - 1) // 3))
+    min_lake_r = max(2, int(round(float(worldgen.get("lake_min_radius", 6)) * water_feature_scale)))
+    max_lake_r = max(min_lake_r, int(round(float(worldgen.get("lake_max_radius", 26)) * water_feature_scale)))
+    min_lake_r = min(min_lake_r, max_lake_radius_by_map)
+    max_lake_r = min(max_lake_r, max_lake_radius_by_map)
+    if max_lake_r < 2:
+        n_lakes = 0
+    else:
+        n_lakes = max(n_lakes, scaled_min_lakes)
+        n_lakes = min(n_lakes, scaled_max_lakes)
+        n_lakes = min(n_lakes, max(0, inner_area // max(24, (max_lake_r * max_lake_r * 6))))
     lake_min_lobes = max(1, int(worldgen.get("lake_min_lobes", 2)))
     lake_max_lobes = max(lake_min_lobes, int(worldgen.get("lake_max_lobes", 5)))
     organic_perm = _build_permutation(rng)
@@ -943,14 +959,26 @@ def generate_biome_terrain(
         )
 
     # Rivers.
-    min_rivers = max(1, int(worldgen.get("min_rivers", 2)))
-    max_rivers = max(min_rivers, int(worldgen.get("max_rivers", 6)))
-    n_rivers = rng.randint(min_rivers, max_rivers)
-    river_w_min = max(1, int(worldgen.get("river_min_width", 2)))
-    river_w_max = max(river_w_min, int(worldgen.get("river_max_width", 4)))
+    min_rivers_cfg = max(0, int(worldgen.get("min_rivers", 2)))
+    max_rivers_cfg = max(min_rivers_cfg, int(worldgen.get("max_rivers", 6)))
+    scaled_min_rivers = int(round(float(min_rivers_cfg) * water_feature_scale))
+    scaled_max_rivers = max(scaled_min_rivers, int(round(float(max_rivers_cfg) * water_feature_scale)))
+    river_w_min = max(1, int(round(float(worldgen.get("river_min_width", 2)) * water_feature_scale)))
+    river_w_max = max(river_w_min, int(round(float(worldgen.get("river_max_width", 4)) * water_feature_scale)))
+    river_w_cap = max(1, short_side // 14)
+    river_w_min = min(river_w_min, river_w_cap)
+    river_w_max = min(river_w_max, river_w_cap)
     river_cross_map_probability = float(worldgen.get("river_cross_map_probability", 0.7))
     river_endpoint_margin = int(worldgen.get("river_endpoint_margin", 6))
+    river_endpoint_margin = min(river_endpoint_margin, max(2, short_side // 4))
     river_meander_strength = float(worldgen.get("river_meander_strength", 1.2))
+    max_rivers_by_map = max(0, inner_area // max(80, short_side * 6))
+    if scaled_max_rivers <= 0 or river_w_max <= 0 or max_rivers_by_map <= 0:
+        n_rivers = 0
+    else:
+        scaled_max_rivers = min(scaled_max_rivers, max_rivers_by_map)
+        scaled_min_rivers = min(scaled_min_rivers, scaled_max_rivers)
+        n_rivers = rng.randint(scaled_min_rivers, scaled_max_rivers)
     for _ in range(n_rivers):
         _paint_river(
             grid=grid,
