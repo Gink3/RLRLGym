@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QPushButton,
+    QSplitter,
     QSlider,
     QTextEdit,
     QVBoxLayout,
@@ -120,7 +121,7 @@ class MapView(QGraphicsView):
 
 
 class ReplayWindow(QMainWindow):
-    def __init__(self, replay_path: Path, title: str) -> None:
+    def __init__(self, replay_path: Path, title: str, step_ms: int) -> None:
         super().__init__()
         self.setWindowTitle(title)
         self.resize(1500, 940)
@@ -145,7 +146,6 @@ class ReplayWindow(QMainWindow):
         self._visible_tiles: set[tuple[int, int]] = set()
         self._theme_name = load_selected_theme()
         self._theme = get_theme(self._theme_name)
-        self._log_expanded = False
         self._log_popup: QDialog | None = None
         self._log_popup_text: QTextEdit | None = None
 
@@ -154,10 +154,13 @@ class ReplayWindow(QMainWindow):
 
         root = QWidget(self)
         self.setCentralWidget(root)
-        layout = QHBoxLayout(root)
+        layout = QVBoxLayout(root)
+        splitter = QSplitter(Qt.Orientation.Horizontal, root)
+        layout.addWidget(splitter)
 
-        left_col = QVBoxLayout()
-        layout.addLayout(left_col, stretch=5)
+        left_panel = QWidget(self)
+        left_col = QVBoxLayout(left_panel)
+        splitter.addWidget(left_panel)
 
         self.scene = QGraphicsScene(self)
         self.view = MapView(self.scene, self)
@@ -185,8 +188,10 @@ class ReplayWindow(QMainWindow):
         self.slider.setMaximum(0)
         left_col.addWidget(self.slider)
 
-        right_col = QVBoxLayout()
-        layout.addLayout(right_col, stretch=2)
+        right_panel = QWidget(self)
+        right_col = QVBoxLayout(right_panel)
+        splitter.addWidget(right_panel)
+        splitter.setSizes([1080, 420])
 
         right_col.addWidget(QLabel("Replay Files"))
         self.replay_list = QListWidget()
@@ -221,9 +226,7 @@ class ReplayWindow(QMainWindow):
         self.log_agent_list.setMaximumHeight(140)
         right_col.addWidget(self.log_agent_list)
         log_btns = QHBoxLayout()
-        self.expand_log_btn = QPushButton("Expand Log")
         self.popout_log_btn = QPushButton("Pop Out Log")
-        log_btns.addWidget(self.expand_log_btn)
         log_btns.addWidget(self.popout_log_btn)
         right_col.addLayout(log_btns)
         self.log_text = QTextEdit()
@@ -232,11 +235,11 @@ class ReplayWindow(QMainWindow):
         right_col.addWidget(self.log_text, stretch=1)
 
         self.timer = QTimer(self)
-        self.timer.setInterval(110)
+        self.timer.setInterval(max(1, int(step_ms)))
         self.timer.timeout.connect(self._tick_playback)
 
-        self.prev_btn.clicked.connect(lambda: self._set_frame(self.slider.value() - 1))
-        self.next_btn.clicked.connect(lambda: self._set_frame(self.slider.value() + 1))
+        self.prev_btn.clicked.connect(lambda: self.slider.setValue(max(self.slider.minimum(), self._current_frame_idx - 1)))
+        self.next_btn.clicked.connect(lambda: self.slider.setValue(min(self.slider.maximum(), self._current_frame_idx + 1)))
         self.play_btn.clicked.connect(self._toggle_play)
         self.slider.valueChanged.connect(self._set_frame)
         self.prev_ep_btn.clicked.connect(lambda: self._load_replay(self.replay_index - 1))
@@ -244,7 +247,6 @@ class ReplayWindow(QMainWindow):
         self.replay_list.currentRowChanged.connect(self._load_replay)
         self.log_agent_list.itemChanged.connect(self._on_log_filter_changed)
         self.agent_list.currentRowChanged.connect(self._on_selected_agent_changed)
-        self.expand_log_btn.clicked.connect(self._toggle_log_expanded)
         self.popout_log_btn.clicked.connect(self._toggle_log_popout)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
 
@@ -299,11 +301,6 @@ class ReplayWindow(QMainWindow):
         self._tile_cache.clear()
         self._apply_theme()
         self._set_frame(self._current_frame_idx)
-
-    def _toggle_log_expanded(self) -> None:
-        self._log_expanded = not self._log_expanded
-        self.expand_log_btn.setText("Collapse Log" if self._log_expanded else "Expand Log")
-        self.log_text.setMinimumHeight(420 if self._log_expanded else 180)
 
     def _toggle_log_popout(self) -> None:
         if self._log_popup is not None and self._log_popup.isVisible():
@@ -912,6 +909,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="View a saved episode replay (PyQt6)")
     parser.add_argument("replay_path", type=str, help="Path to *.replay.json file")
     parser.add_argument("--title", type=str, default="RLRLGym Replay Viewer")
+    parser.add_argument("--step-ms", type=int, default=110, help="Playback delay per replay step in milliseconds")
     args = parser.parse_args()
 
     replay_path = Path(args.replay_path).resolve()
@@ -919,7 +917,7 @@ def main() -> None:
         raise FileNotFoundError(replay_path)
 
     app = QApplication(sys.argv)
-    win = ReplayWindow(replay_path=replay_path, title=args.title)
+    win = ReplayWindow(replay_path=replay_path, title=args.title, step_ms=args.step_ms)
     win.show()
     sys.exit(app.exec())
 
