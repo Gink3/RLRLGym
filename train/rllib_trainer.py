@@ -39,8 +39,8 @@ class RLlibTrainConfig:
     train_batch_size: int = 4000
     sgd_minibatch_size: int = 1024
     num_sgd_iter: int = 10
-    rollout_fragment_length: int = 200
-    sample_timeout_s: float = 180.0
+    rollout_fragment_length: int = 100
+    sample_timeout_s: float = 600.0
     replay_save_every: int = 5000
     save_latest_replay: bool = True
     env_config_path: str = "data/env_config.json"

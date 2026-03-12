@@ -23,6 +23,8 @@ fi
   --train-batch-size 8000 \
   --sgd-minibatch-size 1024 \
   --num-sgd-iter 10 \
+  --rollout-fragment-length 100 \
+  --sample-timeout-s 600 \
   --replay-save-every 5000 \
   --seed 0 \
   --output-dir outputs/train/crafting_curriculum_10_agents \

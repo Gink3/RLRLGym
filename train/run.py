@@ -37,8 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--train-batch-size", type=int, default=4000)
     p.add_argument("--sgd-minibatch-size", type=int, default=1024)
     p.add_argument("--num-sgd-iter", type=int, default=10)
-    p.add_argument("--rollout-fragment-length", type=int, default=200)
-    p.add_argument("--sample-timeout-s", type=float, default=180.0)
+    p.add_argument("--rollout-fragment-length", type=int, default=100)
+    p.add_argument("--sample-timeout-s", type=float, default=600.0)
     p.add_argument("--replay-save-every", type=int, default=5000)
     p.add_argument(
         "--no-save-latest-replay",
