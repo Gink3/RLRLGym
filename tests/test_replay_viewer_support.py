@@ -21,14 +21,14 @@ class TestReplayViewerSupport(unittest.TestCase):
         self.assertIn("sheep", animals)
         self.assertIn("workbench", constructions)
         self.assertIn("wood_wall", constructions)
-        self.assertIn("clay", resources)
-        self.assertIn("timber", resources)
+        self.assertIn("clay_patch", resources)
+        self.assertIn("tree", resources)
 
     def test_resource_node_sprite_mapping_groups_common_nodes(self):
-        self.assertEqual(resource_node_sprite_id("timber_pine", "wood"), "timber")
-        self.assertEqual(resource_node_sprite_id("berry_patch", "berries"), "berries")
-        self.assertEqual(resource_node_sprite_id("clay_deposit", "clay"), "clay")
-        self.assertEqual(resource_node_sprite_id("copper_vein", "copper_ore"), "ore")
+        self.assertEqual(resource_node_sprite_id("timber_pine", "wood"), "tree")
+        self.assertEqual(resource_node_sprite_id("berry_patch", "berries"), "berry_bush")
+        self.assertEqual(resource_node_sprite_id("clay_deposit", "clay"), "clay_patch")
+        self.assertEqual(resource_node_sprite_id("copper_vein", "copper_ore"), "ore_vein")
 
     def test_activity_log_filter_keeps_actor_and_target_events(self):
         step = {

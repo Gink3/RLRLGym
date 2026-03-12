@@ -588,7 +588,7 @@ class RLRLGymRLlibEnv(MultiAgentEnv):
             entities.append(
                 {
                     "entity_id": str(getattr(node, "entity_id", "") or f"resource_node_{r}_{c}"),
-                    "kind": "resource_node",
+                    "kind": "terrain_feature",
                     "position": [r, c],
                     "alive": True,
                     "volume": float(getattr(node, "volume", 2.0)),

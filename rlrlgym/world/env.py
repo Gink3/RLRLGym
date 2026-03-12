@@ -4904,7 +4904,7 @@ class MultiAgentRLRLGym:
             (r, c)
             for r, row in enumerate(self.state.grid)
             for c, tile_id in enumerate(row)
-            if self.tiles[tile_id].walkable and (r, c) not in occupied_set
+            if self.tiles[tile_id].walkable and tile_id not in self.water_tile_ids and (r, c) not in occupied_set
         ]
         if not walkable:
             return {}
@@ -4968,7 +4968,7 @@ class MultiAgentRLRLGym:
             (r, c)
             for r, row in enumerate(self.state.grid)
             for c, tile_id in enumerate(row)
-            if self.tiles[tile_id].walkable and (r, c) not in occupied_set
+            if self.tiles[tile_id].walkable and tile_id not in self.water_tile_ids and (r, c) not in occupied_set
         ]
         if not walkable:
             return {}
@@ -5022,7 +5022,7 @@ class MultiAgentRLRLGym:
             (r, c)
             for r, row in enumerate(self.state.grid)
             for c, tile_id in enumerate(row)
-            if self.tiles[tile_id].walkable and (r, c) not in occupied_set
+            if self.tiles[tile_id].walkable and tile_id not in self.water_tile_ids and (r, c) not in occupied_set
         ]
         if not walkable:
             return {}
@@ -5054,7 +5054,7 @@ class MultiAgentRLRLGym:
             (r, c)
             for r, row in enumerate(self.state.grid)
             for c, tile_id in enumerate(row)
-            if self.tiles[tile_id].walkable and (r, c) not in occupied_set
+            if self.tiles[tile_id].walkable and tile_id not in self.water_tile_ids and (r, c) not in occupied_set
         ]
         if not walkable:
             return {}
@@ -5106,7 +5106,7 @@ class MultiAgentRLRLGym:
             (r, c)
             for r, row in enumerate(self.state.grid)
             for c, tile_id in enumerate(row)
-            if self.tiles[tile_id].walkable and (r, c) not in occupied_set
+            if self.tiles[tile_id].walkable and tile_id not in self.water_tile_ids and (r, c) not in occupied_set
         ]
         if not walkable:
             return {}

@@ -57,22 +57,22 @@ def resource_node_sprite_id(node_id: str, drop_item: str) -> str:
     node = str(node_id).strip().lower()
     drop = str(drop_item).strip().lower()
     if "timber" in node or "wood" in node or "tree" in node:
-        return "timber"
+        return "tree"
     if "berry" in node:
-        return "berries"
+        return "berry_bush"
     if "grain" in node:
-        return "grain"
+        return "grain_patch"
     if "herb" in node:
-        return "herb"
+        return "herb_patch"
     if drop.endswith("_ore"):
-        return "ore"
+        return "ore_vein"
     if drop in {"stone", "clay", "flint"}:
-        return drop
-    return "generic"
+        return {"stone": "rock_cluster", "clay": "clay_patch", "flint": "rock_cluster"}[drop]
+    return "rock_cluster"
 
 
 def supported_resource_sprite_ids() -> Set[str]:
-    return {"berries", "clay", "flint", "generic", "grain", "herb", "ore", "stone", "timber"}
+    return {"berry_bush", "clay_patch", "grain_patch", "herb_patch", "ore_vein", "rock_cluster", "tree"}
 
 
 def load_profile_map(

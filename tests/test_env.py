@@ -74,6 +74,21 @@ class TestEnv(unittest.TestCase):
         env.reset(seed=301)
         self.assertEqual(env.state.stations, {})
 
+    def test_agents_and_chests_do_not_spawn_on_water(self):
+        env = PettingZooParallelRLRLGym(
+            EnvConfig(width=22, height=18, n_agents=3, max_steps=5, render_enabled=False)
+        )
+        env.reset(seed=302)
+
+        for agent in env.state.agents.values():
+            self.assertNotIn(env.state.grid[agent.position[0]][agent.position[1]], env.water_tile_ids)
+        for pos in env.state.chests.keys():
+            self.assertNotIn(env.state.grid[pos[0]][pos[1]], env.water_tile_ids)
+        for monster in env.state.monsters.values():
+            self.assertNotIn(env.state.grid[monster.position[0]][monster.position[1]], env.water_tile_ids)
+        for animal in env.state.animals.values():
+            self.assertNotIn(env.state.grid[animal.position[0]][animal.position[1]], env.water_tile_ids)
+
     def test_los_blocks_observation_and_default_vision_is_20(self):
         env = PettingZooParallelRLRLGym(
             EnvConfig(width=30, height=30, n_agents=1, max_steps=5, render_enabled=False)

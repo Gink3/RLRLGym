@@ -478,15 +478,15 @@ class ReplayWindow(QMainWindow):
             p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(center - 1, center + 1, 2, 2)
         elif sprite_id in self._resource_sprites:
-            if sprite_id == "timber":
-                p.setBrush(QColor("#8a6137"))
-                p.setPen(QPen(QColor("#caa16f"), 2))
-                p.drawRect(9, 11, 6, 10)
-                p.setBrush(QColor("#3a8c47"))
-                p.setPen(QPen(QColor("#2a6d38"), 1))
-                p.drawEllipse(4, 4, 16, 10)
-                p.drawEllipse(9, 2, 11, 11)
-            elif sprite_id == "berries":
+            if sprite_id == "tree":
+                p.setBrush(QColor("#7a5431"))
+                p.setPen(QPen(QColor("#53381f"), 2))
+                p.drawRect(10, 12, 4, 10)
+                p.setBrush(QColor("#3f8c4d"))
+                p.setPen(QPen(QColor("#2d6d38"), 1))
+                p.drawEllipse(3, 4, 18, 12)
+                p.drawEllipse(7, 1, 10, 11)
+            elif sprite_id == "berry_bush":
                 p.setBrush(QColor("#3b8b44"))
                 p.setPen(QPen(QColor("#2a6d38"), 1))
                 p.drawEllipse(5, 7, 14, 11)
@@ -495,7 +495,7 @@ class ReplayWindow(QMainWindow):
                 p.drawEllipse(8, 10, 4, 4)
                 p.drawEllipse(13, 8, 4, 4)
                 p.drawEllipse(14, 13, 4, 4)
-            elif sprite_id == "grain":
+            elif sprite_id == "grain_patch":
                 p.setPen(QPen(QColor("#d4b24a"), 2))
                 p.drawLine(8, 20, 8, 8)
                 p.drawLine(12, 20, 12, 6)
@@ -503,26 +503,41 @@ class ReplayWindow(QMainWindow):
                 p.drawLine(8, 10, 11, 8)
                 p.drawLine(12, 8, 15, 6)
                 p.drawLine(16, 11, 19, 9)
-            elif sprite_id == "herb":
+            elif sprite_id == "herb_patch":
                 p.setPen(QPen(QColor("#6dbd61"), 2))
                 p.drawLine(center, 20, 8, 9)
                 p.drawLine(center, 20, 16, 8)
                 p.drawLine(center, 20, 12, 6)
+            elif sprite_id == "clay_patch":
+                p.setBrush(QColor("#b88462"))
+                p.setPen(QPen(QColor("#875c3f"), 1))
+                p.drawEllipse(4, 11, 9, 7)
+                p.drawEllipse(10, 8, 10, 8)
+            elif sprite_id == "ore_vein":
+                p.setBrush(QColor("#707b88"))
+                p.setPen(QPen(QColor("#4e5965"), 1))
+                p.drawEllipse(5, 10, 8, 8)
+                p.drawEllipse(11, 7, 8, 9)
+                p.setBrush(QColor("#cda14a"))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(9, 11, 3, 3)
+                p.drawEllipse(14, 12, 3, 3)
             else:
-                fill = {
-                    "stone": "#9ba7b4",
-                    "clay": "#b88462",
-                    "flint": "#808998",
-                    "ore": "#cda14a",
-                    "generic": "#84b3d9",
-                }.get(sprite_id, "#84b3d9")
-                p.setBrush(QColor(fill))
+                p.setBrush(QColor("#8c98a5"))
                 p.setPen(QPen(QColor("#4e5965"), 1))
                 p.drawEllipse(5, 10, 8, 8)
                 p.drawEllipse(11, 7, 8, 9)
                 p.drawEllipse(14, 12, 5, 5)
         else:
-            if sprite_id in {"wood_wall", "rock_wall"}:
+            if sprite_id == "chest":
+                p.setBrush(QColor("#8a6137"))
+                p.setPen(QPen(QColor("#5f4324"), 1))
+                p.drawRoundedRect(4, 7, self.tile_px - 8, self.tile_px - 10, 3, 3)
+                p.setBrush(QColor("#d8b25e"))
+                p.drawRect(4, 10, self.tile_px - 8, 4)
+                p.setBrush(QColor("#f5df9b"))
+                p.drawEllipse(center - 1, 12, 3, 3)
+            elif sprite_id in {"wood_wall", "rock_wall"}:
                 p.setBrush(QColor("#6c5137" if sprite_id == "wood_wall" else "#57616d"))
                 p.setPen(QPen(QColor("#2d333b"), 1))
                 p.drawRect(4, 4, self.tile_px - 8, self.tile_px - 8)
@@ -657,7 +672,7 @@ class ReplayWindow(QMainWindow):
             out.append(
                 {
                     "entity_id": f"resource_node_{pos[0]}_{pos[1]}",
-                    "kind": "resource_node",
+                    "kind": "terrain_feature",
                     "position": list(pos),
                     "alive": True,
                     "sprite_id": resource_node_sprite_id(
@@ -770,7 +785,7 @@ class ReplayWindow(QMainWindow):
                             self.tile_px - 2,
                             self.tile_px - 2,
                             QPen(Qt.PenStyle.NoPen),
-                            QColor(73, 155, 114, 38),
+                            QColor(94, 197, 132, 78),
                         )
                     else:
                         self.scene.addRect(
@@ -779,7 +794,7 @@ class ReplayWindow(QMainWindow):
                             self.tile_px,
                             self.tile_px,
                             QPen(Qt.PenStyle.NoPen),
-                            QColor(8, 10, 12, 110),
+                            QColor(3, 5, 7, 165),
                         )
 
         for row in frame.get("plant_plots", []):
@@ -838,7 +853,7 @@ class ReplayWindow(QMainWindow):
                 self.scene.addItem(m)
             else:
                 z = {
-                    "resource_node": 2.0,
+                    "terrain_feature": 2.0,
                     "item_pile": 2.05,
                     "chest": 2.1,
                     "station": 2.3,
@@ -864,6 +879,7 @@ class ReplayWindow(QMainWindow):
                 sight_pen = QPen(QColor(255, 209, 102, 48))
                 sight_pen.setWidth(1)
                 self.scene.addLine(cx, cy, tx, ty, sight_pen)
+            self.view.centerOn(cx, cy)
 
         self.scene.setSceneRect(0, 0, max(1, w * self.tile_px), max(1, h * self.tile_px))
         self.frame_label.setText(f"frame {idx + 1}/{len(self.frames)}")

@@ -1144,7 +1144,7 @@ def sample_walkable_positions(
         (r, c)
         for r, row in enumerate(grid)
         for c, tile_id in enumerate(row)
-        if tiles[tile_id].walkable
+        if tiles[tile_id].walkable and tile_id not in OPEN_WATER_TILE_IDS
     ]
     if len(walkable) < count:
         raise ValueError("Not enough walkable cells for agent placement")
