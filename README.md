@@ -1,6 +1,11 @@
 # RLRLGym
 RougeLike Reinforcement Learning Gym
 
+## Disclaimer: 
+I did not handwrite any of the python code in this repo. I only edited the DesignDoc.md and the files in the `/docs` directory. The idea is to see how far I can get with using chatGPT and the Codex VSCode extension. This is a side project from some of my interest since I never took a reinforcement learning course in school. Its inspired by Brogue, Cataclysm Dark Days Ahead, and Neural MMO. 
+
+The goal is to create a rich environment similar to a mmo where you can train an agent to fight monsters, level up, and get sweet loot. Included in this repo are a set of tools to build the maps, define custom agent policies for Deep Q Networks (DQN) and Proximal Policiy Optimization (PPO), and view the results. Currently working on finishing the initial set of tools before expanding the envirornment anymore.
+
 ## Terminology
 
 - `Agent`: a single controllable unit in the environment (for example `agent_0`), with inventory, skills, health, hunger, faction state, race, and class.
